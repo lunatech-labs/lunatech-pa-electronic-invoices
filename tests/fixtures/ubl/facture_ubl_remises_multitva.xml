@@ -17,6 +17,7 @@
 
     <cac:AccountingSupplierParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">12345678901234</cbc:EndpointID>
             <cac:PartyName>
                 <cbc:Name>TechConseil SAS</cbc:Name>
             </cac:PartyName>
@@ -43,6 +44,7 @@
 
     <cac:AccountingCustomerParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">98765432109876</cbc:EndpointID>
             <cac:PartyName>
                 <cbc:Name>IndustrieFrance SA</cbc:Name>
             </cac:PartyName>

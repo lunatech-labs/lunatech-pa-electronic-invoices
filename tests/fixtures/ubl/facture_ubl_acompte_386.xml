@@ -21,6 +21,7 @@
 
     <cac:AccountingSupplierParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">44455566677788</cbc:EndpointID>
             <cac:PartyIdentification>
                 <cbc:ID schemeID="0009">44455566677788</cbc:ID>
             </cac:PartyIdentification>
@@ -50,6 +51,7 @@
 
     <cac:AccountingCustomerParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">88899900011122</cbc:EndpointID>
             <cac:PartyIdentification>
                 <cbc:ID schemeID="0009">88899900011122</cbc:ID>
             </cac:PartyIdentification>

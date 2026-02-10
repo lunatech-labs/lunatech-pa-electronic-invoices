@@ -40,6 +40,7 @@
     <!-- Vendeur principal = plombier -->
     <cac:AccountingSupplierParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">22233344455566</cbc:EndpointID>
             <cac:PartyName>
                 <cbc:Name>Plomberie Martin SARL</cbc:Name>
             </cac:PartyName>
@@ -67,6 +68,7 @@
     <!-- Acheteur = propriétaire -->
     <cac:AccountingCustomerParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">77788899900011</cbc:EndpointID>
             <cac:PartyName>
                 <cbc:Name>SCI Les Tilleuls</cbc:Name>
             </cac:PartyName>

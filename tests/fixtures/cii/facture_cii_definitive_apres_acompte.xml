@@ -151,6 +151,9 @@
           <ram:CityName>Nantes</ram:CityName>
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
+        <ram:URIUniversalCommunication>
+          <ram:URIID schemeID="0225">44455566677788</ram:URIID>
+        </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR44555666777</ram:ID>
         </ram:SpecifiedTaxRegistration>
@@ -167,6 +170,9 @@
           <ram:CityName>Nantes</ram:CityName>
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
+        <ram:URIUniversalCommunication>
+          <ram:URIID schemeID="0225">88899900011122</ram:URIID>
+        </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR88999000111</ram:ID>
         </ram:SpecifiedTaxRegistration>

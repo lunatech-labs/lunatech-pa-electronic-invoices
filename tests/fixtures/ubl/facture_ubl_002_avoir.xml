@@ -21,6 +21,7 @@
     <!-- Vendeur -->
     <cac:AccountingSupplierParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">45678901234567</cbc:EndpointID>
             <cac:PartyIdentification>
                 <cbc:ID schemeID="0009">45678901234567</cbc:ID>
             </cac:PartyIdentification>
@@ -51,6 +52,7 @@
     <!-- Acheteur -->
     <cac:AccountingCustomerParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">32165498765432</cbc:EndpointID>
             <cac:PartyIdentification>
                 <cbc:ID schemeID="0009">32165498765432</cbc:ID>
             </cac:PartyIdentification>

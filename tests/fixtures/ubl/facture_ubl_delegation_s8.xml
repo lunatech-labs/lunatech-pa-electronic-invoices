@@ -44,6 +44,7 @@
     <!-- Vendeur = artisan menuisier -->
     <cac:AccountingSupplierParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">11122233344455</cbc:EndpointID>
             <cac:PartyName>
                 <cbc:Name>Menuiserie Artisanale Dupont EURL</cbc:Name>
             </cac:PartyName>
@@ -71,6 +72,7 @@
     <!-- Acheteur = filiale du groupe -->
     <cac:AccountingCustomerParty>
         <cac:Party>
+            <cbc:EndpointID schemeID="0225">66677788899900</cbc:EndpointID>
             <cac:PartyName>
                 <cbc:Name>Hôtellerie du Sud-Ouest SAS</cbc:Name>
             </cac:PartyName>

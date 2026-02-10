@@ -127,6 +127,9 @@
                     <ram:CityName>Paris</ram:CityName>
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">12345678901234</ram:URIID>
+                </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
                     <ram:ID schemeID="VA">FR12345678901</ram:ID>
                 </ram:SpecifiedTaxRegistration>
@@ -142,6 +145,9 @@
                     <ram:CityName>Paris</ram:CityName>
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">98765432109876</ram:URIID>
+                </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
                     <ram:ID schemeID="VA">FR98765432109</ram:ID>
                 </ram:SpecifiedTaxRegistration>

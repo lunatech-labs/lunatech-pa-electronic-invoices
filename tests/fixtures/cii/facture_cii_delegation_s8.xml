@@ -97,6 +97,9 @@
           <ram:CityName>Bordeaux</ram:CityName>
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
+        <ram:URIUniversalCommunication>
+          <ram:URIID schemeID="0225">11122233344455</ram:URIID>
+        </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR11122233344</ram:ID>
         </ram:SpecifiedTaxRegistration>
@@ -113,6 +116,9 @@
           <ram:CityName>Biarritz</ram:CityName>
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
+        <ram:URIUniversalCommunication>
+          <ram:URIID schemeID="0225">66677788899900</ram:URIID>
+        </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR66677788899</ram:ID>
         </ram:SpecifiedTaxRegistration>

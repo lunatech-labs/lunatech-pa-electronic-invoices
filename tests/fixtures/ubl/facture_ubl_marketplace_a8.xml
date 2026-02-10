@@ -15,6 +15,7 @@
   <!-- Vendeur = fournisseur réel -->
   <cac:AccountingSupplierParty>
     <cac:Party>
+      <cbc:EndpointID schemeID="0225">33344455566677</cbc:EndpointID>
       <cac:PartyIdentification>
         <cbc:ID schemeID="0009">33344455566677</cbc:ID>
       </cac:PartyIdentification>
@@ -45,6 +46,7 @@
   <!-- Acheteur = client professionnel -->
   <cac:AccountingCustomerParty>
     <cac:Party>
+      <cbc:EndpointID schemeID="0225">77788899900011</cbc:EndpointID>
       <cac:PartyIdentification>
         <cbc:ID schemeID="0009">77788899900011</cbc:ID>
       </cac:PartyIdentification>
