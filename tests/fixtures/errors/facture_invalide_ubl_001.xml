@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Facture UBL volontairement invalide pour tester la gestion d'erreurs -->
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017</cbc:CustomizationID>
+    <!-- ERREUR: ID manquant -->
+    <cbc:IssueDate>2025-13-45</cbc:IssueDate>
+    <!-- ERREUR: type code invalide -->
+    <cbc:InvoiceTypeCode>999</cbc:InvoiceTypeCode>
+    <!-- ERREUR: devise manquante -->
+
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <!-- ERREUR: vendeur sans nom ni SIRET -->
+            <cac:PostalAddress>
+                <cac:Country>
+                    <cbc:IdentificationCode>XX</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <!-- ERREUR: acheteur manquant -->
+
+    <cac:TaxTotal>
+        <!-- ERREUR: montant TVA incohérent -->
+        <cbc:TaxAmount currencyID="EUR">999.99</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">100.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">999.99</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <!-- ERREUR: totaux incohérents -->
+        <cbc:LineExtensionAmount currencyID="EUR">500.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">100.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">0.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">-500.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">0</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">500.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Produit test</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <!-- ERREUR: montant négatif -->
+            <cbc:PriceAmount currencyID="EUR">-100.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

@@ -1,0 +1,59 @@
+# =============================================================================
+# PDP Facture - Dockerfile pour les tests
+# Inclut Rust toolchain + SaxonC-HE (natif) + FOP + qpdf + libxml2
+# =============================================================================
+
+FROM rust:1.88-bookworm
+
+# Dépendances build + runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libxml2-dev \
+    libxslt1-dev \
+    xsltproc \
+    clang \
+    # Java uniquement pour Apache FOP (rendu PDF)
+    default-jre-headless \
+    curl \
+    unzip \
+    # qpdf pour la correction header binaire PDF/A-3
+    qpdf \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installer SaxonC-HE (natif C++, pas de JVM pour les transformations XSLT)
+ARG SAXONC_VERSION=12-9-0
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+        amd64) SAXONC_ARCH="linux-x86_64" ;; \
+        arm64) SAXONC_ARCH="linux-arm64" ;; \
+        *) echo "Architecture non supportée: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://downloads.saxonica.com/SaxonC/HE/12/SaxonCHE-${SAXONC_ARCH}-${SAXONC_VERSION}.zip" \
+    -o /tmp/saxonc.zip && \
+    mkdir -p /opt/saxonc && \
+    unzip -q /tmp/saxonc.zip -d /opt/saxonc && \
+    rm /tmp/saxonc.zip && \
+    cd /opt/saxonc/command && \
+    ./build64-linux.sh && \
+    cp /opt/saxonc/command/transform /usr/local/bin/transform && \
+    chmod +x /usr/local/bin/transform && \
+    echo "/opt/saxonc/libs" > /etc/ld.so.conf.d/saxonc.conf && ldconfig
+
+# Installer Apache FOP (génération PDF Factur-X)
+ARG FOP_VERSION=2.11
+RUN curl -fsSL "https://dlcdn.apache.org/xmlgraphics/fop/binaries/fop-${FOP_VERSION}-bin.tar.gz" \
+    -o /tmp/fop.tar.gz && \
+    tar xzf /tmp/fop.tar.gz -C /opt && \
+    ln -s /opt/fop-${FOP_VERSION}/fop/fop /usr/local/bin/fop && \
+    rm /tmp/fop.tar.gz
+
+WORKDIR /app
+
+# Copier tout le projet
+COPY . .
+
+# Compiler les tests
+RUN cargo test --workspace --no-run 2>&1
+
+# Exécuter les tests par défaut
+CMD ["cargo", "test", "--workspace", "--", "--nocapture"]

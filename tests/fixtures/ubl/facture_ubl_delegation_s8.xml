@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Facture UBL avec délégation de facturation (cadre S8)
+     Le facturant (II) = Cabinet Comptable crée la facture pour le compte du vendeur.
+     L'adressé à (IV) = Siège social du groupe acheteur reçoit la facture.
+     L'agent de l'acheteur (AB) = Service achats du groupe. -->
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>S8</cbc:ProfileID>
+    <cbc:ID>DELEG-2025-UBL-00001</cbc:ID>
+    <cbc:IssueDate>2025-12-15</cbc:IssueDate>
+    <cbc:DueDate>2026-01-14</cbc:DueDate>
+    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>CMD-GROUPE-2025-042</cbc:BuyerReference>
+
+    <cbc:Note>Facture émise par délégation de facturation - Cabinet Comptable pour le compte de Menuiserie Artisanale#AAB</cbc:Note>
+
+    <cac:ContractDocumentReference>
+        <cbc:ID>CONTRAT-MENUISERIE-2025</cbc:ID>
+    </cac:ContractDocumentReference>
+
+    <!-- Facturant (II) = Cabinet comptable qui émet la facture pour le compte du vendeur -->
+    <cac:InvoicerParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>Cabinet Comptable Gironde SARL</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Cabinet Comptable Gironde SARL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">99988877766655</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR99988877766</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:InvoicerParty>
+
+    <!-- Vendeur = artisan menuisier -->
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>Menuiserie Artisanale Dupont EURL</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Menuiserie Artisanale Dupont EURL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">11122233344455</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>12 impasse des Artisans</cbc:StreetName>
+                <cbc:PostalZone>33000</cbc:PostalZone>
+                <cbc:CityName>Bordeaux</cbc:CityName>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR11122233344</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <!-- Acheteur = filiale du groupe -->
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>Hôtellerie du Sud-Ouest SAS</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Hôtellerie du Sud-Ouest SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">66677788899900</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>45 avenue de la Plage</cbc:StreetName>
+                <cbc:PostalZone>64200</cbc:PostalZone>
+                <cbc:CityName>Biarritz</cbc:CityName>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR66677788899</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <!-- Agent de l'acheteur (AB) = Service achats centralisé -->
+    <cac:BuyerAgentParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>Service Achats Groupe Atlantique</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Service Achats Groupe Atlantique</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">55544433322299</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:BuyerAgentParty>
+
+    <!-- Adressé à (IV) = Siège du groupe qui reçoit la facture -->
+    <cac:AddressedToParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>Groupe Hôtelier Atlantique SA</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Groupe Hôtelier Atlantique SA</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">55544433322211</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AddressedToParty>
+
+    <cac:Delivery>
+        <cbc:ActualDeliveryDate>2025-12-10</cbc:ActualDeliveryDate>
+    </cac:Delivery>
+
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7610011000201234567890188</cbc:ID>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <cac:PaymentTerms>
+        <cbc:Note>Paiement à 30 jours</cbc:Note>
+    </cac:PaymentTerms>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">892.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">4460.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">892.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">4460.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">4460.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">5352.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">5352.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">3500.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Menuiserie sur mesure - Bibliothèque chêne massif</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">3500.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+
+    <cac:InvoiceLine>
+        <cbc:ID>2</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="HUR">8</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">960.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Pose et installation sur site</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">120.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

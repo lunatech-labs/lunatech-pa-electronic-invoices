@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>S1</cbc:ProfileID>
+    <cbc:ID>RECT-2025-00002</cbc:ID>
+    <cbc:IssueDate>2025-07-20</cbc:IssueDate>
+    <cbc:DueDate>2025-08-20</cbc:DueDate>
+    <cbc:InvoiceTypeCode>384</cbc:InvoiceTypeCode>
+    <cbc:Note>#ADN Facture rectificative suite à erreur de quantité sur la facture d'origine FA-2025-00200</cbc:Note>
+    <cbc:Note>#PMT En cas de retard de paiement, indemnité forfaitaire de 40 EUR</cbc:Note>
+    <cbc:Note>#PMD Pénalités de retard : 3 fois le taux d'intérêt légal</cbc:Note>
+    <cbc:Note>#AAB Pas d'escompte pour paiement anticipé</cbc:Note>
+    <cbc:Note>#BAR B2B</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>REF-ACHAT-2025-055</cbc:BuyerReference>
+    <cac:BillingReference>
+        <cac:InvoiceDocumentReference>
+            <cbc:ID>FA-2025-00200</cbc:ID>
+            <cbc:IssueDate>2025-07-05</cbc:IssueDate>
+        </cac:InvoiceDocumentReference>
+    </cac:BillingReference>
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cbc:EndpointID schemeID="0225">111222333_STATUTS</cbc:EndpointID>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Services Numériques SARL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">11122233344455</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>8 boulevard Haussmann</cbc:StreetName>
+                <cbc:CityName>Paris</cbc:CityName>
+                <cbc:PostalZone>75009</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR11111222333</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cbc:EndpointID schemeID="0225">444555666_FACTURES</cbc:EndpointID>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Distribution Express SA</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">44455566677788</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>25 rue du Commerce</cbc:StreetName>
+                <cbc:CityName>Marseille</cbc:CityName>
+                <cbc:PostalZone>13001</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR37444555666</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7610011000201234567890188</cbc:ID>
+            <cac:FinancialInstitutionBranch>
+                <cbc:ID>PSSTFRPPXXX</cbc:ID>
+            </cac:FinancialInstitutionBranch>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+    <cac:PaymentTerms>
+        <cbc:Note>PAIEMENT 30 JOURS NET</cbc:Note>
+    </cac:PaymentTerms>
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">1600.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">8000.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">1600.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">8000.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">8000.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">9600.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">9600.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">100</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">8000.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Quantité corrigée de 80 à 100 unités</cbc:Description>
+            <cbc:Name>Composant électronique REF-A42</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">80.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

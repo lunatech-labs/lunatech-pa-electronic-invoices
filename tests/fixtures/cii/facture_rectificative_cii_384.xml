@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+                          xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+                          xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+                          xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100">
+    <rsm:ExchangedDocumentContext>
+        <ram:BusinessProcessSpecifiedDocumentContextParameter>
+            <ram:ID>S1</ram:ID>
+        </ram:BusinessProcessSpecifiedDocumentContextParameter>
+        <ram:GuidelineSpecifiedDocumentContextParameter>
+            <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+        </ram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+    <rsm:ExchangedDocument>
+        <ram:ID>RECT-2025-00001</ram:ID>
+        <ram:TypeCode>384</ram:TypeCode>
+        <ram:IssueDateTime>
+            <udt:DateTimeString format="102">20250715</udt:DateTimeString>
+        </ram:IssueDateTime>
+        <ram:IncludedNote>
+            <ram:Content>Facture rectificative suite à erreur de prix unitaire sur la facture d'origine FA-2025-00100</ram:Content>
+            <ram:SubjectCode>ADN</ram:SubjectCode>
+        </ram:IncludedNote>
+        <ram:IncludedNote>
+            <ram:Content>En cas de retard de paiement, indemnité forfaitaire de 40 EUR</ram:Content>
+            <ram:SubjectCode>PMT</ram:SubjectCode>
+        </ram:IncludedNote>
+        <ram:IncludedNote>
+            <ram:Content>Pénalités de retard : 3 fois le taux d'intérêt légal</ram:Content>
+            <ram:SubjectCode>PMD</ram:SubjectCode>
+        </ram:IncludedNote>
+        <ram:IncludedNote>
+            <ram:Content>Pas d'escompte pour paiement anticipé</ram:Content>
+            <ram:SubjectCode>AAB</ram:SubjectCode>
+        </ram:IncludedNote>
+        <ram:IncludedNote>
+            <ram:Content>B2B</ram:Content>
+            <ram:SubjectCode>BAR</ram:SubjectCode>
+        </ram:IncludedNote>
+    </rsm:ExchangedDocument>
+    <rsm:SupplyChainTradeTransaction>
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>1</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:Name>Prestation de conseil - prix corrigé</ram:Name>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>120.00</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="HUR">50</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>6000.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+        <ram:ApplicableHeaderTradeAgreement>
+            <ram:BuyerReference>REF-ACHAT-2025-042</ram:BuyerReference>
+            <ram:SellerTradeParty>
+                <ram:GlobalID schemeID="0002">12345678901234</ram:GlobalID>
+                <ram:Name>Conseil Expert SAS</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">12345678901234</ram:ID>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>75008</ram:PostcodeCode>
+                    <ram:LineOne>15 avenue des Champs</ram:LineOne>
+                    <ram:CityName>Paris</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">123456789_STATUTS</ram:URIID>
+                </ram:URIUniversalCommunication>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR12123456789</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:SellerTradeParty>
+            <ram:BuyerTradeParty>
+                <ram:GlobalID schemeID="0002">98765432109876</ram:GlobalID>
+                <ram:Name>Industries Modernes SA</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">98765432109876</ram:ID>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>69003</ram:PostcodeCode>
+                    <ram:LineOne>42 rue de l'Industrie</ram:LineOne>
+                    <ram:CityName>Lyon</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">987654321_FACTURES</ram:URIID>
+                </ram:URIUniversalCommunication>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR37987654321</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:BuyerTradeParty>
+        </ram:ApplicableHeaderTradeAgreement>
+        <ram:ApplicableHeaderTradeDelivery>
+            <ram:ActualDeliverySupplyChainEvent>
+                <ram:OccurrenceDateTime>
+                    <udt:DateTimeString format="102">20250710</udt:DateTimeString>
+                </ram:OccurrenceDateTime>
+            </ram:ActualDeliverySupplyChainEvent>
+        </ram:ApplicableHeaderTradeDelivery>
+        <ram:ApplicableHeaderTradeSettlement>
+            <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+            <ram:SpecifiedTradeSettlementPaymentMeans>
+                <ram:TypeCode>30</ram:TypeCode>
+                <ram:PayeePartyCreditorFinancialAccount>
+                    <ram:IBANID>FR7630001007941234567890185</ram:IBANID>
+                </ram:PayeePartyCreditorFinancialAccount>
+                <ram:PayeeSpecifiedCreditorFinancialInstitution>
+                    <ram:BICID>BNPAFRPPXXX</ram:BICID>
+                </ram:PayeeSpecifiedCreditorFinancialInstitution>
+            </ram:SpecifiedTradeSettlementPaymentMeans>
+            <ram:ApplicableTradeTax>
+                <ram:CalculatedAmount>1200.00</ram:CalculatedAmount>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:BasisAmount>6000.00</ram:BasisAmount>
+                <ram:CategoryCode>S</ram:CategoryCode>
+                <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <ram:SpecifiedTradePaymentTerms>
+                <ram:Description>PAIEMENT 30 JOURS NET</ram:Description>
+                <ram:DueDateDateTime>
+                    <udt:DateTimeString format="102">20250814</udt:DateTimeString>
+                </ram:DueDateDateTime>
+            </ram:SpecifiedTradePaymentTerms>
+            <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+                <ram:LineTotalAmount>6000.00</ram:LineTotalAmount>
+                <ram:TaxBasisTotalAmount>6000.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">1200.00</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>7200.00</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>7200.00</ram:DuePayableAmount>
+            </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+            <ram:InvoiceReferencedDocument>
+                <ram:IssuerAssignedID>FA-2025-00100</ram:IssuerAssignedID>
+                <ram:FormattedIssueDateTime>
+                    <qdt:DateTimeString format="102">20250701</qdt:DateTimeString>
+                </ram:FormattedIssueDateTime>
+            </ram:InvoiceReferencedDocument>
+        </ram:ApplicableHeaderTradeSettlement>
+    </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

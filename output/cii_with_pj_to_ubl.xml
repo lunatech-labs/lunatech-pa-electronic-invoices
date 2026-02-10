@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+		****************************************************************************************************************************************************************************************************
+		This XML Instance has been created by converting a Cross Indistry Invoice D16B to the UBL format. The transformation stylesheet version was: 1.0 and the transformation took place: 2026-02-09T08:40:49.766531+01:00
+		****************************************************************************************************************************************************************************************************
+		-->
+<inv:Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+             xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+             xmlns:inv="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+   <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+   <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+   <cbc:ID>FA-2025-00256</cbc:ID>
+   <cbc:IssueDate>2025-11-20</cbc:IssueDate>
+   <cbc:DueDate>2026-01-15</cbc:DueDate>
+   <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+   <cbc:Note>Facture pour fourniture de matériel informatique</cbc:Note>
+   <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+   <cbc:BuyerReference>CMD-2025-8899</cbc:BuyerReference>
+   <cac:OrderReference>
+      <cbc:ID>PO-2025-8899</cbc:ID>
+   </cac:OrderReference>
+   <cac:AdditionalDocumentReference>
+      <cbc:ID>ATT-PDF-001</cbc:ID>
+      <cbc:DocumentDescription>Bon de commande</cbc:DocumentDescription>
+      <cac:Attachment>
+         <cbc:EmbeddedDocumentBinaryObject mimeCode="application/pdf" filename="bon_commande.pdf">JVBERi0xLjQgZmFrZSBib24gZGUgY29tbWFuZGUgcG91ciB0ZXN0</cbc:EmbeddedDocumentBinaryObject>
+      </cac:Attachment>
+   </cac:AdditionalDocumentReference>
+   <cac:AdditionalDocumentReference>
+      <cbc:ID>ATT-PNG-002</cbc:ID>
+      <cbc:DocumentDescription>Photo chantier</cbc:DocumentDescription>
+      <cac:Attachment>
+         <cbc:EmbeddedDocumentBinaryObject mimeCode="image/png" filename="photo_chantier.png">iVBORw0KGgoAAAANSUhEUg==</cbc:EmbeddedDocumentBinaryObject>
+      </cac:Attachment>
+   </cac:AdditionalDocumentReference>
+   <cac:AdditionalDocumentReference>
+      <cbc:ID>ATT-CSV-003</cbc:ID>
+      <cbc:DocumentDescription>Détail des lignes</cbc:DocumentDescription>
+      <cac:Attachment>
+         <cbc:EmbeddedDocumentBinaryObject mimeCode="text/csv" filename="detail_lignes.csv">cmVmO3F0ZTtwdTt0b3RhbApBMDAxOzEwOzI1LjAwOzI1MC4wMApBMDAyOzU7MTIuNTA7NjIuNTAKQTAwMzszOzguNzU7MjYuMjU=</cbc:EmbeddedDocumentBinaryObject>
+      </cac:Attachment>
+   </cac:AdditionalDocumentReference>
+   <cac:AccountingSupplierParty>
+      <cac:Party>
+         <cac:PartyIdentification>
+            <cbc:ID>FOURNISSEUR-IT-001</cbc:ID>
+         </cac:PartyIdentification>
+         <cac:PartyName>
+            <cbc:Name>InfoTech Solutions</cbc:Name>
+         </cac:PartyName>
+         <cac:PostalAddress>
+            <cbc:StreetName>8 Rue de la République</cbc:StreetName>
+            <cbc:CityName>Lyon</cbc:CityName>
+            <cbc:PostalZone>69003</cbc:PostalZone>
+            <cac:Country>
+               <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+            </cac:Country>
+         </cac:PostalAddress>
+         <cac:PartyTaxScheme>
+            <cbc:CompanyID>FR45678901234</cbc:CompanyID>
+            <cac:TaxScheme>
+               <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+         </cac:PartyTaxScheme>
+         <cac:PartyLegalEntity>
+            <cbc:RegistrationName>InfoTech Solutions SARL</cbc:RegistrationName>
+            <cbc:CompanyID schemeID="0002">456 789 012 34567</cbc:CompanyID>
+         </cac:PartyLegalEntity>
+      </cac:Party>
+   </cac:AccountingSupplierParty>
+   <cac:AccountingCustomerParty>
+      <cac:Party>
+         <cac:PartyIdentification>
+            <cbc:ID>CLIENT-INDUS-042</cbc:ID>
+         </cac:PartyIdentification>
+         <cac:PostalAddress>
+            <cbc:StreetName>120 Boulevard de la Croix-Rousse</cbc:StreetName>
+            <cbc:CityName>Lyon</cbc:CityName>
+            <cbc:PostalZone>69007</cbc:PostalZone>
+            <cac:Country>
+               <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+            </cac:Country>
+         </cac:PostalAddress>
+         <cac:PartyTaxScheme>
+            <cbc:CompanyID>FR32165498765</cbc:CompanyID>
+            <cac:TaxScheme>
+               <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+         </cac:PartyTaxScheme>
+         <cac:PartyLegalEntity>
+            <cbc:RegistrationName>Manufacture Lyonnaise SAS</cbc:RegistrationName>
+            <cbc:CompanyID schemeID="0002">321 654 987 65432</cbc:CompanyID>
+         </cac:PartyLegalEntity>
+      </cac:Party>
+   </cac:AccountingCustomerParty>
+   <cac:Delivery>
+      <cbc:ActualDeliveryDate>2025-11-18</cbc:ActualDeliveryDate>
+      <cac:DeliveryLocation/>
+   </cac:Delivery>
+   <cac:PaymentMeans>
+      <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+      <cac:PayeeFinancialAccount>
+         <cbc:ID>FR7630004000031234567890143</cbc:ID>
+         <cac:FinancialInstitutionBranch>
+            <cbc:ID>BNPAFRPPXXX</cbc:ID>
+         </cac:FinancialInstitutionBranch>
+      </cac:PayeeFinancialAccount>
+   </cac:PaymentMeans>
+   <cac:PaymentTerms>
+      <cbc:Note>Paiement à 45 jours fin de mois</cbc:Note>
+   </cac:PaymentTerms>
+   <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="EUR">6400.00</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+         <cbc:TaxableAmount currencyID="EUR">32000.00</cbc:TaxableAmount>
+         <cbc:TaxAmount currencyID="EUR">6400.00</cbc:TaxAmount>
+         <cac:TaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.00</cbc:Percent>
+            <cac:TaxScheme>
+               <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+         </cac:TaxCategory>
+      </cac:TaxSubtotal>
+   </cac:TaxTotal>
+   <cac:LegalMonetaryTotal>
+      <cbc:LineExtensionAmount currencyID="EUR">32000.00</cbc:LineExtensionAmount>
+      <cbc:TaxExclusiveAmount currencyID="EUR">32000.00</cbc:TaxExclusiveAmount>
+      <cbc:TaxInclusiveAmount currencyID="EUR">38400.00</cbc:TaxInclusiveAmount>
+      <cbc:PayableAmount currencyID="EUR">38400.00</cbc:PayableAmount>
+   </cac:LegalMonetaryTotal>
+   <cac:InvoiceLine>
+      <cbc:ID>1</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="C62">2</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="EUR">17000.00</cbc:LineExtensionAmount>
+      <cac:Item>
+         <cbc:Description>Serveur rack 2U, 2x Intel Xeon Gold 6338, 256Go RAM, 4x SSD 1.92To</cbc:Description>
+         <cbc:Name>Serveur Dell PowerEdge R750</cbc:Name>
+         <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.00</cbc:Percent>
+            <cac:TaxScheme>
+               <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+         </cac:ClassifiedTaxCategory>
+      </cac:Item>
+      <cac:Price>
+         <cbc:PriceAmount currencyID="EUR">8500.00</cbc:PriceAmount>
+      </cac:Price>
+   </cac:InvoiceLine>
+   <cac:InvoiceLine>
+      <cbc:ID>2</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="C62">3</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="EUR">12600.00</cbc:LineExtensionAmount>
+      <cac:Item>
+         <cbc:Description>Switch manageable 48 ports PoE+, 10G uplinks</cbc:Description>
+         <cbc:Name>Switch réseau Cisco Catalyst 9300</cbc:Name>
+         <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.00</cbc:Percent>
+            <cac:TaxScheme>
+               <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+         </cac:ClassifiedTaxCategory>
+      </cac:Item>
+      <cac:Price>
+         <cbc:PriceAmount currencyID="EUR">4200.00</cbc:PriceAmount>
+      </cac:Price>
+   </cac:InvoiceLine>
+   <cac:InvoiceLine>
+      <cbc:ID>3</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="HUR">16</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="EUR">2400.00</cbc:LineExtensionAmount>
+      <cac:Item>
+         <cbc:Description>Installation rack, câblage, configuration réseau et OS</cbc:Description>
+         <cbc:Name>Installation et configuration</cbc:Name>
+         <cac:ClassifiedTaxCategory>
+            <cbc:ID>S</cbc:ID>
+            <cbc:Percent>20.00</cbc:Percent>
+            <cac:TaxScheme>
+               <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+         </cac:ClassifiedTaxCategory>
+      </cac:Item>
+      <cac:Price>
+         <cbc:PriceAmount currencyID="EUR">150.00</cbc:PriceAmount>
+      </cac:Price>
+   </cac:InvoiceLine>
+</inv:Invoice>

@@ -1,0 +1,8 @@
+target/
+data/
+*.db
+pdp-trace.db
+.git/
+.gitignore
+.DS_Store
+**/.DS_Store

@@ -1,0 +1,16 @@
+[package]
+name = "pdp-config"
+description = "Configuration management: YAML/TOML route definitions"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdp-core = { path = "../pdp-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+toml = { workspace = true }
+config = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }

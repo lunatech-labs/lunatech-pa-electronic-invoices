@@ -1,0 +1,25 @@
+[package]
+name = "pdp-cdar"
+description = "CDAR response management: generation and parsing of acknowledgment files"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdp-core = { path = "../pdp-core" }
+pdp-invoice = { path = "../pdp-invoice" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+quick-xml = { workspace = true }
+roxmltree = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "cdar_bench"
+harness = false

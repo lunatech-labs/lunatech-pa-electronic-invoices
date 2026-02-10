@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+                          xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+                          xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+                          xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+   <rsm:ExchangedDocumentContext>
+      <ram:BusinessProcessSpecifiedDocumentContextParameter>
+         <ram:ID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</ram:ID>
+      </ram:BusinessProcessSpecifiedDocumentContextParameter>
+      <ram:GuidelineSpecifiedDocumentContextParameter>
+         <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+      </ram:GuidelineSpecifiedDocumentContextParameter>
+   </rsm:ExchangedDocumentContext>
+   <rsm:ExchangedDocument>
+      <ram:ID>FA-2025-00142</ram:ID>
+      <ram:TypeCode>380</ram:TypeCode>
+      <ram:IssueDateTime>
+         <udt:DateTimeString format="102">20251115</udt:DateTimeString>
+      </ram:IssueDateTime>
+      <ram:IncludedNote>
+         <ram:Content>Facture pour prestation de conseil informatique - Novembre 2025</ram:Content>
+      </ram:IncludedNote>
+   </rsm:ExchangedDocument>
+   <rsm:SupplyChainTradeTransaction>
+      <ram:IncludedSupplyChainTradeLineItem>
+         <ram:AssociatedDocumentLineDocument>
+            <ram:LineID>1</ram:LineID>
+         </ram:AssociatedDocumentLineDocument>
+         <ram:SpecifiedTradeProduct>
+            <ram:Name>Conseil architecture</ram:Name>
+            <ram:Description>Prestation de conseil en architecture logicielle</ram:Description>
+         </ram:SpecifiedTradeProduct>
+         <ram:SpecifiedLineTradeAgreement>
+            <ram:NetPriceProductTradePrice>
+               <ram:ChargeAmount>100.00</ram:ChargeAmount>
+            </ram:NetPriceProductTradePrice>
+         </ram:SpecifiedLineTradeAgreement>
+         <ram:SpecifiedLineTradeDelivery>
+            <ram:BilledQuantity unitCode="HUR">80</ram:BilledQuantity>
+         </ram:SpecifiedLineTradeDelivery>
+         <ram:SpecifiedLineTradeSettlement>
+            <ram:ApplicableTradeTax>
+               <ram:TypeCode>VAT</ram:TypeCode>
+               <ram:CategoryCode>S</ram:CategoryCode>
+               <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <ram:SpecifiedTradeSettlementLineMonetarySummation>
+               <ram:LineTotalAmount>8000.00</ram:LineTotalAmount>
+            </ram:SpecifiedTradeSettlementLineMonetarySummation>
+         </ram:SpecifiedLineTradeSettlement>
+      </ram:IncludedSupplyChainTradeLineItem>
+      <ram:IncludedSupplyChainTradeLineItem>
+         <ram:AssociatedDocumentLineDocument>
+            <ram:LineID>2</ram:LineID>
+         </ram:AssociatedDocumentLineDocument>
+         <ram:SpecifiedTradeProduct>
+            <ram:Name>Développement Rust</ram:Name>
+            <ram:Description>Développement et intégration de modules Rust</ram:Description>
+         </ram:SpecifiedTradeProduct>
+         <ram:SpecifiedLineTradeAgreement>
+            <ram:NetPriceProductTradePrice>
+               <ram:ChargeAmount>100.00</ram:ChargeAmount>
+            </ram:NetPriceProductTradePrice>
+         </ram:SpecifiedLineTradeAgreement>
+         <ram:SpecifiedLineTradeDelivery>
+            <ram:BilledQuantity unitCode="HUR">40</ram:BilledQuantity>
+         </ram:SpecifiedLineTradeDelivery>
+         <ram:SpecifiedLineTradeSettlement>
+            <ram:ApplicableTradeTax>
+               <ram:TypeCode>VAT</ram:TypeCode>
+               <ram:CategoryCode>S</ram:CategoryCode>
+               <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <ram:SpecifiedTradeSettlementLineMonetarySummation>
+               <ram:LineTotalAmount>4000.00</ram:LineTotalAmount>
+            </ram:SpecifiedTradeSettlementLineMonetarySummation>
+         </ram:SpecifiedLineTradeSettlement>
+      </ram:IncludedSupplyChainTradeLineItem>
+      <ram:ApplicableHeaderTradeAgreement>
+         <ram:BuyerReference>BC-2025-0078</ram:BuyerReference>
+         <ram:SellerTradeParty>
+            <ram:GlobalID schemeID="0009">12345678901234</ram:GlobalID>
+            <ram:Name>TechConseil SAS</ram:Name>
+            <ram:SpecifiedLegalOrganization>
+               <ram:ID schemeID="0002">123 456 789 01234</ram:ID>
+            </ram:SpecifiedLegalOrganization>
+            <ram:PostalTradeAddress>
+               <ram:PostcodeCode>75002</ram:PostcodeCode>
+               <ram:LineOne>15 Rue de la Paix</ram:LineOne>
+               <ram:CityName>Paris</ram:CityName>
+               <ram:CountryID>FR</ram:CountryID>
+            </ram:PostalTradeAddress>
+            <ram:SpecifiedTaxRegistration>
+               <ram:ID schemeID="VA">FR12345678901</ram:ID>
+            </ram:SpecifiedTaxRegistration>
+         </ram:SellerTradeParty>
+         <ram:BuyerTradeParty>
+            <ram:GlobalID schemeID="0009">98765432109876</ram:GlobalID>
+            <ram:Name>IndustrieFrance SA</ram:Name>
+            <ram:SpecifiedLegalOrganization>
+               <ram:ID schemeID="0002">987 654 321 09876</ram:ID>
+            </ram:SpecifiedLegalOrganization>
+            <ram:PostalTradeAddress>
+               <ram:PostcodeCode>75008</ram:PostcodeCode>
+               <ram:LineOne>42 Avenue des Champs-Élysées</ram:LineOne>
+               <ram:CityName>Paris</ram:CityName>
+               <ram:CountryID>FR</ram:CountryID>
+            </ram:PostalTradeAddress>
+            <ram:SpecifiedTaxRegistration>
+               <ram:ID schemeID="VA">FR98765432109</ram:ID>
+            </ram:SpecifiedTaxRegistration>
+         </ram:BuyerTradeParty>
+         <ram:BuyerOrderReferencedDocument>
+            <ram:IssuerAssignedID>PO-2025-4567</ram:IssuerAssignedID>
+         </ram:BuyerOrderReferencedDocument>
+         <ram:AdditionalReferencedDocument>
+            <ram:IssuerAssignedID>ATT-PDF-001</ram:IssuerAssignedID>
+            <ram:Name>Bon de commande</ram:Name>
+            <ram:TypeCode>916</ram:TypeCode>
+            <ram:AttachmentBinaryObject mimeCode="application/pdf" filename="bon_commande.pdf">JVBERi0xLjQgZmFrZSBib24gZGUgY29tbWFuZGUgcG91ciB0ZXN0</ram:AttachmentBinaryObject>
+         </ram:AdditionalReferencedDocument>
+         <ram:AdditionalReferencedDocument>
+            <ram:IssuerAssignedID>ATT-PNG-002</ram:IssuerAssignedID>
+            <ram:Name>Photo chantier</ram:Name>
+            <ram:TypeCode>916</ram:TypeCode>
+            <ram:AttachmentBinaryObject mimeCode="image/png" filename="photo_chantier.png">iVBORw0KGgoAAAANSUhEUg==</ram:AttachmentBinaryObject>
+         </ram:AdditionalReferencedDocument>
+         <ram:AdditionalReferencedDocument>
+            <ram:IssuerAssignedID>ATT-CSV-003</ram:IssuerAssignedID>
+            <ram:Name>Détail des lignes</ram:Name>
+            <ram:TypeCode>916</ram:TypeCode>
+            <ram:AttachmentBinaryObject mimeCode="text/csv" filename="detail_lignes.csv">cmVmO3F0ZTtwdTt0b3RhbApBMDAxOzEwOzI1LjAwOzI1MC4wMApBMDAyOzU7MTIuNTA7NjIuNTAKQTAwMzszOzguNzU7MjYuMjU=</ram:AttachmentBinaryObject>
+         </ram:AdditionalReferencedDocument>
+      </ram:ApplicableHeaderTradeAgreement>
+      <ram:ApplicableHeaderTradeDelivery>
+         <ram:ActualDeliverySupplyChainEvent>
+            <ram:OccurrenceDateTime>
+               <udt:DateTimeString format="102">20251115</udt:DateTimeString>
+            </ram:OccurrenceDateTime>
+         </ram:ActualDeliverySupplyChainEvent>
+      </ram:ApplicableHeaderTradeDelivery>
+      <ram:ApplicableHeaderTradeSettlement>
+         <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+         <ram:SpecifiedTradeSettlementPaymentMeans>
+            <ram:TypeCode>30</ram:TypeCode>
+            <ram:PayeePartyCreditorFinancialAccount>
+               <ram:IBANID>FR7630001007941234567890185</ram:IBANID>
+               <ram:AccountName>TechConseil SAS</ram:AccountName>
+            </ram:PayeePartyCreditorFinancialAccount>
+            <ram:PayeeSpecifiedCreditorFinancialInstitution>
+               <ram:BICID>BNPAFRPPXXX</ram:BICID>
+            </ram:PayeeSpecifiedCreditorFinancialInstitution>
+         </ram:SpecifiedTradeSettlementPaymentMeans>
+         <ram:ApplicableTradeTax>
+            <ram:CalculatedAmount>2400.00</ram:CalculatedAmount>
+            <ram:TypeCode>VAT</ram:TypeCode>
+            <ram:BasisAmount>12000.00</ram:BasisAmount>
+            <ram:CategoryCode>S</ram:CategoryCode>
+            <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+         </ram:ApplicableTradeTax>
+         <ram:BillingSpecifiedPeriod>
+            <ram:StartDateTime>
+               <udt:DateTimeString format="102">20251101</udt:DateTimeString>
+            </ram:StartDateTime>
+            <ram:EndDateTime>
+               <udt:DateTimeString format="102">20251130</udt:DateTimeString>
+            </ram:EndDateTime>
+         </ram:BillingSpecifiedPeriod>
+         <ram:SpecifiedTradePaymentTerms>
+            <ram:Description>Paiement à 30 jours fin de mois</ram:Description>
+            <ram:DueDateDateTime>
+               <udt:DateTimeString format="102">20251215</udt:DateTimeString>
+            </ram:DueDateDateTime>
+         </ram:SpecifiedTradePaymentTerms>
+         <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+            <ram:LineTotalAmount>12000.00</ram:LineTotalAmount>
+            <ram:TaxBasisTotalAmount>12000.00</ram:TaxBasisTotalAmount>
+            <ram:TaxTotalAmount currencyID="EUR">2400.00</ram:TaxTotalAmount>
+            <ram:GrandTotalAmount>14400.00</ram:GrandTotalAmount>
+            <ram:DuePayableAmount>14400.00</ram:DuePayableAmount>
+         </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+      </ram:ApplicableHeaderTradeSettlement>
+   </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

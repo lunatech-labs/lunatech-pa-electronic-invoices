@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Facture CII multi-vendeurs (cadre B8 - profil EXTENDED)
+     La plateforme (facturant II) émet une facture regroupant des prestations
+     de plusieurs vendeurs. Le vendeur principal est identifié en BG-4,
+     le facturant (II) est la plateforme qui centralise la facturation.
+     Cas d'usage : plateforme de services regroupant artisans. -->
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+    xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+    xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+    xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100">
+  <rsm:ExchangedDocumentContext>
+    <ram:BusinessProcessSpecifiedDocumentContextParameter>
+      <ram:ID>B8</ram:ID>
+    </ram:BusinessProcessSpecifiedDocumentContextParameter>
+    <ram:GuidelineSpecifiedDocumentContextParameter>
+      <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+    </ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+
+  <rsm:ExchangedDocument>
+    <ram:ID>MV-2025-00100</ram:ID>
+    <ram:TypeCode>380</ram:TypeCode>
+    <ram:IssueDateTime>
+      <udt:DateTimeString format="102">20251220</udt:DateTimeString>
+    </ram:IssueDateTime>
+    <ram:IncludedNote>
+      <ram:Content>Facture multi-vendeurs émise par la plateforme ArtisanConnect pour le compte de ses artisans partenaires</ram:Content>
+      <ram:SubjectCode>AAB</ram:SubjectCode>
+    </ram:IncludedNote>
+  </rsm:ExchangedDocument>
+
+  <rsm:SupplyChainTradeTransaction>
+    <!-- Ligne 1 : Prestation du vendeur principal (plombier) -->
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>1</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:SellerAssignedID>PLOMB-CE-001</ram:SellerAssignedID>
+        <ram:Name>Intervention plomberie - Remplacement chauffe-eau</ram:Name>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:NetPriceProductTradePrice>
+          <ram:ChargeAmount>850.00</ram:ChargeAmount>
+        </ram:NetPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CategoryCode>S</ram:CategoryCode>
+          <ram:RateApplicablePercent>10.00</ram:RateApplicablePercent>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>850.00</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+
+    <!-- Ligne 2 : Prestation du vendeur secondaire (électricien) -->
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>2</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:SellerAssignedID>ELEC-TAB-002</ram:SellerAssignedID>
+        <ram:Name>Mise aux normes tableau électrique</ram:Name>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:NetPriceProductTradePrice>
+          <ram:ChargeAmount>1200.00</ram:ChargeAmount>
+        </ram:NetPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CategoryCode>S</ram:CategoryCode>
+          <ram:RateApplicablePercent>10.00</ram:RateApplicablePercent>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>1200.00</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+
+    <!-- Ligne 3 : Commission plateforme (TVA 20%) -->
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>3</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:SellerAssignedID>COM-PLATFORM</ram:SellerAssignedID>
+        <ram:Name>Commission plateforme ArtisanConnect</ram:Name>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:NetPriceProductTradePrice>
+          <ram:ChargeAmount>205.00</ram:ChargeAmount>
+        </ram:NetPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CategoryCode>S</ram:CategoryCode>
+          <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>205.00</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:BuyerReference>DEVIS-RENO-2025-042</ram:BuyerReference>
+      <!-- Vendeur principal = plombier (premier artisan) -->
+      <ram:SellerTradeParty>
+        <ram:Name>Plomberie Martin SARL</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">22233344455566</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+        <ram:PostalTradeAddress>
+          <ram:PostcodeCode>69003</ram:PostcodeCode>
+          <ram:LineOne>8 rue des Métiers</ram:LineOne>
+          <ram:CityName>Lyon</ram:CityName>
+          <ram:CountryID>FR</ram:CountryID>
+        </ram:PostalTradeAddress>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">FR22233344455</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:SellerTradeParty>
+      <!-- Acheteur = propriétaire -->
+      <ram:BuyerTradeParty>
+        <ram:Name>SCI Les Tilleuls</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">77788899900011</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+        <ram:PostalTradeAddress>
+          <ram:PostcodeCode>69006</ram:PostcodeCode>
+          <ram:LineOne>15 allée des Tilleuls</ram:LineOne>
+          <ram:CityName>Lyon</ram:CityName>
+          <ram:CountryID>FR</ram:CountryID>
+        </ram:PostalTradeAddress>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">FR77788899900</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:BuyerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+
+    <ram:ApplicableHeaderTradeDelivery>
+      <ram:ActualDeliverySupplyChainEvent>
+        <ram:OccurrenceDateTime>
+          <udt:DateTimeString format="102">20251218</udt:DateTimeString>
+        </ram:OccurrenceDateTime>
+      </ram:ActualDeliverySupplyChainEvent>
+    </ram:ApplicableHeaderTradeDelivery>
+
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <!-- Facturant (II) = Plateforme ArtisanConnect qui émet pour le compte des artisans -->
+      <ram:InvoicerTradeParty>
+        <ram:Name>ArtisanConnect SAS</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">33344455566677</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">FR33344455566</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:InvoicerTradeParty>
+      <ram:SpecifiedTradeSettlementPaymentMeans>
+        <ram:TypeCode>30</ram:TypeCode>
+        <ram:PayeePartyCreditorFinancialAccount>
+          <ram:IBANID>FR7620041010051234567890154</ram:IBANID>
+        </ram:PayeePartyCreditorFinancialAccount>
+      </ram:SpecifiedTradeSettlementPaymentMeans>
+      <!-- TVA 10% sur travaux -->
+      <ram:ApplicableTradeTax>
+        <ram:CalculatedAmount>205.00</ram:CalculatedAmount>
+        <ram:TypeCode>VAT</ram:TypeCode>
+        <ram:BasisAmount>2050.00</ram:BasisAmount>
+        <ram:CategoryCode>S</ram:CategoryCode>
+        <ram:RateApplicablePercent>10.00</ram:RateApplicablePercent>
+      </ram:ApplicableTradeTax>
+      <!-- TVA 20% sur commission -->
+      <ram:ApplicableTradeTax>
+        <ram:CalculatedAmount>41.00</ram:CalculatedAmount>
+        <ram:TypeCode>VAT</ram:TypeCode>
+        <ram:BasisAmount>205.00</ram:BasisAmount>
+        <ram:CategoryCode>S</ram:CategoryCode>
+        <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+      </ram:ApplicableTradeTax>
+      <ram:SpecifiedTradePaymentTerms>
+        <ram:Description>Paiement à réception</ram:Description>
+        <ram:DueDateDateTime>
+          <udt:DateTimeString format="102">20260103</udt:DateTimeString>
+        </ram:DueDateDateTime>
+      </ram:SpecifiedTradePaymentTerms>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>2255.00</ram:LineTotalAmount>
+        <ram:TaxBasisTotalAmount>2255.00</ram:TaxBasisTotalAmount>
+        <ram:TaxTotalAmount currencyID="EUR">246.00</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>2501.00</ram:GrandTotalAmount>
+        <ram:DuePayableAmount>2501.00</ram:DuePayableAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

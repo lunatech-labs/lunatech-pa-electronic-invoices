@@ -1,0 +1,112 @@
+# Configuration PDP - Plateforme de Dématérialisation Partenaire
+# ============================================================
+
+pdp:
+  id: PDP-DEMO-001
+  name: "PDP Démo Rust"
+  siret: "12345678901234"
+
+elasticsearch:
+  url: "http://localhost:9200"
+
+# Validation XSD et Schematron
+validation:
+  specs_dir: ./specs
+  xsd_enabled: true
+  en16931_enabled: true
+  br_fr_enabled: true
+
+# Routes de traitement des factures
+routes:
+  # Route 1 : Réception de factures UBL via filesystem local
+  - id: route-ubl-reception
+    description: "Réception et traitement des factures UBL"
+    enabled: true
+    source:
+      type: file
+      path: ./data/in/ubl
+      file_pattern: "*.xml"
+    destination:
+      type: file
+      path: ./data/out/processed
+    error_destination:
+      type: file
+      path: ./data/out/errors
+    validate: true
+    generate_cdar: true
+    cdar_receiver:
+      pdp_id: PPF
+      pdp_name: "Portail Public de Facturation"
+
+  # Route 2 : Réception de factures CII via filesystem local
+  - id: route-cii-reception
+    description: "Réception et traitement des factures CII"
+    enabled: true
+    source:
+      type: file
+      path: ./data/in/cii
+      file_pattern: "*.xml"
+    destination:
+      type: file
+      path: ./data/out/processed
+    error_destination:
+      type: file
+      path: ./data/out/errors
+    validate: true
+    generate_cdar: true
+    cdar_receiver:
+      pdp_id: PPF
+      pdp_name: "Portail Public de Facturation"
+
+  # Route 3 : Transformation UBL -> CII et envoi
+  - id: route-ubl-to-cii
+    description: "Transformation UBL vers CII pour destinataires CII"
+    enabled: true
+    source:
+      type: file
+      path: ./data/in/ubl-to-cii
+      file_pattern: "*.xml"
+    destination:
+      type: file
+      path: ./data/out/cii
+    error_destination:
+      type: file
+      path: ./data/out/errors
+    transform_to: CII
+    validate: true
+    generate_cdar: true
+    cdar_receiver:
+      pdp_id: PDP-DEST-002
+      pdp_name: "PDP Destinataire"
+
+  # Route 4 : Réception SFTP (désactivée par défaut)
+  - id: route-sftp-reception
+    description: "Réception de factures via SFTP"
+    enabled: false
+    source:
+      type: sftp
+      host: sftp.example.com
+      port: 22
+      username: pdp-user
+      private_key_path: ~/.ssh/pdp_key
+      path: /invoices/incoming
+      file_pattern: "*.xml"
+      archive_path: /invoices/archive
+    destination:
+      type: file
+      path: ./data/out/processed
+    error_destination:
+      type: file
+      path: ./data/out/errors
+    validate: true
+    generate_cdar: true
+    cdar_receiver:
+      pdp_id: PPF
+      pdp_name: "Portail Public de Facturation"
+
+polling:
+  interval_secs: 60
+
+logging:
+  format: text
+  level: info

@@ -1,0 +1,30 @@
+[package]
+name = "pdp-invoice"
+description = "Invoice parsing: UBL, CII (XML) and Factur-X (PDF)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdp-core = { path = "../pdp-core" }
+pdp-validate = { path = "../pdp-validate" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+quick-xml = { workspace = true }
+roxmltree = { workspace = true }
+lopdf = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+base64 = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+pdp-transform = { path = "../pdp-transform" }
+
+[[bench]]
+name = "invoice_bench"
+harness = false

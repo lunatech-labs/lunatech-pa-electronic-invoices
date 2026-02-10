@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Facture d'acompte UBL (type 386) - Acompte 30% sur devis rénovation cuisine -->
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>A1</cbc:ProfileID>
+    <cbc:ID>FA-2025-UBL-ACOMPTE-001</cbc:ID>
+    <cbc:IssueDate>2025-10-01</cbc:IssueDate>
+    <cbc:DueDate>2025-10-15</cbc:DueDate>
+    <cbc:InvoiceTypeCode>386</cbc:InvoiceTypeCode>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>DEVIS-2025-100</cbc:BuyerReference>
+
+    <cbc:Note>Facture d'acompte n°1 - 30% du montant total du devis DEV-2025-100#AAB</cbc:Note>
+
+    <cac:ContractDocumentReference>
+        <cbc:ID>DEV-2025-100</cbc:ID>
+    </cac:ContractDocumentReference>
+
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0009">44455566677788</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>Rénovation Habitat Plus SARL</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Rénovation Habitat Plus SARL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">44455566677788</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>22 rue du Bâtiment</cbc:StreetName>
+                <cbc:PostalZone>44000</cbc:PostalZone>
+                <cbc:CityName>Nantes</cbc:CityName>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR44555666777</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0009">88899900011122</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>Cabinet Médical Dr Lefèvre</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Cabinet Médical Dr Lefèvre</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">88899900011122</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>5 place de la Santé</cbc:StreetName>
+                <cbc:PostalZone>44100</cbc:PostalZone>
+                <cbc:CityName>Nantes</cbc:CityName>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR88999000111</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7630004000031234567890143</cbc:ID>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <cac:PaymentTerms>
+        <cbc:Note>Acompte payable à réception</cbc:Note>
+    </cac:PaymentTerms>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">450.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">4500.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">450.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>10</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">4500.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">4500.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">4950.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">4950.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">4500.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Acompte 30% - Rénovation cuisine complète</cbc:Name>
+            <cbc:Description>Acompte sur devis DEV-2025-100 pour rénovation cuisine, démolition + plomberie + électricité</cbc:Description>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>10</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">4500.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

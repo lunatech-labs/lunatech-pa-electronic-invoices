@@ -1,0 +1,686 @@
+{
+  "openapi" : "3.0.3",
+  "info" : {
+    "title" : "AFNOR Flow Service",
+    "version" : "1.0.2",
+    "description" : "Each endpoint must be called with an access token (Bearer). This token is retrieved by a call to a token URL.\n\nThe Flow Service API allows to:\n  - upload a flow.\n  - retrieve information related to a set of flows.\n  - download a flow given its identifier\n\nThe resources of the API are :\n  - '/flows' : with creation and retrieval methods.\n\nWorflow example:\n  - `POST /flows` : provide the flow information & content\n  - `POST /flows/search` : retrieve flows given multiple criterias.\n  - `GET /flows/{id}` : download a flow based on its id.\n \nHistory:\n  - `1.0.0` : First release\n  - `1.0.1` : Fixes following 2025/04/15 SG5 plenary meeting\n    - Remove AcknowledgementXXX enumerates from FlowType\n    - Acknowledgement is now made of details (level, item, reason)\n    - Add the attachment number in the flow information\n    - Add query parameters docType & docIndex to aim a specific download\n    - Change pagination method, from cursors to offsets\n  - `1.0.2` : \n",
+    "contact" : {
+      "name" : "AFNOR",
+      "email" : "sg5@afnor.org"
+    }
+  },
+  "servers" : [ {
+    "url" : "https://{sub-domain}.{domain}/flow-service",
+    "variables" : {
+      "sub-domain" : {
+        "default" : "api.flow",
+        "description" : "Sub domain related to the Flow API if any"
+      },
+      "domain" : {
+        "default" : "company.com",
+        "description" : "Domain name"
+      }
+    },
+    "description" : "Prod public URLs"
+  } ],
+  "tags" : [ {
+    "name" : "Flow",
+    "description" : "Flow management"
+  }, {
+    "name" : "Supervisor",
+    "description" : "Service supervision"
+  } ],
+  "security" : [ {
+    "BearerAuth" : [ ]
+  } ],
+  "paths" : {
+    "/v1/flows" : {
+      "post" : {
+        "operationId" : "createFlow",
+        "summary" : "Submit a new flow",
+        "description" : "Submit a flow. A flow is a single-invoice file, with :\n  - an XML/PDF file with the data of the invoice\n\nThe flow is created with a `flowInfo` object, allowing to qualify the flow.\n  \nA flow can be :\n  - an invoice (CII, UBL, Factur-X,...) \n  - a lifecycle (CDAR) \n  - or a e-reporting file\n",
+        "parameters" : [ {
+          "$ref" : "#/components/parameters/RequestIdHeader"
+        } ],
+        "requestBody" : {
+          "$ref" : "#/components/requestBodies/FlowPostRequest"
+        },
+        "responses" : {
+          "202" : {
+            "$ref" : "#/components/responses/FlowPostResponse"
+          },
+          "400" : {
+            "$ref" : "#/components/responses/Error400Response"
+          },
+          "401" : {
+            "$ref" : "#/components/responses/Error401Response"
+          },
+          "403" : {
+            "$ref" : "#/components/responses/Error403Response"
+          },
+          "500" : {
+            "$ref" : "#/components/responses/Error500Response"
+          },
+          "503" : {
+            "$ref" : "#/components/responses/Error503Response"
+          }
+        },
+        "tags" : [ "Flow" ]
+      }
+    },
+    "/v1/flows/search" : {
+      "post" : {
+        "operationId" : "searchFlow",
+        "summary" : "Select flows upon criteria",
+        "description" : "Retrieves a set of flows matching the provided search criteria:\n  - When setting flowId, do not specify other criteria\n  - Need at least one criterion to be specified\n  - Assuming a logical AND when combining criteria\n  - Assuming a logical OR for criteria allowing a list of values\n>  \nPagination works with pages:\n  - In the request, provide the page to be returned\n  - In the response, the total count of items\n",
+        "parameters" : [ {
+          "$ref" : "#/components/parameters/RequestIdHeader"
+        } ],
+        "requestBody" : {
+          "$ref" : "#/components/requestBodies/FlowSearchRequest"
+        },
+        "responses" : {
+          "200" : {
+            "$ref" : "#/components/responses/FlowSearchResponse"
+          },
+          "206" : {
+            "$ref" : "#/components/responses/FlowSearchResponse"
+          },
+          "400" : {
+            "$ref" : "#/components/responses/Error400Response"
+          },
+          "401" : {
+            "$ref" : "#/components/responses/Error401Response"
+          },
+          "403" : {
+            "$ref" : "#/components/responses/Error403Response"
+          },
+          "500" : {
+            "$ref" : "#/components/responses/Error500Response"
+          },
+          "503" : {
+            "$ref" : "#/components/responses/Error503Response"
+          }
+        },
+        "tags" : [ "Flow" ]
+      }
+    },
+    "/v1/flows/{flowId}" : {
+      "get" : {
+        "summary" : "Download the file of a flow",
+        "description" : "Download a file related to a given flow:\n  - an invoice\n  - a life cycle\n  - an e-reporting\n",
+        "operationId" : "getFlow",
+        "tags" : [ "Flow" ],
+        "parameters" : [ {
+          "name" : "flowId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/NotOnlyUuid"
+          },
+          "description" : "Flow identifier"
+        }, {
+          "name" : "docType",
+          "description" : "This parameter allows to provide the type of file to be uploaded, can be either one:\n  - Original: the document that has been initially sent/provided by the emitter\n  - Converted: the document that has been optionally converted by the system\n  - ReadableView: the document that has been optionally generated as the readable file\n  - Attachment: one of the attached documents, provide the optional index if needed\n",
+          "in" : "query",
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "Original", "Converted", "ReadableView", "Attachment" ],
+            "default" : "Original"
+          }
+        }, {
+          "name" : "docIndex",
+          "description" : "If docType is an Attachment and in case there are several attached documents, it says which one to address\n",
+          "in" : "query",
+          "schema" : {
+            "type" : "integer",
+            "default" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "$ref" : "#/components/responses/FlowGetResponse"
+          },
+          "400" : {
+            "$ref" : "#/components/responses/Error400Response"
+          },
+          "401" : {
+            "$ref" : "#/components/responses/Error401Response"
+          },
+          "403" : {
+            "$ref" : "#/components/responses/Error403Response"
+          },
+          "404" : {
+            "$ref" : "#/components/responses/Error404Response"
+          },
+          "500" : {
+            "$ref" : "#/components/responses/Error500Response"
+          },
+          "503" : {
+            "$ref" : "#/components/responses/Error503Response"
+          }
+        }
+      }
+    },
+    "/v1/healthcheck" : {
+      "get" : {
+        "operationId" : "getHealth",
+        "responses" : {
+          "200" : {
+            "$ref" : "#/components/responses/Ok200EmptyResponse"
+          },
+          "500" : {
+            "$ref" : "#/components/responses/Error500Response"
+          },
+          "503" : {
+            "$ref" : "#/components/responses/Error503Response"
+          }
+        },
+        "summary" : "Check whether the API service is up and running.",
+        "tags" : [ "Supervisor" ]
+      }
+    }
+  },
+  "components" : {
+    "parameters" : {
+      "RequestIdHeader" : {
+        "name" : "Request-Id",
+        "in" : "header",
+        "schema" : {
+          "type" : "string",
+          "format" : "uuid"
+        },
+        "required" : false,
+        "description" : "Header parameter used to correlate logs from several components"
+      }
+    },
+    "schemas" : {
+      "NotOnlyUuid" : {
+        "description" : "Unique identifier supporting UUID but not only, for flexibility purpose",
+        "type" : "string",
+        "maxLength" : 36
+      },
+      "FlowSyntax" : {
+        "type" : "string",
+        "description" : "Syntax of the original file belonging to a flow",
+        "enum" : [ "CII", "UBL", "Factur-X", "CDAR", "FRR" ],
+        "example" : "CII"
+      },
+      "FlowProfile" : {
+        "type" : "string",
+        "enum" : [ "Basic", "CIUS", "Extended-CTC-FR" ]
+      },
+      "FlowType" : {
+        "description" : ">- CustomerInvoice: an invoice that has been received by the system\n>- SupplierInvoice: an invoice that has been emitted by the system\n>- CustomerInvoiceLC: A lifecycle (CDAR) related to a customer invoice\n>- SupplierInvoiceLC: A lifecycle (CDAR) related to supplier invoice\n>- TransactionReport: a e-reporting related to a transactyion\n>- PaymentReport: a e-reporting related to a payment\n",
+        "type" : "string",
+        "enum" : [ "CustomerInvoice", "SupplierInvoice", "CustomerInvoiceLC", "SupplierInvoiceLC", "TransactionReport", "PaymentReport" ],
+        "example" : "SupplierInvoice"
+      },
+      "FlowDirection" : {
+        "type" : "string",
+        "description" : "Direction of the flow:\n>- In:  Incoming flow, from the PDP to the OD\n>- Out: Outgoing flow, from the OD to the PDP\n",
+        "enum" : [ "In", "Out" ],
+        "example" : "Out"
+      },
+      "FlowAckStatus" : {
+        "description" : ">- Ok, the following checks have passed\n>>- Anti virus\n>>- Integrity checks\n>>- Technical rules checks\n>>- Business rules checks\n>- Error, one of the previous test has failed\n>- Pending, the flow is not yet integrated\n",
+        "type" : "string",
+        "enum" : [ "Pending", "Ok", "Error" ]
+      },
+      "FlowInfo" : {
+        "description" : "Signaling of the flow:\n>The tracking id is an external identifier and is used to track the flow by the sender\n>The sha256 is the footprint of the attached file:\n>- if provided in the request: it should be checked once received\n>- if not provided in the request: it should be computed and returned in the response\n",
+        "type" : "object",
+        "required" : [ "name", "flowSyntax" ],
+        "properties" : {
+          "trackingId" : {
+            "$ref" : "#/components/schemas/NotOnlyUuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "flowSyntax" : {
+            "$ref" : "#/components/schemas/FlowSyntax"
+          },
+          "flowProfile" : {
+            "$ref" : "#/components/schemas/FlowProfile"
+          },
+          "sha256" : {
+            "type" : "string",
+            "pattern" : "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "SearchFlowParams" : {
+        "type" : "object",
+        "required" : [ "where" ],
+        "properties" : {
+          "offset" : {
+            "type" : "integer",
+            "default" : 0
+          },
+          "limit" : {
+            "type" : "integer",
+            "maximum" : 100,
+            "default" : 25,
+            "description" : "Maximum number of results that may be returned"
+          },
+          "where" : {
+            "$ref" : "#/components/schemas/SearchFlowFilters"
+          }
+        }
+      },
+      "SearchFlowFilters" : {
+        "description" : "Filtering criteria, at least one is required",
+        "oneOf" : [ {
+          "type" : "object",
+          "required" : [ "updatedAfter" ],
+          "properties" : {
+            "updatedAfter" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "updatedBefore" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "flowType" : {
+              "type" : "array",
+              "items" : {
+                "$ref" : "#/components/schemas/FlowType"
+              }
+            },
+            "flowDirection" : {
+              "type" : "array",
+              "items" : {
+                "$ref" : "#/components/schemas/FlowDirection"
+              }
+            },
+            "trackingId" : {
+              "$ref" : "#/components/schemas/NotOnlyUuid"
+            },
+            "ackStatus" : {
+              "$ref" : "#/components/schemas/FlowAckStatus"
+            }
+          }
+        }, {
+          "$ref" : "#/components/schemas/FlowIdObject"
+        } ]
+      },
+      "FlowIdObject" : {
+        "type" : "object",
+        "properties" : {
+          "flowId" : {
+            "$ref" : "#/components/schemas/NotOnlyUuid"
+          }
+        }
+      },
+      "FullFlowInfo" : {
+        "description" : "Identified Flow info: flow info + id",
+        "allOf" : [ {
+          "$ref" : "#/components/schemas/FlowIdObject"
+        }, {
+          "$ref" : "#/components/schemas/FlowInfo"
+        } ]
+      },
+      "AcknowledgementDetail" : {
+        "type" : "object",
+        "required" : [ "level", "item", "reason" ],
+        "properties" : {
+          "level" : {
+            "type" : "string",
+            "enum" : [ "Error", "Warning" ]
+          },
+          "item" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "AcknowledgementDetails" : {
+        "type" : "array",
+        "minItems" : 1,
+        "items" : {
+          "$ref" : "#/components/schemas/AcknowledgementDetail"
+        }
+      },
+      "Acknowledgement" : {
+        "type" : "object",
+        "required" : [ "status" ],
+        "properties" : {
+          "status" : {
+            "$ref" : "#/components/schemas/FlowAckStatus"
+          },
+          "details" : {
+            "$ref" : "#/components/schemas/AcknowledgementDetails"
+          }
+        }
+      },
+      "Flow" : {
+        "description" : "The properties of a Flow resource",
+        "type" : "object",
+        "properties" : {
+          "submittedAt" : {
+            "description" : "The flow submission date and time (the date ant time the flow was created on the system)\n",
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "description" : "The last update date and time of the flow. When the flow is submitted updatedAt is equal to submittedAt.\nWhen the flow acknowledgment status is changed updatedAt date and time si updated.\n",
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "flowId" : {
+            "$ref" : "#/components/schemas/NotOnlyUuid"
+          },
+          "trackingId" : {
+            "$ref" : "#/components/schemas/NotOnlyUuid"
+          },
+          "flowType" : {
+            "$ref" : "#/components/schemas/FlowType"
+          },
+          "flowDirection" : {
+            "$ref" : "#/components/schemas/FlowDirection"
+          },
+          "flowSyntax" : {
+            "$ref" : "#/components/schemas/FlowSyntax"
+          },
+          "flowProfile" : {
+            "$ref" : "#/components/schemas/FlowProfile"
+          },
+          "attachmentNumber" : {
+            "type" : "integer"
+          },
+          "acknowledgement" : {
+            "$ref" : "#/components/schemas/Acknowledgement"
+          }
+        }
+      },
+      "SearchFlowContent" : {
+        "description" : "A set of flows matching criterias, provided into the request",
+        "type" : "object",
+        "properties" : {
+          "total" : {
+            "type" : "integer"
+          },
+          "offset" : {
+            "type" : "integer"
+          },
+          "limit" : {
+            "type" : "integer"
+          },
+          "filter" : {
+            "$ref" : "#/components/schemas/SearchFlowFilters"
+          },
+          "results" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Flow"
+            }
+          }
+        }
+      },
+      "Error" : {
+        "description" : "Standardized error content",
+        "type" : "object",
+        "required" : [ "errorCode" ],
+        "properties" : {
+          "errorCode" : {
+            "type" : "string",
+            "description" : "Short numerical or alphanumerical code that identifies precisely a unique error.",
+            "example" : "MISSING_REQUIRED_FIELD"
+          },
+          "errorMessage" : {
+            "type" : "string",
+            "description" : "Contains information on the error. Not intended to be displayed to an end user. For security reasons, a tradeof between clarity & security shall be found.",
+            "example" : "Invalid request format"
+          }
+        }
+      }
+    },
+    "requestBodies" : {
+      "FlowSearchRequest" : {
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/SearchFlowParams"
+            }
+          }
+        }
+      },
+      "FlowPostRequest" : {
+        "content" : {
+          "multipart/form-data" : {
+            "schema" : {
+              "type" : "object",
+              "required" : [ "flowInfo", "files" ],
+              "properties" : {
+                "flowInfo" : {
+                  "$ref" : "#/components/schemas/FlowInfo"
+                },
+                "file" : {
+                  "description" : "Flow file",
+                  "type" : "string",
+                  "format" : "binary"
+                }
+              }
+            },
+            "encoding" : {
+              "file" : {
+                "contentType" : "application/pdf, application/xml"
+              },
+              "flowInfo" : {
+                "contentType" : "application/json"
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses" : {
+      "FlowSearchResponse" : {
+        "description" : "OK - Response message when returning the results of a search request.\n  - Holds all the results if code is 200\n  - Holds partial content if code is 206\n",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/SearchFlowContent"
+            }
+          }
+        }
+      },
+      "FlowPostResponse" : {
+        "description" : "OK - Response message once the flow has been uploaded.\n",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/FullFlowInfo"
+            }
+          }
+        }
+      },
+      "FlowGetResponse" : {
+        "description" : "OK - Response message once the flow has been downloaded.",
+        "headers" : {
+          "Content-Disposition" : {
+            "description" : "Header specifying attached file name",
+            "schema" : {
+              "type" : "string",
+              "pattern" : "attachment;filename=*"
+            }
+          }
+        },
+        "content" : {
+          "application/octet-stream" : { }
+        }
+      },
+      "Ok200EmptyResponse" : {
+        "description" : "OK - Operation succeeded"
+      },
+      "Ok204EmptyResponse" : {
+        "description" : "No Content - No content expected"
+      },
+      "Error400Response" : {
+        "description" : "Error 400 : Bad request.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "MISSING_REQUIRED_FIELD",
+              "errorMessage" : "Invalid request format"
+            }
+          }
+        }
+      },
+      "Error401Response" : {
+        "description" : "Error 401 : Authentication error.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "MISSING_TOKEN",
+              "errorMessage" : null
+            }
+          }
+        }
+      },
+      "Error403Response" : {
+        "description" : "Error 403 : Forbidden.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "FORBIDDEN_ACCESS",
+              "errorMessage" : null
+            }
+          }
+        }
+      },
+      "Error404Response" : {
+        "description" : "Error 404 : Resource Not Found.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "MISSING_RESOURCE",
+              "errorMessage" : "Requested resource is Not Found"
+            }
+          }
+        }
+      },
+      "Error405Response" : {
+        "description" : "Error 405 : Method Not Allowed.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "NOT_IMPLEMENTED",
+              "errorMessage" : "Endpoint not implemented"
+            }
+          }
+        }
+      },
+      "Error406Response" : {
+        "description" : "Error 406 : Not Acceptable.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "NOT_ACCEPTABLE",
+              "errorMessage" : "Request format not accepted"
+            }
+          }
+        }
+      },
+      "Error409Response" : {
+        "description" : "Error 409 : Conflict.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "UNIQUE_CONSTRAINT_VIOLATION",
+              "errorMessage" : "Item already exists with same id"
+            }
+          }
+        }
+      },
+      "Error422Response" : {
+        "description" : "Error 422 : Unprocessable entity.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "UNPROCESSABLE_ENTITY",
+              "errorMessage" : "Entity consistency error"
+            }
+          }
+        }
+      },
+      "Error429Response" : {
+        "description" : "Error 429 : Too many requests.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "TOO_MANY_REQUESTS",
+              "errorMessage" : "The client emitted too many requests"
+            }
+          }
+        }
+      },
+      "Error500Response" : {
+        "description" : "Error 500 : Server Internal Error.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "INTERNAL_ERROR",
+              "errorMessage" : null
+            }
+          }
+        }
+      },
+      "Error503Response" : {
+        "description" : "Error 503 : Unavailable Resource.",
+        "content" : {
+          "application/json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/Error"
+            },
+            "example" : {
+              "errorCode" : "RESOURCE_ERROR",
+              "errorMessage" : null
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes" : {
+      "BearerAuth" : {
+        "type" : "http",
+        "scheme" : "bearer",
+        "bearerFormat" : "JWT"
+      }
+    }
+  }
+}

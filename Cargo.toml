@@ -1,0 +1,93 @@
+[workspace]
+members = [
+    "crates/pdp-core",
+    "crates/pdp-sftp",
+    "crates/pdp-invoice",
+    "crates/pdp-transform",
+    "crates/pdp-trace",
+    "crates/pdp-cdar",
+    "crates/pdp-config",
+    "crates/pdp-validate",
+    "crates/pdp-ereporting",
+    "crates/pdp-client",
+    "crates/pdp-peppol",
+    "crates/pdp-app",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Nicolas"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# XML
+quick-xml = { version = "0.31", features = ["serialize"] }
+roxmltree = "0.19"
+
+# PDF
+lopdf = "0.32"
+
+# SFTP
+russh = "0.44"
+russh-sftp = "2.0"
+russh-keys = "0.44"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Date/Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Config
+config = "0.14"
+
+# Database (PostgreSQL — legacy, kept for migration)
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "chrono", "uuid"] }
+
+# XML validation (libxml2 bindings for XSD + XSLT/Schematron)
+libxml = "0.3"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], default-features = false }
+
+# Encoding
+base64 = "0.22"
+
+# Hashing (SHA-256 for flow checksums)
+sha2 = "0.10"
+
+# Archive (tar.gz for PPF flux, zip for general archiving)
+tar = "0.4"
+flate2 = "1.0"
+zip = "2.2"
+
+# URL parsing
+url = "2"
+
+# Testing
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }

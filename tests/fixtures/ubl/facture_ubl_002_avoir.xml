@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CreditNote xmlns="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
+            xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+            xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+    <cbc:ID>AV-2025-00031</cbc:ID>
+    <cbc:IssueDate>2025-11-25</cbc:IssueDate>
+    <cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>
+    <cbc:Note>Avoir suite à retour matériel défectueux - réf. FA-2025-00256</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+
+    <!-- Référence à la facture d'origine -->
+    <cac:BillingReference>
+        <cac:InvoiceDocumentReference>
+            <cbc:ID>FA-2025-00256</cbc:ID>
+            <cbc:IssueDate>2025-11-20</cbc:IssueDate>
+        </cac:InvoiceDocumentReference>
+    </cac:BillingReference>
+
+    <!-- Vendeur -->
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0009">45678901234567</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>InfoTech Solutions SARL</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>8 Rue de la République</cbc:StreetName>
+                <cbc:CityName>Lyon</cbc:CityName>
+                <cbc:PostalZone>69003</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR45678901234</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>InfoTech Solutions SARL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">456 789 012 34567</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <!-- Acheteur -->
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0009">32165498765432</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>Manufacture Lyonnaise SAS</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>120 Boulevard de la Croix-Rousse</cbc:StreetName>
+                <cbc:CityName>Lyon</cbc:CityName>
+                <cbc:PostalZone>69007</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR32165498765</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Manufacture Lyonnaise SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">321 654 987 65432</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <!-- TVA -->
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">1700.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">8500.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">1700.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <!-- Totaux -->
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">8500.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">8500.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">10200.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">10200.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <!-- Ligne avoir : 1 serveur retourné -->
+    <cac:CreditNoteLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:CreditedQuantity unitCode="C62">1</cbc:CreditedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">8500.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Retour serveur Dell PowerEdge R750 défectueux (SN: DELLR750-2025-A1)</cbc:Description>
+            <cbc:Name>Serveur Dell PowerEdge R750</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">8500.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:CreditNoteLine>
+</CreditNote>

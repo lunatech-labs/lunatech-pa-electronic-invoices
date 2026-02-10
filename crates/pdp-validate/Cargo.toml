@@ -1,0 +1,25 @@
+[package]
+name = "pdp-validate"
+description = "XSD and Schematron validation for invoices and CDAR"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdp-core = { path = "../pdp-core" }
+libxml = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+pdp-invoice = { path = "../pdp-invoice" }
+
+[[bench]]
+name = "validate_bench"
+harness = false

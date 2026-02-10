@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Auto-facture CII (TypeCode 389) — L'acheteur émet la facture pour le compte du vendeur -->
+<!-- Cadre de facturation A9 : auto-facturation domestique B2B -->
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+                          xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+                          xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+                          xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+
+    <rsm:ExchangedDocumentContext>
+        <ram:BusinessProcessSpecifiedDocumentContextParameter>
+            <ram:ID>A9</ram:ID>
+        </ram:BusinessProcessSpecifiedDocumentContextParameter>
+        <ram:GuidelineSpecifiedDocumentContextParameter>
+            <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+        </ram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+
+    <rsm:ExchangedDocument>
+        <ram:ID>AF-2025-00012</ram:ID>
+        <ram:TypeCode>389</ram:TypeCode>
+        <ram:IssueDateTime>
+            <udt:DateTimeString format="102">20251201</udt:DateTimeString>
+        </ram:IssueDateTime>
+        <ram:IncludedNote>
+            <ram:Content>Auto-facture émise par l'acheteur pour le compte du fournisseur conformément à l'accord d'auto-facturation du 01/01/2025</ram:Content>
+            <ram:SubjectCode>AAK</ram:SubjectCode>
+        </ram:IncludedNote>
+    </rsm:ExchangedDocument>
+
+    <rsm:SupplyChainTradeTransaction>
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>1</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:GlobalID schemeID="0160">3456789012345</ram:GlobalID>
+                <ram:SellerAssignedID>LAIT-BIO-5L</ram:SellerAssignedID>
+                <ram:BuyerAssignedID>MP-LAIT-001</ram:BuyerAssignedID>
+                <ram:Name>Lait bio 5L</ram:Name>
+                <ram:Description>Lait biologique entier, bidon de 5 litres, origine France</ram:Description>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>2.80</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="LTR">5000</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>5.50</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>14000.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>2</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:SellerAssignedID>BEURRE-BIO-250</ram:SellerAssignedID>
+                <ram:Name>Beurre bio 250g</ram:Name>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>3.20</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="C62">500</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>5.50</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>1600.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+
+        <ram:ApplicableHeaderTradeAgreement>
+            <ram:BuyerReference>CONTRAT-LAIT-2025-001</ram:BuyerReference>
+            <!-- Vendeur = le fournisseur de lait (celui qui reçoit le paiement) -->
+            <ram:SellerTradeParty>
+                <ram:GlobalID schemeID="0088">3012345678901</ram:GlobalID>
+                <ram:Name>Ferme Bio du Vercors EARL</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">51234567800019</ram:ID>
+                    <ram:TradingBusinessName>Ferme Bio du Vercors</ram:TradingBusinessName>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>38250</ram:PostcodeCode>
+                    <ram:LineOne>Lieu-dit Les Granges</ram:LineOne>
+                    <ram:CityName>Villard-de-Lans</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">512345678_STATUTS</ram:URIID>
+                </ram:URIUniversalCommunication>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR51234567800</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:SellerTradeParty>
+            <!-- Acheteur = la laiterie (celui qui émet l'auto-facture) -->
+            <ram:BuyerTradeParty>
+                <ram:GlobalID schemeID="0088">3098765432109</ram:GlobalID>
+                <ram:Name>Laiterie des Alpes SAS</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">98765432100028</ram:ID>
+                    <ram:TradingBusinessName>Laiterie des Alpes</ram:TradingBusinessName>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>38000</ram:PostcodeCode>
+                    <ram:LineOne>Zone Industrielle Nord</ram:LineOne>
+                    <ram:LineTwo>12 Rue des Laitiers</ram:LineTwo>
+                    <ram:CityName>Grenoble</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">987654321</ram:URIID>
+                </ram:URIUniversalCommunication>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR98765432100</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:BuyerTradeParty>
+            <ram:ContractReferencedDocument>
+                <ram:IssuerAssignedID>CONTRAT-AF-2025-001</ram:IssuerAssignedID>
+            </ram:ContractReferencedDocument>
+        </ram:ApplicableHeaderTradeAgreement>
+
+        <ram:ApplicableHeaderTradeDelivery>
+            <ram:ShipToTradeParty>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>38000</ram:PostcodeCode>
+                    <ram:LineOne>Zone Industrielle Nord, Quai de réception</ram:LineOne>
+                    <ram:CityName>Grenoble</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+            </ram:ShipToTradeParty>
+            <ram:ActualDeliverySupplyChainEvent>
+                <ram:OccurrenceDateTime>
+                    <udt:DateTimeString format="102">20251128</udt:DateTimeString>
+                </ram:OccurrenceDateTime>
+            </ram:ActualDeliverySupplyChainEvent>
+        </ram:ApplicableHeaderTradeDelivery>
+
+        <ram:ApplicableHeaderTradeSettlement>
+            <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+            <ram:SpecifiedTradeSettlementPaymentMeans>
+                <ram:TypeCode>30</ram:TypeCode>
+                <ram:PayeePartyCreditorFinancialAccount>
+                    <ram:IBANID>FR7630006000011234567890189</ram:IBANID>
+                </ram:PayeePartyCreditorFinancialAccount>
+            </ram:SpecifiedTradeSettlementPaymentMeans>
+            <ram:ApplicableTradeTax>
+                <ram:CalculatedAmount>858.00</ram:CalculatedAmount>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:BasisAmount>15600.00</ram:BasisAmount>
+                <ram:CategoryCode>S</ram:CategoryCode>
+                <ram:RateApplicablePercent>5.50</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <ram:SpecifiedTradePaymentTerms>
+                <ram:Description>Paiement à 30 jours</ram:Description>
+                <ram:DueDateDateTime>
+                    <udt:DateTimeString format="102">20251231</udt:DateTimeString>
+                </ram:DueDateDateTime>
+            </ram:SpecifiedTradePaymentTerms>
+            <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+                <ram:LineTotalAmount>15600.00</ram:LineTotalAmount>
+                <ram:TaxBasisTotalAmount>15600.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">858.00</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>16458.00</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>16458.00</ram:DuePayableAmount>
+            </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        </ram:ApplicableHeaderTradeSettlement>
+    </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

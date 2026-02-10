@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+    xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+    xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+    xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100">
+  <rsm:ExchangedDocumentContext>
+    <ram:BusinessProcessSpecifiedDocumentContextParameter>
+      <ram:ID>A1</ram:ID>
+    </ram:BusinessProcessSpecifiedDocumentContextParameter>
+    <ram:GuidelineSpecifiedDocumentContextParameter>
+      <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+    </ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+
+  <rsm:ExchangedDocument>
+    <ram:ID>FA-2025-ACOMPTE-001</ram:ID>
+    <ram:TypeCode>386</ram:TypeCode>
+    <ram:IssueDateTime>
+      <udt:DateTimeString format="102">20251001</udt:DateTimeString>
+    </ram:IssueDateTime>
+    <ram:IncludedNote>
+      <ram:Content>Facture d'acompte n°1 - 30% du montant total du devis DEV-2025-100</ram:Content>
+      <ram:SubjectCode>AAB</ram:SubjectCode>
+    </ram:IncludedNote>
+  </rsm:ExchangedDocument>
+
+  <rsm:SupplyChainTradeTransaction>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>1</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:Name>Acompte 30% - Rénovation cuisine complète</ram:Name>
+        <ram:Description>Acompte sur devis DEV-2025-100 pour rénovation cuisine, démolition + plomberie + électricité</ram:Description>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:NetPriceProductTradePrice>
+          <ram:ChargeAmount>4500.00</ram:ChargeAmount>
+        </ram:NetPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CategoryCode>S</ram:CategoryCode>
+          <ram:RateApplicablePercent>10</ram:RateApplicablePercent>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>4500.00</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:BuyerReference>DEVIS-2025-100</ram:BuyerReference>
+      <ram:SellerTradeParty>
+        <ram:GlobalID schemeID="0009">44455566677788</ram:GlobalID>
+        <ram:Name>Rénovation Habitat Plus SARL</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">44455566677788</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+        <ram:PostalTradeAddress>
+          <ram:PostcodeCode>44000</ram:PostcodeCode>
+          <ram:LineOne>22 rue du Bâtiment</ram:LineOne>
+          <ram:CityName>Nantes</ram:CityName>
+          <ram:CountryID>FR</ram:CountryID>
+        </ram:PostalTradeAddress>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">FR44555666777</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:SellerTradeParty>
+      <ram:BuyerTradeParty>
+        <ram:GlobalID schemeID="0009">88899900011122</ram:GlobalID>
+        <ram:Name>Cabinet Médical Dr Lefèvre</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">88899900011122</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+        <ram:PostalTradeAddress>
+          <ram:PostcodeCode>44100</ram:PostcodeCode>
+          <ram:LineOne>5 place de la Santé</ram:LineOne>
+          <ram:CityName>Nantes</ram:CityName>
+          <ram:CountryID>FR</ram:CountryID>
+        </ram:PostalTradeAddress>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">FR88999000111</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:BuyerTradeParty>
+      <ram:ContractReferencedDocument>
+        <ram:IssuerAssignedID>DEV-2025-100</ram:IssuerAssignedID>
+      </ram:ContractReferencedDocument>
+    </ram:ApplicableHeaderTradeAgreement>
+
+    <ram:ApplicableHeaderTradeDelivery>
+      <ram:ActualDeliverySupplyChainEvent>
+        <ram:OccurrenceDateTime>
+          <udt:DateTimeString format="102">20251115</udt:DateTimeString>
+        </ram:OccurrenceDateTime>
+      </ram:ActualDeliverySupplyChainEvent>
+    </ram:ApplicableHeaderTradeDelivery>
+
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:SpecifiedTradeSettlementPaymentMeans>
+        <ram:TypeCode>30</ram:TypeCode>
+        <ram:PayeePartyCreditorFinancialAccount>
+          <ram:IBANID>FR7630004000031234567890143</ram:IBANID>
+        </ram:PayeePartyCreditorFinancialAccount>
+      </ram:SpecifiedTradeSettlementPaymentMeans>
+      <ram:ApplicableTradeTax>
+        <ram:CalculatedAmount>450.00</ram:CalculatedAmount>
+        <ram:TypeCode>VAT</ram:TypeCode>
+        <ram:BasisAmount>4500.00</ram:BasisAmount>
+        <ram:CategoryCode>S</ram:CategoryCode>
+        <ram:RateApplicablePercent>10</ram:RateApplicablePercent>
+      </ram:ApplicableTradeTax>
+      <ram:SpecifiedTradePaymentTerms>
+        <ram:Description>Acompte payable à réception</ram:Description>
+        <ram:DueDateDateTime>
+          <udt:DateTimeString format="102">20251015</udt:DateTimeString>
+        </ram:DueDateDateTime>
+      </ram:SpecifiedTradePaymentTerms>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>4500.00</ram:LineTotalAmount>
+        <ram:TaxBasisTotalAmount>4500.00</ram:TaxBasisTotalAmount>
+        <ram:TaxTotalAmount currencyID="EUR">450.00</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>4950.00</ram:GrandTotalAmount>
+        <ram:DuePayableAmount>4950.00</ram:DuePayableAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+    xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+    xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+    xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100">
+  <rsm:ExchangedDocumentContext>
+    <ram:BusinessProcessSpecifiedDocumentContextParameter>
+      <ram:ID>A8</ram:ID>
+    </ram:BusinessProcessSpecifiedDocumentContextParameter>
+    <ram:GuidelineSpecifiedDocumentContextParameter>
+      <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+    </ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+
+  <rsm:ExchangedDocument>
+    <ram:ID>MKP-2025-00789</ram:ID>
+    <ram:TypeCode>380</ram:TypeCode>
+    <ram:IssueDateTime>
+      <udt:DateTimeString format="102">20251201</udt:DateTimeString>
+    </ram:IssueDateTime>
+    <ram:IncludedNote>
+      <ram:Content>Facture émise par le mandataire de facturation (MarketPlace Pro) au nom et pour le compte du fournisseur - Mandat MDF-2025-1234</ram:Content>
+      <ram:SubjectCode>AAB</ram:SubjectCode>
+    </ram:IncludedNote>
+  </rsm:ExchangedDocument>
+
+  <rsm:SupplyChainTradeTransaction>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>1</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:GlobalID schemeID="0160">3700123456789</ram:GlobalID>
+        <ram:SellerAssignedID>PS-X500-BLK</ram:SellerAssignedID>
+        <ram:Name>Casque audio sans fil ProSound X500</ram:Name>
+        <ram:Description>Casque Bluetooth 5.3, réduction de bruit active, autonomie 40h</ram:Description>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:NetPriceProductTradePrice>
+          <ram:ChargeAmount>149.99</ram:ChargeAmount>
+        </ram:NetPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="C62">25</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CategoryCode>S</ram:CategoryCode>
+          <ram:RateApplicablePercent>20</ram:RateApplicablePercent>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>3749.75</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>2</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:GlobalID schemeID="0160">3700987654321</ram:GlobalID>
+        <ram:SellerAssignedID>SW-200-BLU</ram:SellerAssignedID>
+        <ram:Name>Enceinte portable SoundWave 200</ram:Name>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:NetPriceProductTradePrice>
+          <ram:ChargeAmount>79.90</ram:ChargeAmount>
+        </ram:NetPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="C62">40</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CategoryCode>S</ram:CategoryCode>
+          <ram:RateApplicablePercent>20</ram:RateApplicablePercent>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>3196.00</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:BuyerReference>ACHAT-MKP-2025-456</ram:BuyerReference>
+      <!-- Vendeur = fournisseur réel -->
+      <ram:SellerTradeParty>
+        <ram:GlobalID schemeID="0009">33344455566677</ram:GlobalID>
+        <ram:Name>AudioTech France SAS</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">33344455566677</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+        <ram:PostalTradeAddress>
+          <ram:PostcodeCode>31000</ram:PostcodeCode>
+          <ram:LineOne>8 rue de l'Innovation</ram:LineOne>
+          <ram:CityName>Toulouse</ram:CityName>
+          <ram:CountryID>FR</ram:CountryID>
+        </ram:PostalTradeAddress>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">FR33444555666</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:SellerTradeParty>
+      <!-- Acheteur = client professionnel -->
+      <ram:BuyerTradeParty>
+        <ram:GlobalID schemeID="0009">77788899900011</ram:GlobalID>
+        <ram:Name>Électronique Distribution SARL</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">77788899900011</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+        <ram:PostalTradeAddress>
+          <ram:PostcodeCode>33000</ram:PostcodeCode>
+          <ram:LineOne>45 boulevard du Commerce</ram:LineOne>
+          <ram:CityName>Bordeaux</ram:CityName>
+          <ram:CountryID>FR</ram:CountryID>
+        </ram:PostalTradeAddress>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">FR77888999000</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:BuyerTradeParty>
+      <!-- Agent du vendeur = mandataire de facturation (marketplace) -->
+      <ram:SalesAgentTradeParty>
+        <ram:GlobalID schemeID="0009">11122233344455</ram:GlobalID>
+        <ram:Name>MarketPlace Pro SAS</ram:Name>
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">11122233344455</ram:ID>
+        </ram:SpecifiedLegalOrganization>
+      </ram:SalesAgentTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+
+    <ram:ApplicableHeaderTradeDelivery>
+      <ram:ActualDeliverySupplyChainEvent>
+        <ram:OccurrenceDateTime>
+          <udt:DateTimeString format="102">20251128</udt:DateTimeString>
+        </ram:OccurrenceDateTime>
+      </ram:ActualDeliverySupplyChainEvent>
+    </ram:ApplicableHeaderTradeDelivery>
+
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:ApplicableTradeTax>
+        <ram:CalculatedAmount>1389.15</ram:CalculatedAmount>
+        <ram:TypeCode>VAT</ram:TypeCode>
+        <ram:BasisAmount>6945.75</ram:BasisAmount>
+        <ram:CategoryCode>S</ram:CategoryCode>
+        <ram:RateApplicablePercent>20</ram:RateApplicablePercent>
+      </ram:ApplicableTradeTax>
+      <ram:SpecifiedTradePaymentTerms>
+        <ram:Description>Déjà payée - Paiement en ligne via MarketPlace Pro</ram:Description>
+        <ram:DueDateDateTime>
+          <udt:DateTimeString format="102">20251201</udt:DateTimeString>
+        </ram:DueDateDateTime>
+      </ram:SpecifiedTradePaymentTerms>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>6945.75</ram:LineTotalAmount>
+        <ram:TaxBasisTotalAmount>6945.75</ram:TaxBasisTotalAmount>
+        <ram:TaxTotalAmount currencyID="EUR">1389.15</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>8334.90</ram:GrandTotalAmount>
+        <ram:TotalPrepaidAmount>8334.90</ram:TotalPrepaidAmount>
+        <ram:DuePayableAmount>0.00</ram:DuePayableAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

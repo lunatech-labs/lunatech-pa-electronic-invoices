@@ -1,0 +1,26 @@
+[package]
+name = "pdp-app"
+description = "Main application binary: CLI and orchestration"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pdp"
+path = "src/main.rs"
+
+[dependencies]
+pdp-core = { path = "../pdp-core" }
+pdp-sftp = { path = "../pdp-sftp" }
+pdp-invoice = { path = "../pdp-invoice" }
+pdp-transform = { path = "../pdp-transform" }
+pdp-trace = { path = "../pdp-trace" }
+pdp-cdar = { path = "../pdp-cdar" }
+pdp-config = { path = "../pdp-config" }
+pdp-validate = { path = "../pdp-validate" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }

@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Facture CII avec remises/charges document et multi-taux TVA (20% + 5.5% + exonéré) -->
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+                          xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+                          xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+                          xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+
+    <rsm:ExchangedDocumentContext>
+        <ram:BusinessProcessSpecifiedDocumentContextParameter>
+            <ram:ID>A1</ram:ID>
+        </ram:BusinessProcessSpecifiedDocumentContextParameter>
+        <ram:GuidelineSpecifiedDocumentContextParameter>
+            <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+        </ram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+
+    <rsm:ExchangedDocument>
+        <ram:ID>FA-2025-00300</ram:ID>
+        <ram:TypeCode>380</ram:TypeCode>
+        <ram:IssueDateTime>
+            <udt:DateTimeString format="102">20251210</udt:DateTimeString>
+        </ram:IssueDateTime>
+        <ram:IncludedNote>
+            <ram:Content>Facture multi-taux TVA avec remise commerciale et frais de port</ram:Content>
+        </ram:IncludedNote>
+    </rsm:ExchangedDocument>
+
+    <rsm:SupplyChainTradeTransaction>
+        <!-- Ligne 1 : Matériel informatique (TVA 20%) -->
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>1</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:GlobalID schemeID="0160">5901234123457</ram:GlobalID>
+                <ram:Name>Écran 27 pouces 4K</ram:Name>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:GrossPriceProductTradePrice>
+                    <ram:ChargeAmount>450.00</ram:ChargeAmount>
+                </ram:GrossPriceProductTradePrice>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>400.00</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="C62">10</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>4000.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+
+        <!-- Ligne 2 : Livres techniques (TVA 5.5%) -->
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>2</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:Name>Manuel Rust Programming 2nd Ed.</ram:Name>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>45.00</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="C62">20</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>5.50</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>900.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+
+        <!-- Ligne 3 : Formation (exonérée TVA) -->
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>3</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:Name>Formation Rust avancé - 3 jours</ram:Name>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>1800.00</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="DAY">3</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>E</ram:CategoryCode>
+                    <ram:RateApplicablePercent>0.00</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>5400.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+
+        <ram:ApplicableHeaderTradeAgreement>
+            <ram:BuyerReference>BC-2025-MULTI-001</ram:BuyerReference>
+            <ram:SellerTradeParty>
+                <ram:Name>TechConseil SAS</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">12345678901234</ram:ID>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>75002</ram:PostcodeCode>
+                    <ram:LineOne>15 Rue de la Paix</ram:LineOne>
+                    <ram:CityName>Paris</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR12345678901</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:SellerTradeParty>
+            <ram:BuyerTradeParty>
+                <ram:Name>IndustrieFrance SA</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">98765432109876</ram:ID>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>75008</ram:PostcodeCode>
+                    <ram:LineOne>42 Avenue des Champs-Élysées</ram:LineOne>
+                    <ram:CityName>Paris</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR98765432109</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:BuyerTradeParty>
+        </ram:ApplicableHeaderTradeAgreement>
+
+        <ram:ApplicableHeaderTradeDelivery>
+            <ram:ActualDeliverySupplyChainEvent>
+                <ram:OccurrenceDateTime>
+                    <udt:DateTimeString format="102">20251201</udt:DateTimeString>
+                </ram:OccurrenceDateTime>
+            </ram:ActualDeliverySupplyChainEvent>
+        </ram:ApplicableHeaderTradeDelivery>
+
+        <ram:ApplicableHeaderTradeSettlement>
+            <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+            <ram:SpecifiedTradeSettlementPaymentMeans>
+                <ram:TypeCode>30</ram:TypeCode>
+                <ram:PayeePartyCreditorFinancialAccount>
+                    <ram:IBANID>FR7630001007941234567890185</ram:IBANID>
+                </ram:PayeePartyCreditorFinancialAccount>
+            </ram:SpecifiedTradeSettlementPaymentMeans>
+            <!-- Ventilation TVA 20% -->
+            <ram:ApplicableTradeTax>
+                <ram:CalculatedAmount>727.00</ram:CalculatedAmount>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:BasisAmount>3635.00</ram:BasisAmount>
+                <ram:CategoryCode>S</ram:CategoryCode>
+                <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <!-- Ventilation TVA 5.5% -->
+            <ram:ApplicableTradeTax>
+                <ram:CalculatedAmount>49.50</ram:CalculatedAmount>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:BasisAmount>900.00</ram:BasisAmount>
+                <ram:CategoryCode>S</ram:CategoryCode>
+                <ram:RateApplicablePercent>5.50</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <!-- Ventilation TVA exonérée -->
+            <ram:ApplicableTradeTax>
+                <ram:CalculatedAmount>0.00</ram:CalculatedAmount>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:ExemptionReason>Formation professionnelle exonérée art. 261-4-4° CGI</ram:ExemptionReason>
+                <ram:BasisAmount>5400.00</ram:BasisAmount>
+                <ram:CategoryCode>E</ram:CategoryCode>
+                <ram:RateApplicablePercent>0.00</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <!-- Remise commerciale 5% sur total lignes (BG-20) -->
+            <ram:SpecifiedTradeAllowanceCharge>
+                <ram:ChargeIndicator>
+                    <udt:Indicator>false</udt:Indicator>
+                </ram:ChargeIndicator>
+                <ram:ActualAmount>515.00</ram:ActualAmount>
+                <ram:Reason>Remise commerciale 5%</ram:Reason>
+                <ram:CategoryTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+                </ram:CategoryTradeTax>
+            </ram:SpecifiedTradeAllowanceCharge>
+            <!-- Frais de port (BG-21) -->
+            <ram:SpecifiedTradeAllowanceCharge>
+                <ram:ChargeIndicator>
+                    <udt:Indicator>true</udt:Indicator>
+                </ram:ChargeIndicator>
+                <ram:ActualAmount>150.00</ram:ActualAmount>
+                <ram:Reason>Frais de port et emballage</ram:Reason>
+                <ram:CategoryTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+                </ram:CategoryTradeTax>
+            </ram:SpecifiedTradeAllowanceCharge>
+            <ram:SpecifiedTradePaymentTerms>
+                <ram:Description>Paiement à 30 jours</ram:Description>
+                <ram:DueDateDateTime>
+                    <udt:DateTimeString format="102">20260109</udt:DateTimeString>
+                </ram:DueDateDateTime>
+            </ram:SpecifiedTradePaymentTerms>
+            <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+                <ram:LineTotalAmount>10300.00</ram:LineTotalAmount>
+                <ram:ChargeTotalAmount>150.00</ram:ChargeTotalAmount>
+                <ram:AllowanceTotalAmount>515.00</ram:AllowanceTotalAmount>
+                <ram:TaxBasisTotalAmount>9935.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">776.50</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>10711.50</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>10711.50</ram:DuePayableAmount>
+            </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        </ram:ApplicableHeaderTradeSettlement>
+    </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

@@ -1,0 +1,145 @@
+use async_trait::async_trait;
+use crate::exchange::Exchange;
+use crate::error::PdpResult;
+
+/// Un Processor transforme un Exchange.
+/// C'est l'équivalent du Processor dans Apache Camel.
+/// Chaque étape du pipeline (parsing, validation, transformation, etc.)
+/// est un Processor.
+#[async_trait]
+pub trait Processor: Send + Sync {
+    /// Nom du processor (pour la traçabilité)
+    fn name(&self) -> &str;
+
+    /// Traite l'exchange et retourne l'exchange modifié
+    async fn process(&self, exchange: Exchange) -> PdpResult<Exchange>;
+}
+
+/// Processor qui enchaîne plusieurs processors
+pub struct ProcessorChain {
+    name: String,
+    processors: Vec<Box<dyn Processor>>,
+}
+
+impl ProcessorChain {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            processors: Vec::new(),
+        }
+    }
+
+    pub fn add(mut self, processor: Box<dyn Processor>) -> Self {
+        self.processors.push(processor);
+        self
+    }
+}
+
+#[async_trait]
+impl Processor for ProcessorChain {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        for processor in &self.processors {
+            tracing::debug!(
+                processor = processor.name(),
+                exchange_id = %exchange.id,
+                "Exécution du processor"
+            );
+            exchange = processor.process(exchange).await?;
+        }
+        Ok(exchange)
+    }
+}
+
+/// Processor simple basé sur une closure (pour les cas simples)
+pub struct FnProcessor<F>
+where
+    F: Fn(Exchange) -> PdpResult<Exchange> + Send + Sync,
+{
+    name: String,
+    func: F,
+}
+
+impl<F> FnProcessor<F>
+where
+    F: Fn(Exchange) -> PdpResult<Exchange> + Send + Sync,
+{
+    pub fn new(name: &str, func: F) -> Self {
+        Self {
+            name: name.to_string(),
+            func,
+        }
+    }
+}
+
+#[async_trait]
+impl<F> Processor for FnProcessor<F>
+where
+    F: Fn(Exchange) -> PdpResult<Exchange> + Send + Sync,
+{
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn process(&self, exchange: Exchange) -> PdpResult<Exchange> {
+        (self.func)(exchange)
+    }
+}
+
+/// Processor de logging (utile pour le debug)
+pub struct LogProcessor {
+    name: String,
+    level: LogLevel,
+}
+
+#[derive(Debug, Clone)]
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogProcessor {
+    pub fn new(name: &str, level: LogLevel) -> Self {
+        Self {
+            name: name.to_string(),
+            level,
+        }
+    }
+
+    pub fn info(name: &str) -> Self {
+        Self::new(name, LogLevel::Info)
+    }
+}
+
+#[async_trait]
+impl Processor for LogProcessor {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn process(&self, exchange: Exchange) -> PdpResult<Exchange> {
+        let msg = format!(
+            "[{}] Exchange {} | flow={} | status={} | fichier={} | erreurs={}",
+            self.name,
+            exchange.id,
+            exchange.flow_id,
+            exchange.status,
+            exchange.source_filename.as_deref().unwrap_or("N/A"),
+            exchange.errors.len(),
+        );
+
+        match self.level {
+            LogLevel::Debug => tracing::debug!("{}", msg),
+            LogLevel::Info => tracing::info!("{}", msg),
+            LogLevel::Warn => tracing::warn!("{}", msg),
+            LogLevel::Error => tracing::error!("{}", msg),
+        }
+
+        Ok(exchange)
+    }
+}

@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+    <cbc:ID>FA-2025-00142</cbc:ID>
+    <cbc:IssueDate>2025-11-15</cbc:IssueDate>
+    <cbc:DueDate>2025-12-15</cbc:DueDate>
+    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+    <cbc:Note>Facture pour prestation de conseil informatique - Novembre 2025</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>BC-2025-0078</cbc:BuyerReference>
+
+    <!-- Période de facturation -->
+    <cac:InvoicePeriod>
+        <cbc:StartDate>2025-11-01</cbc:StartDate>
+        <cbc:EndDate>2025-11-30</cbc:EndDate>
+    </cac:InvoicePeriod>
+
+    <!-- Référence bon de commande -->
+    <cac:OrderReference>
+        <cbc:ID>PO-2025-4567</cbc:ID>
+    </cac:OrderReference>
+
+    <!-- Vendeur -->
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:EndpointID schemeID="0009">12345678901234</cac:EndpointID>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0009">12345678901234</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>TechConseil SAS</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>15 Rue de la Paix</cbc:StreetName>
+                <cbc:CityName>Paris</cbc:CityName>
+                <cbc:PostalZone>75002</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR12345678901</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>TechConseil SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">123 456 789 01234</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <!-- Acheteur -->
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:EndpointID schemeID="0009">98765432109876</cac:EndpointID>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0009">98765432109876</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>IndustrieFrance SA</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>42 Avenue des Champs-Élysées</cbc:StreetName>
+                <cbc:CityName>Paris</cbc:CityName>
+                <cbc:PostalZone>75008</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR98765432109</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>IndustrieFrance SA</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">987 654 321 09876</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <!-- Moyen de paiement -->
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cbc:PaymentID>FA-2025-00142</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7630001007941234567890185</cbc:ID>
+            <cbc:Name>TechConseil SAS</cbc:Name>
+            <cac:FinancialInstitutionBranch>
+                <cbc:ID>BNPAFRPPXXX</cbc:ID>
+            </cac:FinancialInstitutionBranch>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <!-- Conditions de paiement -->
+    <cac:PaymentTerms>
+        <cbc:Note>Paiement à 30 jours fin de mois</cbc:Note>
+    </cac:PaymentTerms>
+
+    <!-- TVA -->
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">2400.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">12000.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">2400.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <!-- Totaux -->
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">12000.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">12000.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">14400.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">14400.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <!-- Ligne 1 -->
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="HUR">80</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">8000.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Prestation de conseil en architecture logicielle</cbc:Description>
+            <cbc:Name>Conseil architecture</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">100.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+
+    <!-- Ligne 2 -->
+    <cac:InvoiceLine>
+        <cbc:ID>2</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="HUR">40</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">4000.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Développement et intégration de modules Rust</cbc:Description>
+            <cbc:Name>Développement Rust</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">100.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

@@ -1,0 +1,11 @@
+[package]
+name = "pdp-ereporting"
+description = "E-reporting flux 10: transaction and payment reporting for PPF"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdp-core = { path = "../pdp-core" }
+serde = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }

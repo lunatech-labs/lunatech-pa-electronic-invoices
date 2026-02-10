@@ -1,0 +1,29 @@
+[package]
+name = "pdp-core"
+description = "Core pipeline engine: routes, processors, endpoints, exchanges"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "archive_bench"
+harness = false

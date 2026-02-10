@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Avoir CII (TypeCode 381) — Référence facture d'origine FA-2025-00256 -->
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+                          xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+                          xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+                          xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+
+    <rsm:ExchangedDocumentContext>
+        <ram:BusinessProcessSpecifiedDocumentContextParameter>
+            <ram:ID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</ram:ID>
+        </ram:BusinessProcessSpecifiedDocumentContextParameter>
+        <ram:GuidelineSpecifiedDocumentContextParameter>
+            <ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>
+        </ram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+
+    <rsm:ExchangedDocument>
+        <ram:ID>AV-2025-00045</ram:ID>
+        <ram:TypeCode>381</ram:TypeCode>
+        <ram:IssueDateTime>
+            <udt:DateTimeString format="102">20251205</udt:DateTimeString>
+        </ram:IssueDateTime>
+        <ram:IncludedNote>
+            <ram:Content>Avoir pour retour de 1 serveur défectueux - réf. FA-2025-00256</ram:Content>
+        </ram:IncludedNote>
+    </rsm:ExchangedDocument>
+
+    <rsm:SupplyChainTradeTransaction>
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>1</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:Name>Serveur Dell PowerEdge R750</ram:Name>
+                <ram:Description>Retour serveur défectueux SN: DELLR750-2025-A1</ram:Description>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>8500.00</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>8500.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+
+        <ram:ApplicableHeaderTradeAgreement>
+            <ram:SellerTradeParty>
+                <ram:Name>InfoTech Solutions SARL</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">45678901234567</ram:ID>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>69003</ram:PostcodeCode>
+                    <ram:LineOne>8 Rue de la République</ram:LineOne>
+                    <ram:CityName>Lyon</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">456789012_STATUTS</ram:URIID>
+                </ram:URIUniversalCommunication>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR45678901234</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:SellerTradeParty>
+            <ram:BuyerTradeParty>
+                <ram:Name>Manufacture Lyonnaise SAS</ram:Name>
+                <ram:SpecifiedLegalOrganization>
+                    <ram:ID schemeID="0002">32165498765432</ram:ID>
+                </ram:SpecifiedLegalOrganization>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>69007</ram:PostcodeCode>
+                    <ram:LineOne>120 Boulevard de la Croix-Rousse</ram:LineOne>
+                    <ram:CityName>Lyon</ram:CityName>
+                    <ram:CountryID>FR</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">321654987</ram:URIID>
+                </ram:URIUniversalCommunication>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">FR32165498765</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:BuyerTradeParty>
+        </ram:ApplicableHeaderTradeAgreement>
+
+        <ram:ApplicableHeaderTradeDelivery>
+            <ram:ActualDeliverySupplyChainEvent>
+                <ram:OccurrenceDateTime>
+                    <udt:DateTimeString format="102">20251120</udt:DateTimeString>
+                </ram:OccurrenceDateTime>
+            </ram:ActualDeliverySupplyChainEvent>
+        </ram:ApplicableHeaderTradeDelivery>
+
+        <ram:ApplicableHeaderTradeSettlement>
+            <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+            <ram:ApplicableTradeTax>
+                <ram:CalculatedAmount>1700.00</ram:CalculatedAmount>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:BasisAmount>8500.00</ram:BasisAmount>
+                <ram:CategoryCode>S</ram:CategoryCode>
+                <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            <ram:SpecifiedTradePaymentTerms>
+                <ram:Description>Remboursement sous 30 jours</ram:Description>
+                <ram:DueDateDateTime>
+                    <udt:DateTimeString format="102">20260104</udt:DateTimeString>
+                </ram:DueDateDateTime>
+            </ram:SpecifiedTradePaymentTerms>
+            <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+                <ram:LineTotalAmount>8500.00</ram:LineTotalAmount>
+                <ram:TaxBasisTotalAmount>8500.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">1700.00</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>10200.00</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>10200.00</ram:DuePayableAmount>
+            </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+            <!-- Référence à la facture d'origine -->
+            <ram:InvoiceReferencedDocument>
+                <ram:IssuerAssignedID>FA-2025-00256</ram:IssuerAssignedID>
+                <ram:FormattedIssueDateTime>
+                    <qdt:DateTimeString format="102">20251120</qdt:DateTimeString>
+                </ram:FormattedIssueDateTime>
+            </ram:InvoiceReferencedDocument>
+        </ram:ApplicableHeaderTradeSettlement>
+    </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

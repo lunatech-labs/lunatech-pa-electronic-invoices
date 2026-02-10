@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CDV Encaissée (212) — Phase Traitement (23), StatusCode=4, Issuer=SE, avec MEN (montant encaissé) -->
+<rsm:CrossDomainAcknowledgementAndResponse
+ xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+ xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+ xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+ xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossDomainAcknowledgementAndResponse:100"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+     <rsm:ExchangedDocumentContext>
+          <ram:BusinessProcessSpecifiedDocumentContextParameter>
+               <ram:ID>REGULATED</ram:ID>
+          </ram:BusinessProcessSpecifiedDocumentContextParameter>
+          <ram:GuidelineSpecifiedDocumentContextParameter>
+               <ram:ID>urn.cpro.gouv.fr:1p0:CDV:invoice</ram:ID>
+          </ram:GuidelineSpecifiedDocumentContextParameter>
+     </rsm:ExchangedDocumentContext>
+     <rsm:ExchangedDocument>
+          <ram:ID>F202500003_212_20250801100000#380_20250701</ram:ID>
+          <ram:Name>CDV-212_Encaissee_F202500003</ram:Name>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20250801100500</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:SenderTradeParty>
+               <ram:RoleCode>WK</ram:RoleCode>
+          </ram:SenderTradeParty>
+          <ram:IssuerTradeParty>
+               <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
+               <ram:Name>VENDEUR</ram:Name>
+               <ram:RoleCode>SE</ram:RoleCode>
+          </ram:IssuerTradeParty>
+          <ram:RecipientTradeParty>
+               <ram:GlobalID schemeID="0002">200000008</ram:GlobalID>
+               <ram:Name>ACHETEUR</ram:Name>
+               <ram:RoleCode>BY</ram:RoleCode>
+               <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">200000008</ram:URIID>
+               </ram:URIUniversalCommunication>
+          </ram:RecipientTradeParty>
+          <ram:RecipientTradeParty>
+               <ram:GlobalID schemeID="0238">9998</ram:GlobalID>
+               <ram:Name>PPF</ram:Name>
+               <ram:RoleCode>DFH</ram:RoleCode>
+          </ram:RecipientTradeParty>
+     </rsm:ExchangedDocument>
+     <rsm:AcknowledgementDocument>
+          <ram:MultipleReferencesIndicator>
+               <udt:Indicator>false</udt:Indicator>
+          </ram:MultipleReferencesIndicator>
+          <ram:TypeCode>23</ram:TypeCode>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20250801100000</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:ReferenceReferencedDocument>
+               <ram:IssuerAssignedID>F202500003</ram:IssuerAssignedID>
+               <ram:StatusCode>47</ram:StatusCode>
+               <ram:TypeCode>380</ram:TypeCode>
+               <ram:ReceiptDateTime>
+                    <udt:DateTimeString format="204">20250701151000</udt:DateTimeString>
+               </ram:ReceiptDateTime>
+               <ram:FormattedIssueDateTime>
+                    <qdt:DateTimeString format="102">20250701</qdt:DateTimeString>
+               </ram:FormattedIssueDateTime>
+               <ram:ProcessConditionCode>212</ram:ProcessConditionCode>
+               <ram:ProcessCondition>Encaissée</ram:ProcessCondition>
+               <ram:IssuerTradeParty>
+                    <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
+                    <ram:RoleCode>SE</ram:RoleCode>
+               </ram:IssuerTradeParty>
+               <ram:SpecifiedDocumentStatus>
+                    <ram:SpecifiedDocumentCharacteristic>
+                         <ram:TypeCode>MEN</ram:TypeCode>
+                         <ram:ValueChangedIndicator>
+                              <udt:IndicatorString>false</udt:IndicatorString>
+                         </ram:ValueChangedIndicator>
+                         <ram:ValueAmount currencyID="EUR">12000.00</ram:ValueAmount>
+                         <ram:ValuePercent>20.00</ram:ValuePercent>
+                    </ram:SpecifiedDocumentCharacteristic>
+               </ram:SpecifiedDocumentStatus>
+          </ram:ReferenceReferencedDocument>
+     </rsm:AcknowledgementDocument>
+</rsm:CrossDomainAcknowledgementAndResponse>

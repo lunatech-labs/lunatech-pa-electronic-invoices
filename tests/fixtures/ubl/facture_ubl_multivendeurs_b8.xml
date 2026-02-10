@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Facture UBL multi-vendeurs (cadre B8 - profil EXTENDED)
+     La plateforme (facturant II) émet une facture regroupant des prestations
+     de plusieurs vendeurs. Le vendeur principal est identifié en BG-4,
+     le facturant (II) est la plateforme qui centralise la facturation. -->
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>B8</cbc:ProfileID>
+    <cbc:ID>MV-2025-UBL-00100</cbc:ID>
+    <cbc:IssueDate>2025-12-20</cbc:IssueDate>
+    <cbc:DueDate>2026-01-03</cbc:DueDate>
+    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>DEVIS-RENO-2025-042</cbc:BuyerReference>
+
+    <cbc:Note>Facture multi-vendeurs émise par la plateforme ArtisanConnect pour le compte de ses artisans partenaires#AAB</cbc:Note>
+
+    <!-- Facturant (II) = Plateforme ArtisanConnect -->
+    <cac:InvoicerParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>ArtisanConnect SAS</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>ArtisanConnect SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">33344455566677</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR33344455566</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:InvoicerParty>
+
+    <!-- Vendeur principal = plombier -->
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>Plomberie Martin SARL</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Plomberie Martin SARL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">22233344455566</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>8 rue des Métiers</cbc:StreetName>
+                <cbc:PostalZone>69003</cbc:PostalZone>
+                <cbc:CityName>Lyon</cbc:CityName>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR22233344455</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <!-- Acheteur = propriétaire -->
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:PartyName>
+                <cbc:Name>SCI Les Tilleuls</cbc:Name>
+            </cac:PartyName>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>SCI Les Tilleuls</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">77788899900011</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:PostalAddress>
+                <cbc:StreetName>15 allée des Tilleuls</cbc:StreetName>
+                <cbc:PostalZone>69006</cbc:PostalZone>
+                <cbc:CityName>Lyon</cbc:CityName>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR77788899900</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <cac:Delivery>
+        <cbc:ActualDeliveryDate>2025-12-18</cbc:ActualDeliveryDate>
+    </cac:Delivery>
+
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7620041010051234567890154</cbc:ID>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <cac:PaymentTerms>
+        <cbc:Note>Paiement à réception</cbc:Note>
+    </cac:PaymentTerms>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">246.00</cbc:TaxAmount>
+        <!-- TVA 10% sur travaux -->
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">2050.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">205.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>10.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+        <!-- TVA 20% sur commission -->
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">205.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">41.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">2255.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">2255.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">2501.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">2501.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <!-- Ligne 1 : Prestation du vendeur principal (plombier) -->
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">850.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Intervention plomberie - Remplacement chauffe-eau</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>PLOMB-CE-001</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>10.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">850.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+
+    <!-- Ligne 2 : Prestation du vendeur secondaire (électricien) -->
+    <cac:InvoiceLine>
+        <cbc:ID>2</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">1200.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Mise aux normes tableau électrique</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>ELEC-TAB-002</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>10.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">1200.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+
+    <!-- Ligne 3 : Commission plateforme (TVA 20%) -->
+    <cac:InvoiceLine>
+        <cbc:ID>3</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">205.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Commission plateforme ArtisanConnect</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>COM-PLATFORM</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">205.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

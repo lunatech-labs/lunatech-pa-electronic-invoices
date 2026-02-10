@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CDV Émise (201) — Phase Transmission (305), Sender=WK -->
+<rsm:CrossDomainAcknowledgementAndResponse
+ xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+ xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+ xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+ xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossDomainAcknowledgementAndResponse:100"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+     <rsm:ExchangedDocumentContext>
+          <ram:BusinessProcessSpecifiedDocumentContextParameter>
+               <ram:ID>REGULATED</ram:ID>
+          </ram:BusinessProcessSpecifiedDocumentContextParameter>
+          <ram:GuidelineSpecifiedDocumentContextParameter>
+               <ram:ID>urn.cpro.gouv.fr:1p0:CDV:invoice</ram:ID>
+          </ram:GuidelineSpecifiedDocumentContextParameter>
+     </rsm:ExchangedDocumentContext>
+     <rsm:ExchangedDocument>
+          <ram:ID>FA-2025-00142_201_20251115143000#380_20251115</ram:ID>
+          <ram:Name>CDV-201_Emise_FA-2025-00142</ram:Name>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20251115143000</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:SenderTradeParty>
+               <ram:GlobalID schemeID="0002">PDP-TECHCONSEIL-001</ram:GlobalID>
+               <ram:Name>TechConseil PDP</ram:Name>
+               <ram:RoleCode>WK</ram:RoleCode>
+          </ram:SenderTradeParty>
+          <ram:IssuerTradeParty>
+               <ram:RoleCode>WK</ram:RoleCode>
+          </ram:IssuerTradeParty>
+          <ram:RecipientTradeParty>
+               <ram:GlobalID schemeID="0002">12345678901234</ram:GlobalID>
+               <ram:Name>TechConseil SAS</ram:Name>
+               <ram:RoleCode>SE</ram:RoleCode>
+               <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">12345678901234_STATUTS</ram:URIID>
+               </ram:URIUniversalCommunication>
+          </ram:RecipientTradeParty>
+     </rsm:ExchangedDocument>
+     <rsm:AcknowledgementDocument>
+          <ram:MultipleReferencesIndicator>
+               <udt:Indicator>false</udt:Indicator>
+          </ram:MultipleReferencesIndicator>
+          <ram:TypeCode>305</ram:TypeCode>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20251115143000</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:ReferenceReferencedDocument>
+               <ram:IssuerAssignedID>FA-2025-00142</ram:IssuerAssignedID>
+               <ram:StatusCode>10</ram:StatusCode>
+               <ram:TypeCode>380</ram:TypeCode>
+               <ram:ReceiptDateTime>
+                    <udt:DateTimeString format="204">20251115143000</udt:DateTimeString>
+               </ram:ReceiptDateTime>
+               <ram:FormattedIssueDateTime>
+                    <qdt:DateTimeString format="102">20251115</qdt:DateTimeString>
+               </ram:FormattedIssueDateTime>
+               <ram:ProcessConditionCode>201</ram:ProcessConditionCode>
+               <ram:ProcessCondition>Émise</ram:ProcessCondition>
+               <ram:IssuerTradeParty>
+                    <ram:GlobalID schemeID="0002">12345678901234</ram:GlobalID>
+                    <ram:RoleCode>SE</ram:RoleCode>
+               </ram:IssuerTradeParty>
+          </ram:ReferenceReferencedDocument>
+     </rsm:AcknowledgementDocument>
+</rsm:CrossDomainAcknowledgementAndResponse>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CDV Transmise PDP (301) — Phase Transmission (305), StatusCode=10 -->
+<rsm:CrossDomainAcknowledgementAndResponse
+ xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+ xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+ xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+ xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossDomainAcknowledgementAndResponse:100"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+     <rsm:ExchangedDocumentContext>
+          <ram:BusinessProcessSpecifiedDocumentContextParameter>
+               <ram:ID>REGULATED</ram:ID>
+          </ram:BusinessProcessSpecifiedDocumentContextParameter>
+          <ram:GuidelineSpecifiedDocumentContextParameter>
+               <ram:ID>urn.cpro.gouv.fr:1p0:CDV:invoice</ram:ID>
+          </ram:GuidelineSpecifiedDocumentContextParameter>
+     </rsm:ExchangedDocumentContext>
+     <rsm:ExchangedDocument>
+          <ram:ID>F202500001_301_20250701152500#380_20250701</ram:ID>
+          <ram:Name>CDV-301_Transmise_PDP_F202500001</ram:Name>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20250701153000</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:SenderTradeParty>
+               <ram:RoleCode>WK</ram:RoleCode>
+          </ram:SenderTradeParty>
+          <ram:IssuerTradeParty>
+               <ram:RoleCode>WK</ram:RoleCode>
+          </ram:IssuerTradeParty>
+          <ram:RecipientTradeParty>
+               <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
+               <ram:Name>VENDEUR</ram:Name>
+               <ram:RoleCode>SE</ram:RoleCode>
+               <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">100000009_STATUTS</ram:URIID>
+               </ram:URIUniversalCommunication>
+          </ram:RecipientTradeParty>
+     </rsm:ExchangedDocument>
+     <rsm:AcknowledgementDocument>
+          <ram:MultipleReferencesIndicator>
+               <udt:Indicator>false</udt:Indicator>
+          </ram:MultipleReferencesIndicator>
+          <ram:TypeCode>305</ram:TypeCode>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20250701152500</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:ReferenceReferencedDocument>
+               <ram:IssuerAssignedID>F202500001</ram:IssuerAssignedID>
+               <ram:StatusCode>10</ram:StatusCode>
+               <ram:TypeCode>380</ram:TypeCode>
+               <ram:ReceiptDateTime>
+                    <udt:DateTimeString format="204">20250701151000</udt:DateTimeString>
+               </ram:ReceiptDateTime>
+               <ram:FormattedIssueDateTime>
+                    <qdt:DateTimeString format="102">20250701</qdt:DateTimeString>
+               </ram:FormattedIssueDateTime>
+               <ram:ProcessConditionCode>301</ram:ProcessConditionCode>
+               <ram:ProcessCondition>Transmise_PDP</ram:ProcessCondition>
+               <ram:IssuerTradeParty>
+                    <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
+                    <ram:RoleCode>SE</ram:RoleCode>
+               </ram:IssuerTradeParty>
+          </ram:ReferenceReferencedDocument>
+     </rsm:AcknowledgementDocument>
+</rsm:CrossDomainAcknowledgementAndResponse>

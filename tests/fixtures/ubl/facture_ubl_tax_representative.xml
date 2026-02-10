@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Facture UBL avec représentant fiscal (BG-11) — Vendeur étranger avec rep. fiscal FR -->
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>A2</cbc:ProfileID>
+    <cbc:ID>FA-2025-DE-0088</cbc:ID>
+    <cbc:IssueDate>2025-12-01</cbc:IssueDate>
+    <cbc:DueDate>2025-12-31</cbc:DueDate>
+    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+    <cbc:Note>Facture émise par un fournisseur allemand avec représentant fiscal en France</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>BC-2025-INT-042</cbc:BuyerReference>
+
+    <!-- Pièce jointe (BG-24) -->
+    <cac:AdditionalDocumentReference>
+        <cbc:ID>ATT-001</cbc:ID>
+        <cbc:DocumentDescription>Bon de livraison signé</cbc:DocumentDescription>
+        <cac:Attachment>
+            <cac:ExternalReference>
+                <cbc:URI>https://docs.example.com/bl/BL-2025-DE-0088.pdf</cbc:URI>
+            </cac:ExternalReference>
+        </cac:Attachment>
+    </cac:AdditionalDocumentReference>
+
+    <!-- Vendeur allemand -->
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cbc:EndpointID schemeID="0204">DE123456789</cbc:EndpointID>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0088">4012345000010</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>Maschinenbau GmbH</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>Industriestraße 42</cbc:StreetName>
+                <cbc:CityName>Stuttgart</cbc:CityName>
+                <cbc:PostalZone>70173</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>DE</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>DE123456789</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Maschinenbau GmbH</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0204">HRB 12345</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <!-- Acheteur français -->
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cbc:EndpointID schemeID="0225">98765432109876</cbc:EndpointID>
+            <cac:PartyName>
+                <cbc:Name>IndustrieFrance SA</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>42 Avenue des Champs-Élysées</cbc:StreetName>
+                <cbc:CityName>Paris</cbc:CityName>
+                <cbc:PostalZone>75008</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR98765432109</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>IndustrieFrance SA</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">98765432109876</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <!-- Représentant fiscal en France (BG-11) -->
+    <cac:TaxRepresentativeParty>
+        <cac:PartyName>
+            <cbc:Name>Cabinet Fiscal International SARL</cbc:Name>
+        </cac:PartyName>
+        <cac:PostalAddress>
+            <cbc:StreetName>25 Rue du Faubourg Saint-Honoré</cbc:StreetName>
+            <cbc:CityName>Paris</cbc:CityName>
+            <cbc:PostalZone>75008</cbc:PostalZone>
+            <cac:Country>
+                <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+            </cac:Country>
+        </cac:PostalAddress>
+        <cac:PartyTaxScheme>
+            <cbc:CompanyID>FR55667788990</cbc:CompanyID>
+            <cac:TaxScheme>
+                <cbc:ID>VAT</cbc:ID>
+            </cac:TaxScheme>
+        </cac:PartyTaxScheme>
+    </cac:TaxRepresentativeParty>
+
+    <cac:Delivery>
+        <cbc:ActualDeliveryDate>2025-11-28</cbc:ActualDeliveryDate>
+        <cac:DeliveryLocation>
+            <cac:Address>
+                <cbc:StreetName>Zone Industrielle de Roissy</cbc:StreetName>
+                <cbc:CityName>Roissy-en-France</cbc:CityName>
+                <cbc:PostalZone>95700</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:Address>
+        </cac:DeliveryLocation>
+    </cac:Delivery>
+
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>DE89370400440532013000</cbc:ID>
+            <cac:FinancialInstitutionBranch>
+                <cbc:ID>COBADEFFXXX</cbc:ID>
+            </cac:FinancialInstitutionBranch>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">5000.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">25000.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">5000.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">25000.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">25000.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">30000.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">30000.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">25000.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Machine-outil CNC 5 axes, modèle DMG MORI CMX 50U</cbc:Description>
+            <cbc:Name>Centre d'usinage CNC 5 axes</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>CMX50U-2025</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">25000.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

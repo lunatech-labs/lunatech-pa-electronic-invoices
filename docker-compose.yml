@@ -1,0 +1,154 @@
+# =============================================================================
+# PDP Facture - Docker Compose
+# =============================================================================
+
+services:
+  # Elasticsearch - traçabilité + archivage (un index par SIREN)
+  elasticsearch:
+    image: elasticsearch:8.15.0
+    container_name: pdp-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\\|yellow\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Kibana - visualisation (optionnel, pour debug/monitoring)
+  kibana:
+    image: kibana:8.15.0
+    container_name: pdp-kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+  # PDP principal - traitement des factures
+  pdp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdp-facture
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - ./data/in:/app/data/in
+      - ./data/out:/app/data/out
+      - ./config.yaml:/app/config.yaml:ro
+      - peppol-inbound:/app/peppol/inbox:ro     # Messages reçus (Oxalis → PDP)
+      - peppol-outbound:/app/peppol/outbox      # Messages à envoyer (PDP → Oxalis)
+    environment:
+      - RUST_LOG=info
+      - PDP_SPECS_DIR=/app/specs
+      - PDP_CONFIG=/app/config.yaml
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - PEPPOL_INBOX=/app/peppol/inbox
+      - PEPPOL_OUTBOX=/app/peppol/outbox
+    restart: unless-stopped
+    command: ["start"]
+
+  # Exécution unique (one-shot) des routes
+  pdp-run:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdp-run
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - ./data/in:/app/data/in
+      - ./data/out:/app/data/out
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - RUST_LOG=info
+      - PDP_SPECS_DIR=/app/specs
+      - PDP_CONFIG=/app/config.yaml
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    command: ["run"]
+    profiles:
+      - run
+
+  # Tests dans Docker
+  pdp-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: pdp-test
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=debug
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    profiles:
+      - test
+
+  # =========================================================================
+  # PEPPOL — Gateway AS4 (Oxalis)
+  # =========================================================================
+
+  # Oxalis AS4 — notre Access Point PEPPOL (envoi et réception)
+  oxalis:
+    image: norstella/oxalis-as4:7.2.0-latest
+    container_name: pdp-oxalis
+    ports:
+      - "8080:8080"       # HTTP (Tomcat)
+      - "8443:8443"       # HTTPS (AS4)
+    volumes:
+      - ./docker/oxalis/oxalis.conf:/oxalis/conf/oxalis.conf:ro
+      - ./docker/oxalis/logback.xml:/oxalis/conf/logback.xml:ro
+      - peppol-inbound:/oxalis/inbound          # Messages reçus par Oxalis
+      - peppol-outbound:/oxalis/outbound        # Messages à envoyer par Oxalis
+    environment:
+      - OXALIS_HOME=/oxalis/conf
+      - JAVA_OPTS=-Xms256m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:8080/oxalis/status || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    profiles:
+      - peppol
+    restart: unless-stopped
+
+  # Oxalis AS4 — simule une PDP distante (pour les tests inter-PDP)
+  oxalis-remote:
+    image: norstella/oxalis-as4:7.2.0-latest
+    container_name: pdp-oxalis-remote
+    ports:
+      - "8081:8080"
+      - "8444:8443"
+    volumes:
+      - ./docker/oxalis/oxalis.conf:/oxalis/conf/oxalis.conf:ro
+      - ./docker/oxalis/logback.xml:/oxalis/conf/logback.xml:ro
+      - peppol-remote-inbound:/oxalis/inbound
+    environment:
+      - OXALIS_HOME=/oxalis/conf
+      - JAVA_OPTS=-Xms256m -Xmx512m
+    profiles:
+      - peppol
+    restart: unless-stopped
+
+volumes:
+  esdata:
+  peppol-inbound:       # Messages PEPPOL reçus (Oxalis → PDP)
+  peppol-outbound:      # Messages PEPPOL à envoyer (PDP → Oxalis)
+  peppol-remote-inbound:  # Messages reçus par la PDP distante simulée

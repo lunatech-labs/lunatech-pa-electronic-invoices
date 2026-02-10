@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Auto-facture UBL (TypeCode 389) — Cadre A9 : l'acheteur émet pour le compte du vendeur -->
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>A9</cbc:ProfileID>
+    <cbc:ID>AF-2025-00015</cbc:ID>
+    <cbc:IssueDate>2025-12-05</cbc:IssueDate>
+    <cbc:DueDate>2026-01-05</cbc:DueDate>
+    <cbc:InvoiceTypeCode>389</cbc:InvoiceTypeCode>
+    <cbc:Note>#AAK Auto-facture émise par l'acheteur conformément à l'accord d'auto-facturation</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>CONTRAT-AF-2025-UBL</cbc:BuyerReference>
+
+    <cac:ContractDocumentReference>
+        <cbc:ID>CONTRAT-AF-2025-UBL</cbc:ID>
+    </cac:ContractDocumentReference>
+
+    <!-- Vendeur = le fournisseur (celui qui reçoit le paiement) -->
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cbc:EndpointID schemeID="0225">51234567800019</cbc:EndpointID>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0088">3012345678901</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>Ferme Bio du Vercors</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>Lieu-dit Les Granges</cbc:StreetName>
+                <cbc:CityName>Villard-de-Lans</cbc:CityName>
+                <cbc:PostalZone>38250</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR51234567800</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Ferme Bio du Vercors EARL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">51234567800019</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <!-- Acheteur = la laiterie (celui qui émet l'auto-facture) -->
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cbc:EndpointID schemeID="0225">98765432100028</cbc:EndpointID>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0088">3098765432109</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>Laiterie des Alpes</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>Zone Industrielle Nord</cbc:StreetName>
+                <cbc:AdditionalStreetName>12 Rue des Laitiers</cbc:AdditionalStreetName>
+                <cbc:CityName>Grenoble</cbc:CityName>
+                <cbc:PostalZone>38000</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR98765432100</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Laiterie des Alpes SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">98765432100028</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <cac:Delivery>
+        <cbc:ActualDeliveryDate>2025-11-30</cbc:ActualDeliveryDate>
+    </cac:Delivery>
+
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7630006000011234567890189</cbc:ID>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <cac:PaymentTerms>
+        <cbc:Note>Paiement à 30 jours</cbc:Note>
+    </cac:PaymentTerms>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">858.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">15600.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">858.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>5.50</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">15600.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">15600.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">16458.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">16458.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="LTR">5000</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">14000.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Lait biologique entier, bidon de 5 litres, origine France</cbc:Description>
+            <cbc:Name>Lait bio 5L</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>LAIT-BIO-5L</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:StandardItemIdentification>
+                <cbc:ID schemeID="0160">3456789012345</cbc:ID>
+            </cac:StandardItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>5.50</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">2.80</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+
+    <cac:InvoiceLine>
+        <cbc:ID>2</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">500</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">1600.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Name>Beurre bio 250g</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>BEURRE-BIO-250</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>5.50</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">3.20</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

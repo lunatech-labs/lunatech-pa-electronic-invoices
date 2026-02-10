@@ -1,0 +1,31 @@
+[package]
+name = "pdp-transform"
+description = "Invoice format transformations: UBL <-> CII <-> Factur-X"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdp-core = { path = "../pdp-core" }
+pdp-invoice = { path = "../pdp-invoice" }
+pdp-validate = { path = "../pdp-validate" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+quick-xml = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+lopdf = { workspace = true }
+
+[features]
+saxonc_ffi = []
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "transform_bench"
+harness = false

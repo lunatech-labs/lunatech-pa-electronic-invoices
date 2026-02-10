@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CDV Prise en charge (204) — Phase Traitement (23), StatusCode=4, Issuer=BY -->
+<rsm:CrossDomainAcknowledgementAndResponse
+ xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
+ xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+ xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+ xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossDomainAcknowledgementAndResponse:100"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+     <rsm:ExchangedDocumentContext>
+          <ram:BusinessProcessSpecifiedDocumentContextParameter>
+               <ram:ID>REGULATED</ram:ID>
+          </ram:BusinessProcessSpecifiedDocumentContextParameter>
+          <ram:GuidelineSpecifiedDocumentContextParameter>
+               <ram:ID>urn.cpro.gouv.fr:1p0:CDV:invoice</ram:ID>
+          </ram:GuidelineSpecifiedDocumentContextParameter>
+     </rsm:ExchangedDocumentContext>
+     <rsm:ExchangedDocument>
+          <ram:ID>FA-2025-00142_204_20251116090000#380_20251115</ram:ID>
+          <ram:Name>CDV-204_Prise_en_charge_FA-2025-00142</ram:Name>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20251116090000</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:SenderTradeParty>
+               <ram:RoleCode>WK</ram:RoleCode>
+          </ram:SenderTradeParty>
+          <ram:IssuerTradeParty>
+               <ram:GlobalID schemeID="0002">987654321</ram:GlobalID>
+               <ram:Name>AcmeCorp SARL</ram:Name>
+               <ram:RoleCode>BY</ram:RoleCode>
+          </ram:IssuerTradeParty>
+          <ram:RecipientTradeParty>
+               <ram:GlobalID schemeID="0002">123456789</ram:GlobalID>
+               <ram:Name>TechConseil SAS</ram:Name>
+               <ram:RoleCode>SE</ram:RoleCode>
+               <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">123456789_STATUTS</ram:URIID>
+               </ram:URIUniversalCommunication>
+          </ram:RecipientTradeParty>
+     </rsm:ExchangedDocument>
+     <rsm:AcknowledgementDocument>
+          <ram:MultipleReferencesIndicator>
+               <udt:Indicator>false</udt:Indicator>
+          </ram:MultipleReferencesIndicator>
+          <ram:TypeCode>23</ram:TypeCode>
+          <ram:IssueDateTime>
+               <udt:DateTimeString format="204">20251116090000</udt:DateTimeString>
+          </ram:IssueDateTime>
+          <ram:ReferenceReferencedDocument>
+               <ram:IssuerAssignedID>FA-2025-00142</ram:IssuerAssignedID>
+               <ram:StatusCode>4</ram:StatusCode>
+               <ram:TypeCode>380</ram:TypeCode>
+               <ram:ReceiptDateTime>
+                    <udt:DateTimeString format="204">20251115142233</udt:DateTimeString>
+               </ram:ReceiptDateTime>
+               <ram:FormattedIssueDateTime>
+                    <qdt:DateTimeString format="102">20251115</qdt:DateTimeString>
+               </ram:FormattedIssueDateTime>
+               <ram:ProcessConditionCode>204</ram:ProcessConditionCode>
+               <ram:ProcessCondition>Prise_en_charge</ram:ProcessCondition>
+               <ram:IssuerTradeParty>
+                    <ram:GlobalID schemeID="0002">123456789</ram:GlobalID>
+                    <ram:RoleCode>SE</ram:RoleCode>
+               </ram:IssuerTradeParty>
+          </ram:ReferenceReferencedDocument>
+     </rsm:AcknowledgementDocument>
+</rsm:CrossDomainAcknowledgementAndResponse>
