@@ -329,4 +329,81 @@ mod tests {
         // Should fail in strict mode
         assert!(result.is_err());
     }
+
+    // ===== Tests de rejet Schematron : fixtures invalides =====
+
+    /// Helper : valide un fichier en mode lenient et retourne (is_valid, issues_json)
+    async fn validate_fixture(path: &str) -> (bool, String) {
+        let specs = specs_dir();
+        // Mode lenient : les erreurs ne bloquent pas, on récupère les issues
+        let processor = XmlValidateProcessor::with_options(&specs, true, true, true, false);
+        let xml = std::fs::read(path).unwrap_or_else(|_| panic!("Fixture introuvable : {}", path));
+        let exchange = Exchange::new(xml);
+        let ex = processor.process(exchange).await
+            .expect("Le processeur en mode lenient ne doit pas échouer");
+        let issues = ex.get_property("validation.xml.issues")
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let has_fatal = issues.contains("\"Fatal\"") || issues.contains("\"Error\"");
+        (!has_fatal, issues)
+    }
+
+    #[tokio::test]
+    async fn test_schematron_reject_cii_sans_endpoint() {
+        let (valid, issues) = validate_fixture(
+            "../../tests/fixtures/errors/cii_sans_endpoint.xml"
+        ).await;
+        // BR-FR-12/13 promus en fatal => doit être invalide
+        // Note : le XSD F1BASE peut aussi rejeter avant le Schematron
+        assert!(!valid, "CII sans endpoint doit être rejeté. Issues: {}", issues);
+    }
+
+    #[tokio::test]
+    async fn test_schematron_reject_ubl_sans_endpoint() {
+        let (valid, issues) = validate_fixture(
+            "../../tests/fixtures/errors/ubl_sans_endpoint.xml"
+        ).await;
+        // Note : le XSD F1BASE peut aussi rejeter avant le Schematron
+        assert!(!valid, "UBL sans endpoint doit être rejeté. Issues: {}", issues);
+    }
+
+    #[tokio::test]
+    async fn test_schematron_reject_cii_id_trop_long() {
+        let (valid, issues) = validate_fixture(
+            "../../tests/fixtures/errors/cii_id_trop_long.xml"
+        ).await;
+        assert!(!valid, "CII avec ID > 35 chars doit être rejeté (BR-FR-01). Issues: {}", issues);
+    }
+
+    #[tokio::test]
+    async fn test_schematron_reject_ubl_id_trop_long() {
+        let (valid, issues) = validate_fixture(
+            "../../tests/fixtures/errors/ubl_id_trop_long.xml"
+        ).await;
+        assert!(!valid, "UBL avec ID > 35 chars doit être rejeté (BR-FR-01). Issues: {}", issues);
+    }
+
+    #[tokio::test]
+    async fn test_schematron_reject_cii_sans_acheteur() {
+        let (valid, issues) = validate_fixture(
+            "../../tests/fixtures/errors/cii_sans_acheteur.xml"
+        ).await;
+        assert!(!valid, "CII sans acheteur doit être rejeté. Issues: {}", issues);
+    }
+
+    #[tokio::test]
+    async fn test_schematron_reject_ubl_sans_acheteur() {
+        let (valid, issues) = validate_fixture(
+            "../../tests/fixtures/errors/ubl_sans_acheteur.xml"
+        ).await;
+        assert!(!valid, "UBL sans acheteur doit être rejeté. Issues: {}", issues);
+    }
+
+    #[tokio::test]
+    async fn test_schematron_reject_cii_type_invalide() {
+        let (valid, issues) = validate_fixture(
+            "../../tests/fixtures/errors/cii_type_invalide.xml"
+        ).await;
+        assert!(!valid, "CII avec TypeCode 999 doit être rejeté (BR-FR-04). Issues: {}", issues);
+    }
 }

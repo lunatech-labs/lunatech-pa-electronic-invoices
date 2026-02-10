@@ -102,7 +102,41 @@ impl InvoiceValidator {
             }
         }
 
-        let is_valid = report.is_valid();
+        // Vérifications BR-FR complémentaires (non couvertes par tous les Schematrons)
+        // BR-FR-01 : ID facture ≤ 35 caractères
+        if invoice.invoice_number.len() > 35 {
+            errors.push(ValidationIssue {
+                rule_id: "BR-FR-01".to_string(),
+                severity: Severity::Fatal,
+                field: "invoice_number".to_string(),
+                message: format!(
+                    "BR-FR-01 : Le numéro de facture (BT-1) ne doit pas dépasser 35 caractères (actuel : {})",
+                    invoice.invoice_number.len()
+                ),
+            });
+        }
+
+        // BR-FR-04 : types de facture autorisés
+        const VALID_TYPE_CODES: &[&str] = &[
+            "380", "389", "393", "501", "386", "500", "384", "471", "472", "473",
+            "261", "262", "381", "396", "502", "503",
+        ];
+        if let Some(ref tc) = invoice.invoice_type_code {
+            if !VALID_TYPE_CODES.contains(&tc.as_str()) {
+                errors.push(ValidationIssue {
+                    rule_id: "BR-FR-04".to_string(),
+                    severity: Severity::Fatal,
+                    field: "invoice_type_code".to_string(),
+                    message: format!(
+                        "BR-FR-04 : Le type de facture '{}' n'est pas autorisé. Types valides : {:?}",
+                        tc, VALID_TYPE_CODES
+                    ),
+                });
+            }
+        }
+
+        let has_fatal = errors.iter().any(|e| e.severity == Severity::Fatal || e.severity == Severity::Error);
+        let is_valid = report.is_valid() && !has_fatal;
 
         tracing::info!(
             invoice = %invoice.invoice_number,
@@ -132,6 +166,38 @@ impl InvoiceValidator {
                 field: "invoice_number".to_string(),
                 message: "Le numéro de facture (BT-1) est obligatoire".to_string(),
             });
+        }
+
+        // BR-FR-01 : ID facture ≤ 35 caractères
+        if invoice.invoice_number.len() > 35 {
+            errors.push(ValidationIssue {
+                rule_id: "BR-FR-01".to_string(),
+                severity: Severity::Fatal,
+                field: "invoice_number".to_string(),
+                message: format!(
+                    "BR-FR-01 : Le numéro de facture (BT-1) ne doit pas dépasser 35 caractères (actuel : {})",
+                    invoice.invoice_number.len()
+                ),
+            });
+        }
+
+        // BR-FR-04 : types de facture autorisés
+        const VALID_TYPE_CODES: &[&str] = &[
+            "380", "389", "393", "501", "386", "500", "384", "471", "472", "473",
+            "261", "262", "381", "396", "502", "503",
+        ];
+        if let Some(ref tc) = invoice.invoice_type_code {
+            if !VALID_TYPE_CODES.contains(&tc.as_str()) {
+                errors.push(ValidationIssue {
+                    rule_id: "BR-FR-04".to_string(),
+                    severity: Severity::Fatal,
+                    field: "invoice_type_code".to_string(),
+                    message: format!(
+                        "BR-FR-04 : Le type de facture '{}' n'est pas autorisé. Types valides : {:?}",
+                        tc, VALID_TYPE_CODES
+                    ),
+                });
+            }
         }
 
         if invoice.issue_date.is_none() {
@@ -554,5 +620,97 @@ mod tests {
         assert!(result.is_valid, "Multi-vendeurs B8 UBL devrait être valide: {:?}", result.errors);
         assert_eq!(invoice.business_process.as_deref(), Some("B8"));
         assert!(invoice.invoicer_name.is_some(), "Le facturant (II) doit être renseigné");
+    }
+
+    // ===== Tests de rejet : fixtures invalides =====
+
+    #[test]
+    fn test_reject_cii_sans_endpoint() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/cii_sans_endpoint.xml")
+            .expect("Fixture CII sans endpoint introuvable");
+        let invoice = crate::cii::CiiParser::new().parse(&xml).unwrap();
+        assert!(invoice.seller_endpoint_id.is_none(), "seller_endpoint_id doit être absent");
+        assert!(invoice.buyer_endpoint_id.is_none(), "buyer_endpoint_id doit être absent");
+    }
+
+    #[test]
+    fn test_reject_ubl_sans_endpoint() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/ubl_sans_endpoint.xml")
+            .expect("Fixture UBL sans endpoint introuvable");
+        let invoice = crate::ubl::UblParser::new().parse(&xml).unwrap();
+        assert!(invoice.seller_endpoint_id.is_none(), "seller_endpoint_id doit être absent");
+        assert!(invoice.buyer_endpoint_id.is_none(), "buyer_endpoint_id doit être absent");
+    }
+
+    #[test]
+    fn test_reject_cii_id_trop_long() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/cii_id_trop_long.xml")
+            .expect("Fixture CII ID trop long introuvable");
+        let invoice = crate::cii::CiiParser::new().parse(&xml).unwrap();
+        assert!(invoice.invoice_number.len() > 35, "L'ID doit dépasser 35 caractères");
+
+        let validator = InvoiceValidator::new();
+        let result = validator.validate(&invoice);
+        assert!(!result.is_valid, "BR-FR-01 : ID > 35 chars doit être rejeté");
+        let has_br_fr_01 = result.errors.iter().any(|e| {
+            e.rule_id.contains("BR-FR-01") || e.message.contains("35")
+        });
+        assert!(has_br_fr_01, "Doit contenir une erreur BR-FR-01 : {:?}", result.errors);
+    }
+
+    #[test]
+    fn test_reject_ubl_id_trop_long() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/ubl_id_trop_long.xml")
+            .expect("Fixture UBL ID trop long introuvable");
+        let invoice = crate::ubl::UblParser::new().parse(&xml).unwrap();
+        assert!(invoice.invoice_number.len() > 35, "L'ID doit dépasser 35 caractères");
+
+        let validator = InvoiceValidator::new();
+        let result = validator.validate(&invoice);
+        assert!(!result.is_valid, "BR-FR-01 : ID > 35 chars doit être rejeté");
+        let has_br_fr_01 = result.errors.iter().any(|e| {
+            e.rule_id.contains("BR-FR-01") || e.message.contains("35")
+        });
+        assert!(has_br_fr_01, "Doit contenir une erreur BR-FR-01 : {:?}", result.errors);
+    }
+
+    #[test]
+    fn test_reject_cii_sans_acheteur() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/cii_sans_acheteur.xml")
+            .expect("Fixture CII sans acheteur introuvable");
+        let invoice = crate::cii::CiiParser::new().parse(&xml).unwrap();
+        assert!(invoice.buyer_name.is_none(), "buyer_name doit être absent");
+
+        let validator = InvoiceValidator::new();
+        let result = validator.validate(&invoice);
+        assert!(!result.is_valid, "Facture sans acheteur doit être rejetée");
+    }
+
+    #[test]
+    fn test_reject_ubl_sans_acheteur() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/ubl_sans_acheteur.xml")
+            .expect("Fixture UBL sans acheteur introuvable");
+        let invoice = crate::ubl::UblParser::new().parse(&xml).unwrap();
+        assert!(invoice.buyer_name.is_none(), "buyer_name doit être absent");
+
+        let validator = InvoiceValidator::new();
+        let result = validator.validate(&invoice);
+        assert!(!result.is_valid, "Facture sans acheteur doit être rejetée");
+    }
+
+    #[test]
+    fn test_reject_cii_type_invalide() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/cii_type_invalide.xml")
+            .expect("Fixture CII type invalide introuvable");
+        let invoice = crate::cii::CiiParser::new().parse(&xml).unwrap();
+        assert_eq!(invoice.invoice_type_code.as_deref(), Some("999"));
+
+        let validator = InvoiceValidator::new();
+        let result = validator.validate(&invoice);
+        assert!(!result.is_valid, "TypeCode 999 doit être rejeté (BR-FR-04)");
+        let has_type_error = result.errors.iter().any(|e| {
+            e.rule_id.contains("BR-FR-04") || e.message.contains("type") || e.message.contains("999")
+        });
+        assert!(has_type_error, "Doit contenir une erreur de type : {:?}", result.errors);
     }
 }
