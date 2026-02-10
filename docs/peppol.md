@@ -477,8 +477,31 @@ PDP_A (émetteur)                          PDP_B (destinataire)
 
 Vérifications effectuées :
 - SBDH contient les bons sender/receiver (SIREN)
-- SBDH contient les scopes DOCUMENTID et PROCESSID
+- SBDH contient les scopes DOCUMENTID, PROCESSID et COUNTRY_C1
 - Le payload (facture UBL ou CDAR) est transmis intact
 - `PeppolReceiveProcessor` détecte le bon type de document
 - Le statut passe à `FlowStatus::Received`
 - L'acquittement supprime le message de l'inbox
+
+### Benchmark AS4
+
+Performances mesurées en local (Docker, même machine) avec `oxalis-standalone` 7.2.0 :
+
+| Mode | Durée (10 msg) | Moy/msg | Débit |
+|------|----------------|---------|-------|
+| **Séquentiel** (1 JVM par envoi) | 17.5s | 1752ms | 0.5 msg/s |
+| **Parallèle** (`--repeat`, 1 JVM) | 2.2s | 991ms | **10 msg/s** |
+| **Concurrent** (10 JVM shell) | 54.8s | 5481ms | 0.1 msg/s |
+
+- **Facture** : 7 KB (UBL), 8.4 KB avec enveloppe SBDH
+- **Transport** : AS4 signé (WS-Security XML-DSIG) via HTTP
+- **Persistance** : fichier XML dans `/oxalis/inbound/` du récepteur
+
+Le mode **parallèle** (pool de threads interne Oxalis) est optimal : **~1s par message, 10 msg/s**.
+Le séquentiel est pénalisé par le démarrage JVM (~650ms) à chaque invocation.
+Le concurrent shell est le pire car 10 JVM lourdes saturent le CPU.
+
+```bash
+# Exécuter le benchmark (N = nombre de messages, défaut 10)
+bash ./docker/bench-as4.sh 10
+```
