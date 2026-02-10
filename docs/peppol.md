@@ -314,7 +314,7 @@ Le projet inclut un setup Docker Compose avec Oxalis pour tester les échanges P
 docker compose --profile peppol up -d
 
 # Vérifier le statut
-curl http://localhost:8080/oxalis/status
+curl http://localhost:8080/status
 
 # Tout démarrer (ES + PDP + Oxalis)
 docker compose --profile peppol up -d elasticsearch pdp oxalis
@@ -340,6 +340,8 @@ Voir [docs/docker.md](docker.md) pour plus de détails.
 
 ## Tests
 
+### Tests unitaires
+
 51 tests (49 unit + 2 doc-tests) couvrant :
 
 - **model** (12) : ParticipantId, DocumentTypeId, ProcessId, PeppolMessage, PeppolConfig
@@ -353,3 +355,64 @@ Voir [docs/docker.md](docker.md) pour plus de détails.
 ```bash
 cargo test -p pdp-peppol
 ```
+
+### Tests d'intégration PEPPOL (inter-PDP)
+
+5 tests d'intégration simulant l'envoi d'une facture entre deux PDP via le réseau PEPPOL :
+
+| Test | Description |
+|------|-------------|
+| `test_envoi_facture_pdp_a_vers_pdp_b_filesystem` | Roundtrip complet : charge une facture UBL → `PeppolMessage` → SBDH → `FilesystemGateway` outbox → inbox → `PeppolReceiveProcessor` → vérifie ID, contenu, métadonnées, statut `Received` |
+| `test_sbdh_roundtrip_avec_vraie_facture` | Build SBDH + parse : vérifie sender/receiver/document_type/process_id + payload intact |
+| `test_envoi_cdar_pdp_a_vers_pdp_b_filesystem` | Même roundtrip avec un CDV (CDAR) — vérifie détection type `CDAR` |
+| `test_oxalis_rest_gateway_health` | Health check Oxalis REST (conditionnel, `OXALIS_URL`) |
+| `test_oxalis_envoi_facture_via_rest_gateway` | Envoi via REST gateway Oxalis (conditionnel, `OXALIS_URL`) |
+
+#### Exécution sans Docker (toujours disponible)
+
+Les 3 premiers tests utilisent le `FilesystemGateway` et ne nécessitent aucune infrastructure :
+
+```bash
+cargo test -p pdp-peppol --test peppol_integration
+```
+
+#### Exécution avec Docker Oxalis
+
+Les 2 derniers tests nécessitent un gateway Oxalis accessible :
+
+```bash
+# 1. Démarrer Oxalis
+docker compose --profile peppol up -d
+
+# 2. Vérifier qu'Oxalis est prêt
+curl http://localhost:8080/status
+
+# 3. Exécuter tous les tests (y compris REST gateway)
+OXALIS_URL=http://localhost:8080 cargo test -p pdp-peppol --test peppol_integration
+
+# 4. Arrêter Oxalis
+docker compose --profile peppol down
+```
+
+#### Flux testé
+
+```
+PDP_A (émetteur)                          PDP_B (destinataire)
+┌─────────────────┐                       ┌─────────────────┐
+│ 1. Charger UBL  │                       │                 │
+│ 2. PeppolMessage│                       │                 │
+│ 3. SBDH build   │                       │                 │
+│ 4. Gateway.send │──── outbox/ ────────▶│ 5. Gateway.recv │
+│    (outbox)     │  (volume partagé /   │    (inbox)      │
+│                 │   transport AS4)      │ 6. ReceiveProc  │
+│                 │                       │ 7. Vérification │
+└─────────────────┘                       └─────────────────┘
+```
+
+Vérifications effectuées :
+- SBDH contient les bons sender/receiver (SIREN)
+- SBDH contient les scopes DOCUMENTID et PROCESSID
+- Le payload (facture UBL ou CDAR) est transmis intact
+- `PeppolReceiveProcessor` détecte le bon type de document
+- Le statut passe à `FlowStatus::Received`
+- L'acquittement supprime le message de l'inbox

@@ -112,15 +112,16 @@ services:
       - "8080:8080"       # HTTP (Tomcat)
       - "8443:8443"       # HTTPS (AS4)
     volumes:
-      - ./docker/oxalis/oxalis.conf:/oxalis/conf/oxalis.conf:ro
-      - ./docker/oxalis/logback.xml:/oxalis/conf/logback.xml:ro
+      - ./docker/oxalis/oxalis.conf:/oxalis/conf/conf/oxalis.conf:ro
+      - ./docker/oxalis/oxalis-keystore.jks:/oxalis/conf/conf/oxalis-keystore.jks:ro
+      - ./docker/oxalis/logback.xml:/oxalis/conf/conf/logback.xml:ro
       - peppol-inbound:/oxalis/inbound          # Messages reçus par Oxalis
       - peppol-outbound:/oxalis/outbound        # Messages à envoyer par Oxalis
     environment:
       - OXALIS_HOME=/oxalis/conf
       - JAVA_OPTS=-Xms256m -Xmx512m
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsSL http://localhost:8080/oxalis/status || exit 1"]
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:8080/status || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -137,8 +138,9 @@ services:
       - "8081:8080"
       - "8444:8443"
     volumes:
-      - ./docker/oxalis/oxalis.conf:/oxalis/conf/oxalis.conf:ro
-      - ./docker/oxalis/logback.xml:/oxalis/conf/logback.xml:ro
+      - ./docker/oxalis/oxalis.conf:/oxalis/conf/conf/oxalis.conf:ro
+      - ./docker/oxalis/oxalis-keystore.jks:/oxalis/conf/conf/oxalis-keystore.jks:ro
+      - ./docker/oxalis/logback.xml:/oxalis/conf/conf/logback.xml:ro
       - peppol-remote-inbound:/oxalis/inbound
     environment:
       - OXALIS_HOME=/oxalis/conf
