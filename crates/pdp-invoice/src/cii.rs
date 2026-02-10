@@ -3,7 +3,6 @@ use pdp_core::model::{
     DocumentAllowanceCharge, InvoiceAttachment, InvoiceData, InvoiceFormat, InvoiceLine,
     InvoiceNote, InvoiceProfile, PostalAddress, TaxBreakdown,
 };
-use base64::Engine as _;
 use roxmltree::Document;
 
 /// Parser pour les factures CII (Cross-Industry Invoice) / UN/CEFACT

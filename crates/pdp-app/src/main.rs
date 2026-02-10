@@ -101,7 +101,7 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
         "Démarrage de la PDP en mode polling"
     );
 
-    let mut router = build_router(&config).await?;
+    let router = build_router(&config).await?;
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // Gérer Ctrl+C
@@ -540,7 +540,7 @@ async fn build_router(config: &pdp_config::PdpConfig) -> Result<pdp_core::Router
 
         // 5. Génération CDAR (optionnelle)
         if route_config.generate_cdar {
-            if let Some(ref receiver) = route_config.cdar_receiver {
+            if let Some(ref _receiver) = route_config.cdar_receiver {
                 builder = builder.process(Box::new(pdp_cdar::CdarProcessor::new(
                     &config.pdp.id,
                     &config.pdp.name,
