@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- CDV Service fait (209) — Phase Traitement (23), StatusCode=4, Issuer=BY -->
+<!-- CDV Complétée (209) — Phase Traitement (23), StatusCode=4, Issuer=BY -->
 <rsm:CrossDomainAcknowledgementAndResponse
  xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
  xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
@@ -16,7 +16,7 @@
      </rsm:ExchangedDocumentContext>
      <rsm:ExchangedDocument>
           <ram:ID>F202500003_209_20250720100000#380_20250701</ram:ID>
-          <ram:Name>CDV-209_Service_fait_F202500003</ram:Name>
+          <ram:Name>CDV-209_Complétée_F202500003</ram:Name>
           <ram:IssueDateTime>
                <udt:DateTimeString format="204">20250720100500</udt:DateTimeString>
           </ram:IssueDateTime>
@@ -56,7 +56,7 @@
                     <qdt:DateTimeString format="102">20250701</qdt:DateTimeString>
                </ram:FormattedIssueDateTime>
                <ram:ProcessConditionCode>209</ram:ProcessConditionCode>
-               <ram:ProcessCondition>Service_fait</ram:ProcessCondition>
+               <ram:ProcessCondition>Complétée</ram:ProcessCondition>
                <ram:IssuerTradeParty>
                     <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
                     <ram:RoleCode>SE</ram:RoleCode>

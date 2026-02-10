@@ -310,7 +310,7 @@ impl CdarGenerator {
             InvoiceStatusCode::ApprouveePartiellement => Some(4),
             InvoiceStatusCode::EnLitige => Some(4),
             InvoiceStatusCode::Suspendue => Some(4),
-            InvoiceStatusCode::ServiceFait => Some(4),
+            InvoiceStatusCode::Completee => Some(4),
             InvoiceStatusCode::Refusee => Some(8),
             InvoiceStatusCode::PaiementTransmis => Some(4),
             InvoiceStatusCode::Encaissee => Some(4),
@@ -508,9 +508,9 @@ impl CdarGenerator {
             RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
-    /// Génère un CDV Service fait (209)
-    pub fn generate_service_fait(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::ServiceFait, CdvTypeCode::Traitement,
+    /// Génère un CDV Complétée (209)
+    pub fn generate_completee(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
+        self.generate_status(InvoiceStatusCode::Completee, CdvTypeCode::Traitement,
             RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
@@ -1073,10 +1073,10 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_service_fait_209() {
+    fn test_generate_completee_209() {
         let gen = CdarGenerator::new("100000009", "PDP Test");
         let inv = make_test_invoice();
-        let cdv = gen.generate_service_fait(&inv, "380");
+        let cdv = gen.generate_completee(&inv, "380");
         assert_eq!(cdv.referenced_documents[0].process_condition_code, 209);
         roundtrip(&cdv, &gen, 209);
     }

@@ -581,8 +581,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_fixture_209_service_fait() {
-        assert_fixture_status("cdv_209_service_fait.xml", 209, "Service_fait", CdvTypeCode::Traitement);
+    fn test_parse_fixture_209_completee() {
+        assert_fixture_status("cdv_209_completee.xml", 209, "Complétée", CdvTypeCode::Traitement);
     }
 
     #[test]
@@ -854,7 +854,7 @@ mod tests {
             ("cdv_205_approuvee.xml", 205),
             ("cdv_206_approuvee_partiellement.xml", 206),
             ("cdv_208_suspendue.xml", 208),
-            ("cdv_209_service_fait.xml", 209),
+            ("cdv_209_completee.xml", 209),
             ("cdv_211_paiement_transmis.xml", 211),
             ("cdv_212_encaissee.xml", 212),
             ("cdv_214_visee.xml", 214),

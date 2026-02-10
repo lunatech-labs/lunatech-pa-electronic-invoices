@@ -417,7 +417,7 @@ fn map_cdv_to_flow_status(status_code: u16) -> FlowStatus {
         Some(InvoiceStatusCode::PriseEnCharge) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::Approuvee) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::ApprouveePartiellement) => FlowStatus::Acknowledged,
-        Some(InvoiceStatusCode::ServiceFait) => FlowStatus::Acknowledged,
+        Some(InvoiceStatusCode::Completee) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::PaiementTransmis) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::Encaissee) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::Visee) => FlowStatus::Acknowledged,
@@ -825,7 +825,7 @@ mod tests {
         assert_processor_status("cdv_204_prise_en_charge.xml", FlowStatus::Acknowledged, false).await;
         assert_processor_status("cdv_205_approuvee.xml", FlowStatus::Acknowledged, false).await;
         assert_processor_status("cdv_206_approuvee_partiellement.xml", FlowStatus::Acknowledged, false).await;
-        assert_processor_status("cdv_209_service_fait.xml", FlowStatus::Acknowledged, false).await;
+        assert_processor_status("cdv_209_completee.xml", FlowStatus::Acknowledged, false).await;
         assert_processor_status("cdv_211_paiement_transmis.xml", FlowStatus::Acknowledged, false).await;
         assert_processor_status("cdv_212_encaissee.xml", FlowStatus::Acknowledged, false).await;
         assert_processor_status("cdv_214_visee.xml", FlowStatus::Acknowledged, false).await;
