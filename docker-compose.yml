@@ -101,13 +101,40 @@ services:
       - test
 
   # =========================================================================
-  # PEPPOL — Gateway AS4 (Oxalis)
+  # PEPPOL — SMP + Gateway AS4 (Oxalis)
   # =========================================================================
 
-  # Oxalis AS4 — notre Access Point PEPPOL (envoi et réception)
+  # phoss SMP — annuaire local des participants PEPPOL
+  smp:
+    image: phelger/phoss-smp-xml:latest
+    platform: linux/amd64
+    container_name: pdp-smp
+    ports:
+      - "8888:8080"
+    environment:
+      - WEBAPP_DATAPATH=/home/git
+      - CONFIG_FILE=/config/application.properties
+    volumes:
+      - smp-data:/home/git
+      - ./docker/smp/application.properties:/config/application.properties:ro
+      - ./docker/oxalis/oxalis-keystore.jks:/config/smp-keystore.jks:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:8080/public || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    profiles:
+      - peppol
+    restart: unless-stopped
+
+  # Oxalis AS4 — notre Access Point PEPPOL (PDP_A, envoi)
   oxalis:
     image: norstella/oxalis-as4:7.2.0-latest
     container_name: pdp-oxalis
+    depends_on:
+      smp:
+        condition: service_healthy
     ports:
       - "8080:8080"       # HTTP (Tomcat)
       - "8443:8443"       # HTTPS (AS4)
@@ -130,10 +157,13 @@ services:
       - peppol
     restart: unless-stopped
 
-  # Oxalis AS4 — simule une PDP distante (pour les tests inter-PDP)
+  # Oxalis AS4 — PDP distante (PDP_B, réception)
   oxalis-remote:
     image: norstella/oxalis-as4:7.2.0-latest
     container_name: pdp-oxalis-remote
+    depends_on:
+      smp:
+        condition: service_healthy
     ports:
       - "8081:8080"
       - "8444:8443"
@@ -145,12 +175,19 @@ services:
     environment:
       - OXALIS_HOME=/oxalis/conf
       - JAVA_OPTS=-Xms256m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:8080/status || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     profiles:
       - peppol
     restart: unless-stopped
 
 volumes:
   esdata:
+  smp-data:               # Données SMP (participants, endpoints)
   peppol-inbound:       # Messages PEPPOL reçus (Oxalis → PDP)
   peppol-outbound:      # Messages PEPPOL à envoyer (PDP → Oxalis)
   peppol-remote-inbound:  # Messages reçus par la PDP distante simulée

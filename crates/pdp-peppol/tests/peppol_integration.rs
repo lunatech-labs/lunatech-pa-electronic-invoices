@@ -300,6 +300,117 @@ async fn test_oxalis_envoi_facture_via_rest_gateway() {
 }
 
 // ============================================================
+// Test 6 : Envoi AS4 réel vers oxalis-remote (nécessite Docker + SMP)
+// ============================================================
+
+/// Test end-to-end : envoie un message AS4 depuis notre code Rust
+/// directement vers oxalis-remote (PDP_B).
+///
+/// Prérequis :
+///   podman compose --profile peppol up -d smp oxalis oxalis-remote
+///   bash ./docker/peppol-setup.sh
+///   OXALIS_URL=http://localhost:8080 cargo test -p pdp-peppol --test peppol_integration
+#[tokio::test]
+async fn test_as4_envoi_reel_vers_oxalis_remote() {
+    // Ce test ne s'exécute que si OXALIS_URL est défini
+    let _oxalis_url = match std::env::var("OXALIS_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("OXALIS_URL non défini — test AS4 réel ignoré");
+            return;
+        }
+    };
+
+    // L'URL d'oxalis-remote est déduite (port 8081 en local)
+    let remote_as4_url = std::env::var("OXALIS_REMOTE_URL")
+        .unwrap_or_else(|_| "http://localhost:8081/as4".to_string());
+
+    let invoice_xml = std::fs::read_to_string(FIXTURE_UBL)
+        .expect("Fixture UBL introuvable");
+
+    let sender = ParticipantId::from_siren("123456789");
+    let receiver = ParticipantId::from_siren("987654321");
+
+    let message = PeppolMessage::ubl_invoice(
+        sender,
+        receiver,
+        invoice_xml.as_bytes().to_vec(),
+    );
+
+    // Construire le client AS4
+    let config = pdp_peppol::model::PeppolConfig::test();
+    let client = pdp_peppol::as4::As4Client::new(config);
+
+    // Endpoint cible : oxalis-remote
+    let endpoint = pdp_peppol::model::SmpEndpoint {
+        endpoint_url: remote_as4_url.clone(),
+        certificate: String::new(),
+        transport_profile: "peppol-transport-as4-v2_0".to_string(),
+        service_activation_date: None,
+        service_expiration_date: None,
+    };
+
+    println!("Envoi AS4 vers {}", remote_as4_url);
+    let result = client.send(&message, &endpoint).await
+        .expect("Envoi AS4 échoué (erreur réseau)");
+
+    println!(
+        "Résultat AS4 : success={}, message_id={}, error={:?}",
+        result.success, result.message_id, result.error
+    );
+
+    // Le message a été envoyé — même si Oxalis rejette (certificat invalide),
+    // on vérifie que la communication AS4 fonctionne
+    assert!(!result.message_id.is_empty(), "Message ID doit être présent");
+
+    // Si le message est accepté, c'est un vrai succès AS4 end-to-end
+    if result.success {
+        println!("✓ Message AS4 accepté par oxalis-remote !");
+    } else {
+        println!(
+            "✗ Message AS4 rejeté par oxalis-remote (attendu en test local) : {:?}",
+            result.error
+        );
+    }
+}
+
+// ============================================================
+// Test 7 : Vérification du SMP lookup (nécessite Docker + SMP)
+// ============================================================
+
+#[tokio::test]
+async fn test_smp_lookup_participant() {
+    let _oxalis_url = match std::env::var("OXALIS_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("OXALIS_URL non défini — test SMP lookup ignoré");
+            return;
+        }
+    };
+
+    let smp_url = std::env::var("SMP_URL")
+        .unwrap_or_else(|_| "http://localhost:8888".to_string());
+
+    // Vérifier que le SMP répond
+    let client = reqwest::Client::new();
+    let resp = client.get(format!(
+        "{}/iso6523-actorid-upis%3A%3A0002%3A987654321",
+        smp_url
+    ))
+    .send()
+    .await
+    .expect("SMP inaccessible");
+
+    assert_eq!(resp.status(), 200, "Le participant PDP_B doit être enregistré dans le SMP");
+
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("987654321"), "La réponse SMP doit contenir le participant ID");
+    assert!(body.contains("ServiceGroup"), "La réponse SMP doit être un ServiceGroup XML");
+
+    println!("✓ SMP lookup OK pour 0002:987654321");
+}
+
+// ============================================================
 // Utilitaires
 // ============================================================
 

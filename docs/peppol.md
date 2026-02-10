@@ -305,36 +305,100 @@ ReceptionProcessor (erreur) → IrrecevabiliteProcessor (CDAR 501)
     → FilesystemGateway.send() → outbox/ → Oxalis → AS4 → PDP émettrice
 ```
 
-## Docker — Oxalis AS4
+## Docker — Environnement PEPPOL local
 
-Le projet inclut un setup Docker Compose avec Oxalis pour tester les échanges PEPPOL :
+Le projet inclut un setup Docker Compose complet pour tester les échanges PEPPOL AS4 en local, avec un SMP (annuaire) et deux Access Points Oxalis.
 
 ```bash
-# Démarrer Oxalis (profil peppol)
-docker compose --profile peppol up -d
+# Démarrer tous les services PEPPOL
+podman compose --profile peppol up -d smp oxalis oxalis-remote
 
-# Vérifier le statut
-curl http://localhost:8080/status
+# Enregistrer les participants dans le SMP
+bash ./docker/peppol-setup.sh
 
-# Tout démarrer (ES + PDP + Oxalis)
-docker compose --profile peppol up -d elasticsearch pdp oxalis
+# Vérifier les statuts
+curl http://localhost:8888/public   # SMP
+curl http://localhost:8080/status   # Oxalis PDP_A
+curl http://localhost:8081/status   # Oxalis PDP_B
+
+# Arrêter
+podman compose --profile peppol down
 ```
 
-### Architecture
+### Architecture complète
 
 ```
-┌──────────┐     peppol-outbound     ┌──────────┐
-│   PDP    │ ──────────────────────▶ │  Oxalis  │ ──AS4──▶ Réseau PEPPOL
-│  (Rust)  │                         │  :8080   │
-│          │ ◀────────────────────── │  :8443   │ ◀──AS4──
-└──────────┘     peppol-inbound      └──────────┘
+                        docker compose --profile peppol
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │                                                                         │
+ │  ┌─────────────────────┐                                                │
+ │  │   phoss-smp (SMP)   │  Annuaire des participants                     │
+ │  │   :8888 → :8080     │  - Enregistre PDP_B (0002:987654321)           │
+ │  │   phelger/phoss-     │  - Endpoint → oxalis-remote:8080/as4          │
+ │  │   smp-xml:latest     │  - Certificat AP de test                      │
+ │  └────────┬────────────┘                                                │
+ │           │ lookup (StaticLocator)                                       │
+ │           │                                                              │
+ │  ┌────────▼────────────┐         AS4/HTTP          ┌──────────────────┐ │
+ │  │  oxalis (PDP_A)     │ ════════════════════════▶ │ oxalis-remote    │ │
+ │  │  Access Point envoi │     SBDH + UBL Invoice    │ (PDP_B)          │ │
+ │  │  :8080 (HTTP)       │                           │ Access Point     │ │
+ │  │  :8443 (HTTPS/AS4)  │                           │ réception        │ │
+ │  └────────┬────────────┘                           │ :8081 → :8080    │ │
+ │           │                                         │ :8444 → :8443    │ │
+ │           │ volumes Docker                          └────────┬─────────┘ │
+ │           │                                                  │           │
+ │  ┌────────▼──────────┐                            ┌─────────▼────────┐  │
+ │  │ peppol-outbound   │  PDP → Oxalis (envoi)      │ peppol-remote-   │  │
+ │  │ peppol-inbound    │  Oxalis → PDP (réception)  │ inbound          │  │
+ │  └────────┬──────────┘                            │ (messages reçus) │  │
+ │           │                                        └──────────────────┘  │
+ │           │                                                              │
+ └───────────┼──────────────────────────────────────────────────────────────┘
+             │
+    ┌────────▼──────────┐
+    │   PDP (Rust)      │  Notre application
+    │   FilesystemGW    │  - Dépose SBDH dans outbox
+    │   ou RestGW       │  - Lit SBDH depuis inbox
+    │                   │  - PeppolSendProcessor
+    │                   │  - PeppolReceiveProcessor
+    └───────────────────┘
 ```
 
-- **`peppol-outbound`** : PDP dépose des SBDH XML → Oxalis les envoie via AS4
-- **`peppol-inbound`** : Oxalis reçoit via AS4 → PDP lit les SBDH XML
-- **`oxalis-remote`** (`:8081`) : simule une PDP distante pour les tests inter-PDP
+### Services
 
-Configuration Oxalis : `docker/oxalis/oxalis.conf` (SML test, keystore test, persistence filesystem).
+| Service | Image | Ports | Rôle |
+|---------|-------|-------|------|
+| **smp** | `phelger/phoss-smp-xml` | `:8888` | Annuaire SMP local (lookup participants → endpoints) |
+| **oxalis** | `norstella/oxalis-as4:7.2.0` | `:8080`, `:8443` | Access Point PDP_A (envoi AS4) |
+| **oxalis-remote** | `norstella/oxalis-as4:7.2.0` | `:8081`, `:8444` | Access Point PDP_B (réception AS4) |
+
+### Volumes
+
+| Volume | Usage |
+|--------|-------|
+| `peppol-outbound` | PDP dépose des SBDH XML → Oxalis les envoie via AS4 |
+| `peppol-inbound` | Oxalis reçoit via AS4 → PDP lit les SBDH XML |
+| `peppol-remote-inbound` | Messages reçus par PDP_B (oxalis-remote) |
+| `smp-data` | Données persistantes du SMP (participants, endpoints) |
+
+### Flux d'envoi AS4 (PDP_A → PDP_B)
+
+```
+1. PDP Rust construit un PeppolMessage + SBDH
+2. FilesystemGateway.send() dépose le SBDH dans peppol-outbound/
+3. Oxalis (PDP_A) lit le SBDH
+4. Oxalis consulte le SMP : "où envoyer pour 0002:987654321 ?"
+5. SMP répond : "oxalis-remote:8080/as4" + certificat
+6. Oxalis (PDP_A) envoie le message AS4 à oxalis-remote
+7. Oxalis-remote (PDP_B) reçoit et dépose dans peppol-remote-inbound/
+```
+
+### Configuration
+
+- **Oxalis** : `docker/oxalis/oxalis.conf` — StaticLocator vers SMP local, keystore test
+- **SMP** : configuré via `docker/peppol-setup.sh` (REST API, participants + endpoints)
+- **Keystore** : `docker/oxalis/oxalis-keystore.jks` — certificat auto-signé RSA 2048 (test uniquement)
 
 Voir [docs/docker.md](docker.md) pour plus de détails.
 
@@ -358,15 +422,17 @@ cargo test -p pdp-peppol
 
 ### Tests d'intégration PEPPOL (inter-PDP)
 
-5 tests d'intégration simulant l'envoi d'une facture entre deux PDP via le réseau PEPPOL :
+7 tests d'intégration simulant l'envoi d'une facture entre deux PDP via le réseau PEPPOL :
 
-| Test | Description |
-|------|-------------|
-| `test_envoi_facture_pdp_a_vers_pdp_b_filesystem` | Roundtrip complet : charge une facture UBL → `PeppolMessage` → SBDH → `FilesystemGateway` outbox → inbox → `PeppolReceiveProcessor` → vérifie ID, contenu, métadonnées, statut `Received` |
-| `test_sbdh_roundtrip_avec_vraie_facture` | Build SBDH + parse : vérifie sender/receiver/document_type/process_id + payload intact |
-| `test_envoi_cdar_pdp_a_vers_pdp_b_filesystem` | Même roundtrip avec un CDV (CDAR) — vérifie détection type `CDAR` |
-| `test_oxalis_rest_gateway_health` | Health check Oxalis REST (conditionnel, `OXALIS_URL`) |
-| `test_oxalis_envoi_facture_via_rest_gateway` | Envoi via REST gateway Oxalis (conditionnel, `OXALIS_URL`) |
+| Test | Docker | Description |
+|------|--------|-------------|
+| `test_envoi_facture_pdp_a_vers_pdp_b_filesystem` | Non | Roundtrip complet : UBL → SBDH → `FilesystemGateway` → `PeppolReceiveProcessor` → vérifie ID, contenu, statut `Received` |
+| `test_sbdh_roundtrip_avec_vraie_facture` | Non | Build SBDH + parse : vérifie sender/receiver/document_type/process_id + payload intact |
+| `test_envoi_cdar_pdp_a_vers_pdp_b_filesystem` | Non | Même roundtrip avec un CDV (CDAR) — vérifie détection type `CDAR` |
+| `test_oxalis_rest_gateway_health` | Oui | Health check Oxalis REST (conditionnel, `OXALIS_URL`) |
+| `test_oxalis_envoi_facture_via_rest_gateway` | Oui | Envoi via REST gateway Oxalis (conditionnel, `OXALIS_URL`) |
+| `test_as4_envoi_reel_vers_oxalis_remote` | Oui | **Envoi AS4 réel** : `As4Client` → SOAP+MIME → `oxalis-remote:8081/as4` |
+| `test_smp_lookup_participant` | Oui | **Lookup SMP** : vérifie que PDP_B (0002:987654321) est enregistré dans phoss-smp |
 
 #### Exécution sans Docker (toujours disponible)
 
@@ -376,22 +442,22 @@ Les 3 premiers tests utilisent le `FilesystemGateway` et ne nécessitent aucune 
 cargo test -p pdp-peppol --test peppol_integration
 ```
 
-#### Exécution avec Docker Oxalis
+#### Exécution avec Docker (SMP + Oxalis)
 
-Les 2 derniers tests nécessitent un gateway Oxalis accessible :
+Les 4 derniers tests nécessitent l'environnement PEPPOL complet :
 
 ```bash
-# 1. Démarrer Oxalis
-docker compose --profile peppol up -d
+# 1. Démarrer SMP + Oxalis PDP_A + Oxalis PDP_B
+podman compose --profile peppol up -d smp oxalis oxalis-remote
 
-# 2. Vérifier qu'Oxalis est prêt
-curl http://localhost:8080/status
+# 2. Attendre le démarrage (~40s) puis enregistrer les participants
+sleep 40 && bash ./docker/peppol-setup.sh
 
-# 3. Exécuter tous les tests (y compris REST gateway)
+# 3. Exécuter tous les tests (7/7)
 OXALIS_URL=http://localhost:8080 cargo test -p pdp-peppol --test peppol_integration
 
-# 4. Arrêter Oxalis
-docker compose --profile peppol down
+# 4. Arrêter
+podman compose --profile peppol down
 ```
 
 #### Flux testé

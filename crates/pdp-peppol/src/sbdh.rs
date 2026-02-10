@@ -36,6 +36,10 @@ use crate::model::{DocumentTypeId, ParticipantId, PeppolMessage, ProcessId};
 ///         <InstanceIdentifier>process_id</InstanceIdentifier>
 ///         <Identifier>scheme</Identifier>
 ///       </Scope>
+///       <Scope>
+///         <Type>COUNTRY_C1</Type>
+///         <InstanceIdentifier>FR</InstanceIdentifier>
+///       </Scope>
 ///     </BusinessScope>
 ///   </StandardBusinessDocumentHeader>
 ///   <!-- payload XML inséré ici -->
@@ -107,6 +111,13 @@ pub fn build_sbdh(message: &PeppolMessage) -> String {
         <Identifier>"#);
     xml.push_str(&xml_escape(&message.process_id.scheme));
     xml.push_str(r#"</Identifier>
+      </Scope>
+      <Scope>
+        <Type>COUNTRY_C1</Type>
+        <InstanceIdentifier>"#);
+    let country = message.metadata.get("country_c1").map(|s| s.as_str()).unwrap_or("FR");
+    xml.push_str(&xml_escape(country));
+    xml.push_str(r#"</InstanceIdentifier>
       </Scope>
     </BusinessScope>
   </StandardBusinessDocumentHeader>
