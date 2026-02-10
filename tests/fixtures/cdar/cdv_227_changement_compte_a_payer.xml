@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- CDV Transmise destinataire (400) — Phase Transmission (305), StatusCode=10 -->
+<!-- CDV Changement de Compte à Payer (227) — Phase Traitement (23), StatusCode=8 -->
 <rsm:CrossDomainAcknowledgementAndResponse
  xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
  xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
@@ -15,37 +15,39 @@
           </ram:GuidelineSpecifiedDocumentContextParameter>
      </rsm:ExchangedDocumentContext>
      <rsm:ExchangedDocument>
-          <ram:ID>F202500001_400_20250701153000#380_20250701</ram:ID>
-          <ram:Name>CDV-400_Transmise_destinataire_F202500001</ram:Name>
+          <ram:ID>F202500001_227_20250703080000#380_20250701</ram:ID>
+          <ram:Name>CDV-227_Changement_de_Compte_à_Payer_F202500001</ram:Name>
           <ram:IssueDateTime>
-               <udt:DateTimeString format="204">20250701153500</udt:DateTimeString>
+               <udt:DateTimeString format="204">20250703080500</udt:DateTimeString>
           </ram:IssueDateTime>
           <ram:SenderTradeParty>
-               <ram:RoleCode>WK</ram:RoleCode>
+               <ram:RoleCode>BY</ram:RoleCode>
           </ram:SenderTradeParty>
           <ram:IssuerTradeParty>
-               <ram:RoleCode>WK</ram:RoleCode>
+               <ram:RoleCode>BY</ram:RoleCode>
           </ram:IssuerTradeParty>
           <ram:RecipientTradeParty>
                <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
                <ram:Name>VENDEUR</ram:Name>
                <ram:RoleCode>SE</ram:RoleCode>
-               <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0225">100000009_STATUTS</ram:URIID>
-               </ram:URIUniversalCommunication>
+          </ram:RecipientTradeParty>
+          <ram:RecipientTradeParty>
+               <ram:GlobalID schemeID="0002">200000008</ram:GlobalID>
+               <ram:Name>ACHETEUR</ram:Name>
+               <ram:RoleCode>BY</ram:RoleCode>
           </ram:RecipientTradeParty>
      </rsm:ExchangedDocument>
      <rsm:AcknowledgementDocument>
           <ram:MultipleReferencesIndicator>
                <udt:Indicator>false</udt:Indicator>
           </ram:MultipleReferencesIndicator>
-          <ram:TypeCode>305</ram:TypeCode>
+          <ram:TypeCode>23</ram:TypeCode>
           <ram:IssueDateTime>
-               <udt:DateTimeString format="204">20250701153000</udt:DateTimeString>
+               <udt:DateTimeString format="204">20250703080000</udt:DateTimeString>
           </ram:IssueDateTime>
           <ram:ReferenceReferencedDocument>
                <ram:IssuerAssignedID>F202500001</ram:IssuerAssignedID>
-               <ram:StatusCode>10</ram:StatusCode>
+               <ram:StatusCode>8</ram:StatusCode>
                <ram:TypeCode>380</ram:TypeCode>
                <ram:ReceiptDateTime>
                     <udt:DateTimeString format="204">20250701151000</udt:DateTimeString>
@@ -53,12 +55,19 @@
                <ram:FormattedIssueDateTime>
                     <qdt:DateTimeString format="102">20250701</qdt:DateTimeString>
                </ram:FormattedIssueDateTime>
-               <ram:ProcessConditionCode>400</ram:ProcessConditionCode>
-               <ram:ProcessCondition>Transmise_destinataire</ram:ProcessCondition>
+               <ram:ProcessConditionCode>227</ram:ProcessConditionCode>
+               <ram:ProcessCondition>Changement_de_Compte_à_Payer</ram:ProcessCondition>
                <ram:IssuerTradeParty>
                     <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
                     <ram:RoleCode>SE</ram:RoleCode>
                </ram:IssuerTradeParty>
+               <ram:SpecifiedDocumentStatus>
+                    <ram:ReasonCode>AUTRE</ram:ReasonCode>
+                    <ram:Reason>Facture abandonnée par le destinataire après dépassement du délai de traitement</ram:Reason>
+                    <ram:RequestedActionCode>NIN</ram:RequestedActionCode>
+                    <ram:RequestedAction>Contacter le destinataire pour relancer le traitement</ram:RequestedAction>
+                    <ram:SequenceNumeric>1</ram:SequenceNumeric>
+               </ram:SpecifiedDocumentStatus>
           </ram:ReferenceReferencedDocument>
      </rsm:AcknowledgementDocument>
 </rsm:CrossDomainAcknowledgementAndResponse>

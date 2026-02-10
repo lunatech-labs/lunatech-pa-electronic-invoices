@@ -53,20 +53,12 @@ pub enum InvoiceStatusCode {
     Visee = 214,
     Annulee = 220,
     ErreurRoutage = 221,
-    CompleteeParEmetteur = 224,
-    RecycleeParDestinataire = 225,
-    RecycleeParEmetteur = 226,
-    AbandonDestinataire = 227,
-    AbandonEmetteur = 228,
-    Archivee = 250,
-    ArchiveeSansValidation = 251,
-    TransmisePPF = 300,
-    TransmisePDP = 301,
-    TransmiseDestinataire = 400,
-    TransmiseOD = 401,
+    DemandePaiementDirect = 224,
+    Affacturee = 225,
+    AffactureeConfidentiel = 226,
+    ChangementCompteAPayer = 227,
+    NonAffacturee = 228,
     Irrecevable = 501,
-    IrrecevableOD = 500,
-    NonTransmise = 601,
 }
 
 impl InvoiceStatusCode {
@@ -92,21 +84,13 @@ impl InvoiceStatusCode {
             Self::Rejetee => "Rejetée",
             Self::Visee => "Visée",
             Self::Annulee => "Annulée",
-            Self::ErreurRoutage => "Erreur_routage",
-            Self::CompleteeParEmetteur => "Complétée_par_émetteur",
-            Self::RecycleeParDestinataire => "Recyclée_par_destinataire",
-            Self::RecycleeParEmetteur => "Recyclée_par_émetteur",
-            Self::AbandonDestinataire => "Abandon_destinataire",
-            Self::AbandonEmetteur => "Abandon_émetteur",
-            Self::Archivee => "Archivée",
-            Self::ArchiveeSansValidation => "Archivée_sans_validation",
-            Self::TransmisePPF => "Transmise_PPF",
-            Self::TransmisePDP => "Transmise_PDP",
-            Self::TransmiseDestinataire => "Transmise_destinataire",
-            Self::TransmiseOD => "Transmise_OD",
+            Self::ErreurRoutage => "ERREUR_ROUTAGE",
+            Self::DemandePaiementDirect => "Demande_de_Paiement_Direct",
+            Self::Affacturee => "Affacturée",
+            Self::AffactureeConfidentiel => "Affacturée_Confidentiel",
+            Self::ChangementCompteAPayer => "Changement_de_Compte_à_Payer",
+            Self::NonAffacturee => "Non_Affacturée",
             Self::Irrecevable => "Irrecevable",
-            Self::IrrecevableOD => "Irrecevable_OD",
-            Self::NonTransmise => "Non_transmise",
         }
     }
 
@@ -129,20 +113,12 @@ impl InvoiceStatusCode {
             214 => Some(Self::Visee),
             220 => Some(Self::Annulee),
             221 => Some(Self::ErreurRoutage),
-            224 => Some(Self::CompleteeParEmetteur),
-            225 => Some(Self::RecycleeParDestinataire),
-            226 => Some(Self::RecycleeParEmetteur),
-            227 => Some(Self::AbandonDestinataire),
-            228 => Some(Self::AbandonEmetteur),
-            250 => Some(Self::Archivee),
-            251 => Some(Self::ArchiveeSansValidation),
-            300 => Some(Self::TransmisePPF),
-            301 => Some(Self::TransmisePDP),
-            400 => Some(Self::TransmiseDestinataire),
-            401 => Some(Self::TransmiseOD),
-            500 => Some(Self::IrrecevableOD),
+            224 => Some(Self::DemandePaiementDirect),
+            225 => Some(Self::Affacturee),
+            226 => Some(Self::AffactureeConfidentiel),
+            227 => Some(Self::ChangementCompteAPayer),
+            228 => Some(Self::NonAffacturee),
             501 => Some(Self::Irrecevable),
-            601 => Some(Self::NonTransmise),
             _ => None,
         }
     }
@@ -670,7 +646,7 @@ impl CdvResponse {
     pub fn is_success(&self) -> bool {
         self.referenced_documents.iter().all(|doc| {
             let code = doc.process_condition_code;
-            code >= 200 && code < 300 && code != 210 && code != 213 && code != 220 && code != 221 && code != 227 && code != 228
+            code >= 200 && code <= 228 && code != 210 && code != 213 && code != 220 && code != 221
         })
     }
 

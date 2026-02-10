@@ -543,21 +543,6 @@ mod tests {
         assert_fixture_status("cdv_203_mise_a_disposition.xml", 203, "Mise_à_disposition", CdvTypeCode::Transmission);
     }
 
-    #[test]
-    fn test_parse_fixture_300_transmise_ppf() {
-        assert_fixture_status("cdv_300_transmise_ppf.xml", 300, "Transmise_PPF", CdvTypeCode::Transmission);
-    }
-
-    #[test]
-    fn test_parse_fixture_301_transmise_pdp() {
-        assert_fixture_status("cdv_301_transmise_pdp.xml", 301, "Transmise_PDP", CdvTypeCode::Transmission);
-    }
-
-    #[test]
-    fn test_parse_fixture_400_transmise_destinataire() {
-        assert_fixture_status("cdv_400_transmise_destinataire.xml", 400, "Transmise_destinataire", CdvTypeCode::Transmission);
-    }
-
     // --- Phase Traitement (23) ---
 
     #[test]
@@ -641,19 +626,6 @@ mod tests {
         let doc = &cdv.referenced_documents[0];
         assert_eq!(doc.process_condition_code, 221);
         assert_eq!(doc.statuses[0].reason_code.as_deref(), Some("ROUTAGE_ERR"));
-    }
-
-    #[test]
-    fn test_parse_fixture_601_non_transmise_avec_motif() {
-        let xml = fs::read_to_string("../../tests/fixtures/cdar/cdv_601_non_transmise.xml")
-            .expect("Fixture CDV 601 introuvable");
-        let parser = CdarParser::new();
-        let cdv = parser.parse(&xml).expect("Parsing CDV 601 échoué");
-
-        assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
-        let doc = &cdv.referenced_documents[0];
-        assert_eq!(doc.process_condition_code, 601);
-        assert_eq!(doc.statuses[0].reason_code.as_deref(), Some("NON_TRANSMISE"));
     }
 
     // --- Statuts avec caractéristiques (MEN) ---
@@ -746,31 +718,31 @@ mod tests {
         assert!(status.action.is_some());
     }
 
-    // --- Statuts étendus (220-228, 250-251, 401, 500) ---
+    // --- Statuts étendus (220-228) ---
 
     #[test]
-    fn test_parse_fixture_220_completee_par_destinataire() {
+    fn test_parse_fixture_220_annulee() {
         assert_fixture_status("cdv_220_annulee.xml", 220, "Annulée", CdvTypeCode::Traitement);
     }
 
     #[test]
-    fn test_parse_fixture_224_completee_par_emetteur() {
-        assert_fixture_status("cdv_224_completee_par_emetteur.xml", 224, "Complétée_par_émetteur", CdvTypeCode::Traitement);
+    fn test_parse_fixture_224_demande_paiement_direct() {
+        assert_fixture_status("cdv_224_demande_paiement_direct.xml", 224, "Demande_de_Paiement_Direct", CdvTypeCode::Traitement);
     }
 
     #[test]
-    fn test_parse_fixture_225_recyclee_par_destinataire() {
-        assert_fixture_status("cdv_225_recyclee_par_destinataire.xml", 225, "Recyclée_par_destinataire", CdvTypeCode::Traitement);
+    fn test_parse_fixture_225_affacturee() {
+        assert_fixture_status("cdv_225_affacturee.xml", 225, "Affacturée", CdvTypeCode::Traitement);
     }
 
     #[test]
-    fn test_parse_fixture_226_recyclee_par_emetteur() {
-        assert_fixture_status("cdv_226_recyclee_par_emetteur.xml", 226, "Recyclée_par_émetteur", CdvTypeCode::Traitement);
+    fn test_parse_fixture_226_affacturee_confidentiel() {
+        assert_fixture_status("cdv_226_affacturee_confidentiel.xml", 226, "Affacturée_Confidentiel", CdvTypeCode::Traitement);
     }
 
     #[test]
-    fn test_parse_fixture_227_abandon_destinataire() {
-        let xml = fs::read_to_string("../../tests/fixtures/cdar/cdv_227_abandon_destinataire.xml")
+    fn test_parse_fixture_227_changement_compte_a_payer() {
+        let xml = fs::read_to_string("../../tests/fixtures/cdar/cdv_227_changement_compte_a_payer.xml")
             .expect("Fixture CDV 227 introuvable");
         let parser = CdarParser::new();
         let cdv = parser.parse(&xml).expect("Parsing CDV 227 échoué");
@@ -779,18 +751,15 @@ mod tests {
         let doc = &cdv.referenced_documents[0];
         assert_eq!(doc.process_condition_code, 227);
         assert_eq!(doc.status_code, Some(8));
-        // Vérifier le motif d'erreur
         assert_eq!(doc.statuses.len(), 1);
         let status = &doc.statuses[0];
         assert_eq!(status.reason_code.as_deref(), Some("AUTRE"));
-        assert!(status.reason.as_deref().unwrap().contains("destinataire"));
         assert_eq!(status.action_code.as_deref(), Some("NIN"));
-        assert!(status.action.is_some());
     }
 
     #[test]
-    fn test_parse_fixture_228_abandon_emetteur() {
-        let xml = fs::read_to_string("../../tests/fixtures/cdar/cdv_228_abandon_emetteur.xml")
+    fn test_parse_fixture_228_non_affacturee() {
+        let xml = fs::read_to_string("../../tests/fixtures/cdar/cdv_228_non_affacturee.xml")
             .expect("Fixture CDV 228 introuvable");
         let parser = CdarParser::new();
         let cdv = parser.parse(&xml).expect("Parsing CDV 228 échoué");
@@ -799,43 +768,10 @@ mod tests {
         let doc = &cdv.referenced_documents[0];
         assert_eq!(doc.process_condition_code, 228);
         assert_eq!(doc.status_code, Some(8));
-        // Vérifier le motif d'erreur
         assert_eq!(doc.statuses.len(), 1);
         let status = &doc.statuses[0];
         assert_eq!(status.reason_code.as_deref(), Some("AUTRE"));
-        assert!(status.reason.as_deref().unwrap().contains("émetteur"));
         assert_eq!(status.action_code.as_deref(), Some("NIN"));
-        assert!(status.action.is_some());
-    }
-
-    #[test]
-    fn test_parse_fixture_250_archivee() {
-        assert_fixture_status("cdv_250_archivee.xml", 250, "Archivée", CdvTypeCode::Traitement);
-    }
-
-    #[test]
-    fn test_parse_fixture_251_archivee_sans_validation() {
-        assert_fixture_status("cdv_251_archivee_sans_validation.xml", 251, "Archivée_sans_validation", CdvTypeCode::Traitement);
-    }
-
-    #[test]
-    fn test_parse_fixture_401_transmise_od() {
-        assert_fixture_status("cdv_401_transmise_od.xml", 401, "Transmise_OD", CdvTypeCode::Transmission);
-    }
-
-    #[test]
-    fn test_parse_fixture_500_irrecevable_od() {
-        let xml = fs::read_to_string("../../tests/fixtures/cdar/cdv_500_irrecevable_od.xml")
-            .expect("Fixture CDV 500 introuvable");
-        let parser = CdarParser::new();
-        let cdv = parser.parse(&xml).expect("Parsing CDV 500 échoué");
-
-        assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
-        let doc = &cdv.referenced_documents[0];
-        assert_eq!(doc.process_condition_code, 500);
-        assert_eq!(doc.status_code, Some(8));
-        assert_eq!(doc.statuses.len(), 1);
-        assert_eq!(doc.statuses[0].reason_code.as_deref(), Some("IRR_SYNTAX"));
     }
 
     // --- Validation is_success / is_rejected / is_irrecevable ---
@@ -844,7 +780,7 @@ mod tests {
     fn test_fixture_status_classification() {
         let parser = CdarParser::new();
 
-        // Statuts "success" (200-214 sauf 210, 213)
+        // Statuts "success" (200-228 sauf 210, 213, 220, 221)
         for (file, code) in &[
             ("cdv_200_deposee.xml", 200u16),
             ("cdv_201_emise.xml", 201),
@@ -858,11 +794,11 @@ mod tests {
             ("cdv_211_paiement_transmis.xml", 211),
             ("cdv_212_encaissee.xml", 212),
             ("cdv_214_visee.xml", 214),
-            ("cdv_224_completee_par_emetteur.xml", 224),
-            ("cdv_225_recyclee_par_destinataire.xml", 225),
-            ("cdv_226_recyclee_par_emetteur.xml", 226),
-            ("cdv_250_archivee.xml", 250),
-            ("cdv_251_archivee_sans_validation.xml", 251),
+            ("cdv_224_demande_paiement_direct.xml", 224),
+            ("cdv_225_affacturee.xml", 225),
+            ("cdv_226_affacturee_confidentiel.xml", 226),
+            ("cdv_227_changement_compte_a_payer.xml", 227),
+            ("cdv_228_non_affacturee.xml", 228),
         ] {
             let xml = fs::read_to_string(format!("../../tests/fixtures/cdar/{}", file))
                 .unwrap_or_else(|_| panic!("Fixture {} introuvable", file));
@@ -894,12 +830,5 @@ mod tests {
         assert!(!cdv.is_success(), "CDV 220 Annulée ne devrait pas être success");
         assert!(!cdv.is_rejected(), "CDV 220 Annulée ne devrait pas être rejected");
         assert!(cdv.is_annulee(), "CDV 220 devrait être annulée");
-
-        // Statuts "abandon" = not success (codes >= 220 avec StatusCode=8)
-        for file in &["cdv_227_abandon_destinataire.xml", "cdv_228_abandon_emetteur.xml"] {
-            let xml = fs::read_to_string(format!("../../tests/fixtures/cdar/{}", file)).unwrap();
-            let cdv = parser.parse(&xml).unwrap();
-            assert!(!cdv.is_success(), "CDV {} ne devrait pas être success", file);
-        }
     }
 }

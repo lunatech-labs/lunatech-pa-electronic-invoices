@@ -317,21 +317,13 @@ impl CdarGenerator {
             InvoiceStatusCode::Rejetee => Some(8),
             InvoiceStatusCode::Visee => Some(4),
             InvoiceStatusCode::Annulee => Some(4),
-            InvoiceStatusCode::CompleteeParEmetteur => Some(4),
             InvoiceStatusCode::ErreurRoutage => Some(8),
-            InvoiceStatusCode::RecycleeParDestinataire => Some(4),
-            InvoiceStatusCode::RecycleeParEmetteur => Some(4),
-            InvoiceStatusCode::AbandonDestinataire => Some(8),
-            InvoiceStatusCode::AbandonEmetteur => Some(8),
-            InvoiceStatusCode::Archivee => Some(4),
-            InvoiceStatusCode::ArchiveeSansValidation => Some(4),
-            InvoiceStatusCode::TransmisePPF => Some(10),
-            InvoiceStatusCode::TransmisePDP => Some(10),
-            InvoiceStatusCode::TransmiseDestinataire => Some(10),
-            InvoiceStatusCode::TransmiseOD => Some(10),
+            InvoiceStatusCode::DemandePaiementDirect => Some(4),
+            InvoiceStatusCode::Affacturee => Some(4),
+            InvoiceStatusCode::AffactureeConfidentiel => Some(4),
+            InvoiceStatusCode::ChangementCompteAPayer => Some(4),
+            InvoiceStatusCode::NonAffacturee => Some(4),
             InvoiceStatusCode::Irrecevable => Some(8),
-            InvoiceStatusCode::IrrecevableOD => Some(8),
-            InvoiceStatusCode::NonTransmise => Some(8),
         };
 
         // Destinataires selon le type
@@ -426,54 +418,6 @@ impl CdarGenerator {
     pub fn generate_mise_a_disposition(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
         self.generate_status(InvoiceStatusCode::MiseADisposition, CdvTypeCode::Transmission,
             RoleCode::WK, invoice, invoice_type_code, Vec::new())
-    }
-
-    /// Génère un CDV Transmise PPF (300)
-    pub fn generate_transmise_ppf(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::TransmisePPF, CdvTypeCode::Transmission,
-            RoleCode::WK, invoice, invoice_type_code, Vec::new())
-    }
-
-    /// Génère un CDV Transmise PDP (301)
-    pub fn generate_transmise_pdp(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::TransmisePDP, CdvTypeCode::Transmission,
-            RoleCode::WK, invoice, invoice_type_code, Vec::new())
-    }
-
-    /// Génère un CDV Transmise destinataire (400)
-    pub fn generate_transmise_destinataire(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::TransmiseDestinataire, CdvTypeCode::Transmission,
-            RoleCode::WK, invoice, invoice_type_code, Vec::new())
-    }
-
-    /// Génère un CDV Transmise OD (401)
-    pub fn generate_transmise_od(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::TransmiseOD, CdvTypeCode::Transmission,
-            RoleCode::WK, invoice, invoice_type_code, Vec::new())
-    }
-
-    /// Génère un CDV Non transmise (601)
-    pub fn generate_non_transmise(&self, invoice: &InvoiceData, reason: StatusReasonCode, message: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::NonTransmise, CdvTypeCode::Transmission,
-            RoleCode::WK, invoice, "380", vec![DocumentStatus {
-                status_code: None,
-                reason_code: Some(reason.code().to_string()),
-                reason: Some(message.to_string()),
-                action_code: None, action: None, sequence: Some(1),
-                characteristics: Vec::new(),
-            }])
-    }
-
-    /// Génère un CDV Irrecevable OD (500)
-    pub fn generate_irrecevable_od(&self, invoice: &InvoiceData, reason: StatusReasonCode, message: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::IrrecevableOD, CdvTypeCode::Transmission,
-            RoleCode::WK, invoice, "380", vec![DocumentStatus {
-                status_code: None,
-                reason_code: Some(reason.code().to_string()),
-                reason: Some(message.to_string()),
-                action_code: None, action: None, sequence: Some(1),
-                characteristics: Vec::new(),
-            }])
     }
 
     /// Génère un CDV Erreur routage (221)
@@ -572,46 +516,34 @@ impl CdarGenerator {
             RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
-    /// Génère un CDV Complétée par émetteur (224)
-    pub fn generate_completee_par_emetteur(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::CompleteeParEmetteur, CdvTypeCode::Traitement,
-            RoleCode::SE, invoice, invoice_type_code, Vec::new())
-    }
-
-    /// Génère un CDV Recyclée par destinataire (225)
-    pub fn generate_recyclee_par_destinataire(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::RecycleeParDestinataire, CdvTypeCode::Traitement,
+    /// Génère un CDV Demande de Paiement Direct (224)
+    pub fn generate_demande_paiement_direct(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
+        self.generate_status(InvoiceStatusCode::DemandePaiementDirect, CdvTypeCode::Traitement,
             RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
-    /// Génère un CDV Recyclée par émetteur (226)
-    pub fn generate_recyclee_par_emetteur(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::RecycleeParEmetteur, CdvTypeCode::Traitement,
-            RoleCode::SE, invoice, invoice_type_code, Vec::new())
-    }
-
-    /// Génère un CDV Abandon destinataire (227)
-    pub fn generate_abandon_destinataire(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::AbandonDestinataire, CdvTypeCode::Traitement,
+    /// Génère un CDV Affacturée (225)
+    pub fn generate_affacturee(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
+        self.generate_status(InvoiceStatusCode::Affacturee, CdvTypeCode::Traitement,
             RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
-    /// Génère un CDV Abandon émetteur (228)
-    pub fn generate_abandon_emetteur(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::AbandonEmetteur, CdvTypeCode::Traitement,
-            RoleCode::SE, invoice, invoice_type_code, Vec::new())
+    /// Génère un CDV Affacturée Confidentiel (226)
+    pub fn generate_affacturee_confidentiel(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
+        self.generate_status(InvoiceStatusCode::AffactureeConfidentiel, CdvTypeCode::Traitement,
+            RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
-    /// Génère un CDV Archivée (250)
-    pub fn generate_archivee(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::Archivee, CdvTypeCode::Traitement,
-            RoleCode::WK, invoice, invoice_type_code, Vec::new())
+    /// Génère un CDV Changement de Compte à Payer (227)
+    pub fn generate_changement_compte_a_payer(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
+        self.generate_status(InvoiceStatusCode::ChangementCompteAPayer, CdvTypeCode::Traitement,
+            RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
-    /// Génère un CDV Archivée sans validation (251)
-    pub fn generate_archivee_sans_validation(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
-        self.generate_status(InvoiceStatusCode::ArchiveeSansValidation, CdvTypeCode::Traitement,
-            RoleCode::WK, invoice, invoice_type_code, Vec::new())
+    /// Génère un CDV Non Affacturée (228)
+    pub fn generate_non_affacturee(&self, invoice: &InvoiceData, invoice_type_code: &str) -> CdvResponse {
+        self.generate_status(InvoiceStatusCode::NonAffacturee, CdvTypeCode::Traitement,
+            RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
     /// Sérialise un CDV en XML conforme CrossDomainAcknowledgementAndResponse D23B
@@ -1141,135 +1073,58 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_completee_par_emetteur_224() {
+    fn test_generate_demande_paiement_direct_224() {
         let gen = CdarGenerator::new("100000009", "PDP Test");
         let inv = make_test_invoice();
-        let cdv = gen.generate_completee_par_emetteur(&inv, "380");
+        let cdv = gen.generate_demande_paiement_direct(&inv, "380");
         assert_eq!(cdv.referenced_documents[0].process_condition_code, 224);
         roundtrip(&cdv, &gen, 224);
     }
 
     #[test]
-    fn test_generate_recyclee_par_destinataire_225() {
+    fn test_generate_affacturee_225() {
         let gen = CdarGenerator::new("100000009", "PDP Test");
         let inv = make_test_invoice();
-        let cdv = gen.generate_recyclee_par_destinataire(&inv, "380");
+        let cdv = gen.generate_affacturee(&inv, "380");
         assert_eq!(cdv.referenced_documents[0].process_condition_code, 225);
         roundtrip(&cdv, &gen, 225);
     }
 
     #[test]
-    fn test_generate_recyclee_par_emetteur_226() {
+    fn test_generate_affacturee_confidentiel_226() {
         let gen = CdarGenerator::new("100000009", "PDP Test");
         let inv = make_test_invoice();
-        let cdv = gen.generate_recyclee_par_emetteur(&inv, "380");
+        let cdv = gen.generate_affacturee_confidentiel(&inv, "380");
         assert_eq!(cdv.referenced_documents[0].process_condition_code, 226);
         roundtrip(&cdv, &gen, 226);
     }
 
     #[test]
-    fn test_generate_abandon_destinataire_227() {
+    fn test_generate_changement_compte_a_payer_227() {
         let gen = CdarGenerator::new("100000009", "PDP Test");
         let inv = make_test_invoice();
-        let cdv = gen.generate_abandon_destinataire(&inv, "380");
+        let cdv = gen.generate_changement_compte_a_payer(&inv, "380");
         assert_eq!(cdv.referenced_documents[0].process_condition_code, 227);
         roundtrip(&cdv, &gen, 227);
     }
 
     #[test]
-    fn test_generate_abandon_emetteur_228() {
+    fn test_generate_non_affacturee_228() {
         let gen = CdarGenerator::new("100000009", "PDP Test");
         let inv = make_test_invoice();
-        let cdv = gen.generate_abandon_emetteur(&inv, "380");
+        let cdv = gen.generate_non_affacturee(&inv, "380");
         assert_eq!(cdv.referenced_documents[0].process_condition_code, 228);
         roundtrip(&cdv, &gen, 228);
     }
 
-    #[test]
-    fn test_generate_archivee_250() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_archivee(&inv, "380");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 250);
-        roundtrip(&cdv, &gen, 250);
-    }
-
-    #[test]
-    fn test_generate_archivee_sans_validation_251() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_archivee_sans_validation(&inv, "380");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 251);
-        roundtrip(&cdv, &gen, 251);
-    }
-
-    #[test]
-    fn test_generate_transmise_ppf_300() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_transmise_ppf(&inv, "380");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 300);
-        assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
-        roundtrip(&cdv, &gen, 300);
-    }
-
-    #[test]
-    fn test_generate_transmise_pdp_301() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_transmise_pdp(&inv, "380");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 301);
-        roundtrip(&cdv, &gen, 301);
-    }
-
-    #[test]
-    fn test_generate_transmise_destinataire_400() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_transmise_destinataire(&inv, "380");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 400);
-        roundtrip(&cdv, &gen, 400);
-    }
-
-    #[test]
-    fn test_generate_transmise_od_401() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_transmise_od(&inv, "380");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 401);
-        roundtrip(&cdv, &gen, 401);
-    }
-
-    #[test]
-    fn test_generate_irrecevable_od_500() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_irrecevable_od(&inv, StatusReasonCode::IrrSyntax, "Erreur syntaxe OD");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 500);
-        roundtrip(&cdv, &gen, 500);
-    }
-
-    #[test]
-    fn test_generate_non_transmise_601() {
-        let gen = CdarGenerator::new("100000009", "PDP Test");
-        let inv = make_test_invoice();
-        let cdv = gen.generate_non_transmise(&inv, StatusReasonCode::NonTransmise, "Échec transmission");
-        assert_eq!(cdv.referenced_documents[0].process_condition_code, 601);
-        roundtrip(&cdv, &gen, 601);
-    }
-
-    // ===== Test exhaustif : tous les codes statut sont mappés =====
+    // ===== Test exhaustif : tous les codes statut spec sont mappés =====
 
     #[test]
     fn test_all_status_codes_have_labels() {
         let all_codes: Vec<u16> = vec![
             200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214,
             220, 221, 224, 225, 226, 227, 228,
-            250, 251,
-            300, 301,
-            400, 401,
-            500, 501,
-            601,
+            501,
         ];
         for code in all_codes {
             let status = InvoiceStatusCode::from_code(code);

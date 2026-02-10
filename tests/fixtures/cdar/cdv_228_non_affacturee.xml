@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- CDV Transmise OD (401) — Phase Transmission (305), StatusCode=10 -->
+<!-- CDV Non Affacturée (228) — Phase Traitement (23), StatusCode=8 -->
 <rsm:CrossDomainAcknowledgementAndResponse
  xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100"
  xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
@@ -15,37 +15,39 @@
           </ram:GuidelineSpecifiedDocumentContextParameter>
      </rsm:ExchangedDocumentContext>
      <rsm:ExchangedDocument>
-          <ram:ID>F202500001_401_20250701154000#380_20250701</ram:ID>
-          <ram:Name>CDV-401_Transmise_OD_F202500001</ram:Name>
+          <ram:ID>F202500001_228_20250703090000#380_20250701</ram:ID>
+          <ram:Name>CDV-228_Abandon_emetteur_F202500001</ram:Name>
           <ram:IssueDateTime>
-               <udt:DateTimeString format="204">20250701154500</udt:DateTimeString>
+               <udt:DateTimeString format="204">20250703090500</udt:DateTimeString>
           </ram:IssueDateTime>
           <ram:SenderTradeParty>
-               <ram:RoleCode>WK</ram:RoleCode>
+               <ram:RoleCode>SE</ram:RoleCode>
           </ram:SenderTradeParty>
           <ram:IssuerTradeParty>
-               <ram:RoleCode>WK</ram:RoleCode>
+               <ram:RoleCode>SE</ram:RoleCode>
           </ram:IssuerTradeParty>
           <ram:RecipientTradeParty>
                <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
                <ram:Name>VENDEUR</ram:Name>
                <ram:RoleCode>SE</ram:RoleCode>
-               <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0225">100000009_STATUTS</ram:URIID>
-               </ram:URIUniversalCommunication>
+          </ram:RecipientTradeParty>
+          <ram:RecipientTradeParty>
+               <ram:GlobalID schemeID="0002">200000008</ram:GlobalID>
+               <ram:Name>ACHETEUR</ram:Name>
+               <ram:RoleCode>BY</ram:RoleCode>
           </ram:RecipientTradeParty>
      </rsm:ExchangedDocument>
      <rsm:AcknowledgementDocument>
           <ram:MultipleReferencesIndicator>
                <udt:Indicator>false</udt:Indicator>
           </ram:MultipleReferencesIndicator>
-          <ram:TypeCode>305</ram:TypeCode>
+          <ram:TypeCode>23</ram:TypeCode>
           <ram:IssueDateTime>
-               <udt:DateTimeString format="204">20250701154000</udt:DateTimeString>
+               <udt:DateTimeString format="204">20250703090000</udt:DateTimeString>
           </ram:IssueDateTime>
           <ram:ReferenceReferencedDocument>
                <ram:IssuerAssignedID>F202500001</ram:IssuerAssignedID>
-               <ram:StatusCode>10</ram:StatusCode>
+               <ram:StatusCode>8</ram:StatusCode>
                <ram:TypeCode>380</ram:TypeCode>
                <ram:ReceiptDateTime>
                     <udt:DateTimeString format="204">20250701151000</udt:DateTimeString>
@@ -53,12 +55,19 @@
                <ram:FormattedIssueDateTime>
                     <qdt:DateTimeString format="102">20250701</qdt:DateTimeString>
                </ram:FormattedIssueDateTime>
-               <ram:ProcessConditionCode>401</ram:ProcessConditionCode>
-               <ram:ProcessCondition>Transmise_OD</ram:ProcessCondition>
+               <ram:ProcessConditionCode>228</ram:ProcessConditionCode>
+               <ram:ProcessCondition>Non_Affacturée</ram:ProcessCondition>
                <ram:IssuerTradeParty>
                     <ram:GlobalID schemeID="0002">100000009</ram:GlobalID>
                     <ram:RoleCode>SE</ram:RoleCode>
                </ram:IssuerTradeParty>
+               <ram:SpecifiedDocumentStatus>
+                    <ram:ReasonCode>AUTRE</ram:ReasonCode>
+                    <ram:Reason>Facture abandonnée par l'émetteur suite à annulation de la commande</ram:Reason>
+                    <ram:RequestedActionCode>NIN</ram:RequestedActionCode>
+                    <ram:RequestedAction>Émettre un avoir si nécessaire</ram:RequestedAction>
+                    <ram:SequenceNumeric>1</ram:SequenceNumeric>
+               </ram:SpecifiedDocumentStatus>
           </ram:ReferenceReferencedDocument>
      </rsm:AcknowledgementDocument>
 </rsm:CrossDomainAcknowledgementAndResponse>

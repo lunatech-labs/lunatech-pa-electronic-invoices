@@ -409,10 +409,6 @@ fn map_cdv_to_flow_status(status_code: u16) -> FlowStatus {
         Some(InvoiceStatusCode::Emise) => FlowStatus::Distributed,
         Some(InvoiceStatusCode::Recue) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::MiseADisposition) => FlowStatus::Distributed,
-        Some(InvoiceStatusCode::TransmisePPF) => FlowStatus::Distributed,
-        Some(InvoiceStatusCode::TransmisePDP) => FlowStatus::Distributed,
-        Some(InvoiceStatusCode::TransmiseDestinataire) => FlowStatus::Distributed,
-        Some(InvoiceStatusCode::TransmiseOD) => FlowStatus::Distributed,
         // Phase Traitement — statuts positifs
         Some(InvoiceStatusCode::PriseEnCharge) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::Approuvee) => FlowStatus::Acknowledged,
@@ -421,23 +417,19 @@ fn map_cdv_to_flow_status(status_code: u16) -> FlowStatus {
         Some(InvoiceStatusCode::PaiementTransmis) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::Encaissee) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::Visee) => FlowStatus::Acknowledged,
+        Some(InvoiceStatusCode::DemandePaiementDirect) => FlowStatus::Acknowledged,
+        Some(InvoiceStatusCode::Affacturee) => FlowStatus::Acknowledged,
+        Some(InvoiceStatusCode::AffactureeConfidentiel) => FlowStatus::Acknowledged,
+        Some(InvoiceStatusCode::ChangementCompteAPayer) => FlowStatus::Acknowledged,
+        Some(InvoiceStatusCode::NonAffacturee) => FlowStatus::Acknowledged,
         Some(InvoiceStatusCode::Annulee) => FlowStatus::Cancelled,
-        Some(InvoiceStatusCode::CompleteeParEmetteur) => FlowStatus::Acknowledged,
-        Some(InvoiceStatusCode::RecycleeParDestinataire) => FlowStatus::Acknowledged,
-        Some(InvoiceStatusCode::RecycleeParEmetteur) => FlowStatus::Acknowledged,
-        Some(InvoiceStatusCode::Archivee) => FlowStatus::Acknowledged,
-        Some(InvoiceStatusCode::ArchiveeSansValidation) => FlowStatus::Acknowledged,
         // Phase Traitement — statuts d'attente
         Some(InvoiceStatusCode::EnLitige) => FlowStatus::WaitingAck,
         Some(InvoiceStatusCode::Suspendue) => FlowStatus::WaitingAck,
-        // Phase Traitement/Transmission — rejets et erreurs
+        // Rejets et erreurs
         Some(InvoiceStatusCode::Rejetee) => FlowStatus::Rejected,
         Some(InvoiceStatusCode::Refusee) => FlowStatus::Rejected,
         Some(InvoiceStatusCode::Irrecevable) => FlowStatus::Rejected,
-        Some(InvoiceStatusCode::IrrecevableOD) => FlowStatus::Rejected,
-        Some(InvoiceStatusCode::AbandonDestinataire) => FlowStatus::Rejected,
-        Some(InvoiceStatusCode::AbandonEmetteur) => FlowStatus::Rejected,
-        Some(InvoiceStatusCode::NonTransmise) => FlowStatus::Error,
         Some(InvoiceStatusCode::ErreurRoutage) => FlowStatus::Error,
         _ => FlowStatus::WaitingAck,
     }
@@ -788,7 +780,8 @@ mod tests {
         assert_eq!(map_cdv_to_flow_status(202), FlowStatus::Acknowledged);
         assert_eq!(map_cdv_to_flow_status(213), FlowStatus::Rejected);
         assert_eq!(map_cdv_to_flow_status(501), FlowStatus::Rejected);
-        assert_eq!(map_cdv_to_flow_status(601), FlowStatus::Error);
+        assert_eq!(map_cdv_to_flow_status(221), FlowStatus::Error);
+        assert_eq!(map_cdv_to_flow_status(220), FlowStatus::Cancelled);
         assert_eq!(map_cdv_to_flow_status(207), FlowStatus::WaitingAck);
         assert_eq!(map_cdv_to_flow_status(9999), FlowStatus::WaitingAck);
     }
@@ -812,9 +805,6 @@ mod tests {
         // Phase Transmission — statuts positifs → Distributed
         assert_processor_status("cdv_201_emise.xml", FlowStatus::Distributed, false).await;
         assert_processor_status("cdv_203_mise_a_disposition.xml", FlowStatus::Distributed, false).await;
-        assert_processor_status("cdv_300_transmise_ppf.xml", FlowStatus::Distributed, false).await;
-        assert_processor_status("cdv_301_transmise_pdp.xml", FlowStatus::Distributed, false).await;
-        assert_processor_status("cdv_400_transmise_destinataire.xml", FlowStatus::Distributed, false).await;
         // 202 Reçue → Acknowledged
         assert_processor_status("cdv_202_recue.xml", FlowStatus::Acknowledged, false).await;
     }
@@ -835,29 +825,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_cdv_reception_all_error_statuses() {
-        // Rejets → Rejected (avec erreurs)
+        // Rejets → Rejected
         assert_processor_status("cdv_210_refusee.xml", FlowStatus::Rejected, false).await;
+        assert_processor_status("cdv_213_rejetee.xml", FlowStatus::Rejected, true).await;
         assert_processor_status("cdv_501_irrecevable.xml", FlowStatus::Rejected, false).await;
         // Erreurs techniques → Error
         assert_processor_status("cdv_221_erreur_routage.xml", FlowStatus::Error, false).await;
-        assert_processor_status("cdv_601_non_transmise.xml", FlowStatus::Error, false).await;
     }
 
     #[tokio::test]
     async fn test_cdv_reception_extended_statuses() {
         // Annulée → Cancelled
         assert_processor_status("cdv_220_annulee.xml", FlowStatus::Cancelled, false).await;
-        assert_processor_status("cdv_224_completee_par_emetteur.xml", FlowStatus::Acknowledged, false).await;
-        assert_processor_status("cdv_225_recyclee_par_destinataire.xml", FlowStatus::Acknowledged, false).await;
-        assert_processor_status("cdv_226_recyclee_par_emetteur.xml", FlowStatus::Acknowledged, false).await;
-        assert_processor_status("cdv_250_archivee.xml", FlowStatus::Acknowledged, false).await;
-        assert_processor_status("cdv_251_archivee_sans_validation.xml", FlowStatus::Acknowledged, false).await;
-        // Abandon → Rejected
-        assert_processor_status("cdv_227_abandon_destinataire.xml", FlowStatus::Rejected, false).await;
-        assert_processor_status("cdv_228_abandon_emetteur.xml", FlowStatus::Rejected, false).await;
-        // Transmission étendus
-        assert_processor_status("cdv_401_transmise_od.xml", FlowStatus::Distributed, false).await;
-        assert_processor_status("cdv_500_irrecevable_od.xml", FlowStatus::Rejected, false).await;
+        // Statuts 224-228 → Acknowledged
+        assert_processor_status("cdv_224_demande_paiement_direct.xml", FlowStatus::Acknowledged, false).await;
+        assert_processor_status("cdv_225_affacturee.xml", FlowStatus::Acknowledged, false).await;
+        assert_processor_status("cdv_226_affacturee_confidentiel.xml", FlowStatus::Acknowledged, false).await;
+        assert_processor_status("cdv_227_changement_compte_a_payer.xml", FlowStatus::Acknowledged, false).await;
+        assert_processor_status("cdv_228_non_affacturee.xml", FlowStatus::Acknowledged, false).await;
     }
 
     // ===== Tests DocumentTypeRouter =====
