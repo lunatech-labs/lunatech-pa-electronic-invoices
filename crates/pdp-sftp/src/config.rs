@@ -28,6 +28,11 @@ pub struct SftpConfig {
     /// comme entièrement écrit et peut être consommé. 0 = pas de vérification.
     #[serde(default = "default_stable_delay")]
     pub stable_delay_ms: u64,
+    /// Chemin vers le fichier known_hosts pour vérification des clés serveur SSH.
+    /// Si None, la vérification est désactivée (mode développement uniquement).
+    /// En production, ce champ DOIT être configuré pour se protéger contre les attaques MITM.
+    #[serde(default)]
+    pub known_hosts_path: Option<String>,
 }
 
 fn default_pattern() -> String {
@@ -56,6 +61,7 @@ impl Default for SftpConfig {
             delete_after_read: false,
             timeout_secs: default_timeout(),
             stable_delay_ms: default_stable_delay(),
+            known_hosts_path: None,
         }
     }
 }

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsd:schema xmlns:clm61001="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentNameCode:D23A"
+<xsd:schema xmlns:clm61001="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentNameCode:D22A"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentNameCode:D23A"
+    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentNameCode:D22A"
     elementFormDefault="qualified"
-    version="4.19">
+    version="3.17">
   <xsd:simpleType name="DocumentNameCodeContentType">
     <xsd:restriction base="xsd:token">
       <xsd:enumeration value="1"/>
@@ -476,7 +476,6 @@
       <xsd:enumeration value="468"/>
       <xsd:enumeration value="469"/>
       <xsd:enumeration value="470"/>
-      <xsd:enumeration value="480"/>
       <xsd:enumeration value="481"/>
       <xsd:enumeration value="482"/>
       <xsd:enumeration value="483"/>
@@ -495,10 +494,6 @@
       <xsd:enumeration value="497"/>
       <xsd:enumeration value="498"/>
       <xsd:enumeration value="499"/>
-      <xsd:enumeration value="500"/>
-      <xsd:enumeration value="501"/>
-      <xsd:enumeration value="502"/>
-      <xsd:enumeration value="503"/>
       <xsd:enumeration value="520"/>
       <xsd:enumeration value="521"/>
       <xsd:enumeration value="522"/>
@@ -579,7 +574,6 @@
       <xsd:enumeration value="657"/>
       <xsd:enumeration value="658"/>
       <xsd:enumeration value="659"/>
-      <xsd:enumeration value="660"/>
       <xsd:enumeration value="700"/>
       <xsd:enumeration value="701"/>
       <xsd:enumeration value="702"/>

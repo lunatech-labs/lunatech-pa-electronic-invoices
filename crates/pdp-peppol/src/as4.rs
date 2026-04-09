@@ -16,6 +16,9 @@
 //! ```
 
 use chrono::Utc;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use std::io::Write;
 
 use crate::error::PeppolError;
 use crate::model::{As4SendResult, PeppolConfig, PeppolMessage, SmpEndpoint};
@@ -97,18 +100,25 @@ impl As4Client {
         // 1. Construire le SBDH (enveloppe du document)
         let sbdh_xml = sbdh::build_sbdh(message);
 
-        // 2. Construire l'enveloppe SOAP ebMS3
+        // 2. Extraire l'identifiant AP destinataire depuis le certificat SMP
+        //    En PEPPOL, le eb:To/PartyId devrait être le CN du certificat de l'AP
+        //    destinataire. On utilise le certificat du SMP endpoint, ou l'URL en fallback.
+        let to_party_id = extract_ap_cn_from_cert(&endpoint.certificate)
+            .unwrap_or_else(|| endpoint.endpoint_url.clone());
+
+        // 3. Construire l'enveloppe SOAP ebMS3
         let soap_envelope = build_soap_envelope(
             &message_id,
             &self.config.ap_id,
+            &to_party_id,
             &message.document_type_id.to_action(),
             &message.process_id.to_string(),
         );
 
-        // 3. Construire le message MIME multipart
+        // 4. Construire le message MIME multipart (avec compression gzip du payload)
         let mime_body = build_mime_multipart(&soap_envelope, &sbdh_xml);
 
-        // 4. Envoyer via HTTPS POST
+        // 5. Envoyer via HTTPS POST
         let response = self.http
             .post(&endpoint.endpoint_url)
             .header("Content-Type", format!("multipart/related; boundary=\"{}\"; type=\"application/soap+xml\"; start=\"<soap-envelope>\"", MIME_BOUNDARY))
@@ -178,16 +188,14 @@ pub struct As4IncomingMessage {
 /// Parse un message AS4 entrant (MIME multipart).
 ///
 /// Extrait l'enveloppe SOAP et le payload SBDH.
+/// Gère les payloads compressés gzip (PEPPOL AS4 v2.0).
 pub fn parse_incoming_as4(content_type: &str, body: &[u8]) -> Result<As4IncomingMessage, PeppolError> {
-    let body_str = std::str::from_utf8(body)
-        .map_err(|e| PeppolError::As4Error(format!("Body AS4 non UTF-8 : {}", e)))?;
-
     // Extraire le boundary du Content-Type
     let boundary = extract_mime_boundary(content_type)
         .ok_or_else(|| PeppolError::As4Error("Boundary MIME manquant".into()))?;
 
-    // Séparer les parties MIME
-    let parts = split_mime_parts(body_str, &boundary);
+    // Séparer les parties MIME en binaire
+    let parts = split_mime_parts_binary(body, &boundary);
 
     if parts.len() < 2 {
         return Err(PeppolError::As4Error(format!(
@@ -196,12 +204,15 @@ pub fn parse_incoming_as4(content_type: &str, body: &[u8]) -> Result<As4Incoming
         )));
     }
 
-    // Partie 1 : SOAP Envelope
-    let soap_xml = &parts[0];
+    // Partie 1 : SOAP Envelope (texte XML)
+    let soap_xml = std::str::from_utf8(&parts[0])
+        .map_err(|e| PeppolError::As4Error(format!("SOAP envelope non UTF-8 : {}", e)))?;
     let (message_id, action, service) = parse_soap_envelope(soap_xml)?;
 
-    // Partie 2 : SBDH + payload
-    let sbdh_xml = &parts[1];
+    // Partie 2 : SBDH + payload (potentiellement compressé gzip)
+    let sbdh_bytes = try_gzip_decompress_bytes(&parts[1]);
+    let sbdh_xml = std::str::from_utf8(&sbdh_bytes)
+        .map_err(|e| PeppolError::As4Error(format!("SBDH non UTF-8 après décompression : {}", e)))?;
     let sbdh_parsed = sbdh::parse_sbdh(sbdh_xml)
         .map_err(|e| PeppolError::As4Error(format!("SBDH invalide : {}", e)))?;
 
@@ -278,9 +289,14 @@ pub fn build_as4_error(ref_message_id: &str, error_code: &str, error_detail: &st
 // ============================================================
 
 /// Construit l'enveloppe SOAP ebMS3 pour un message AS4 sortant.
+///
+/// `to_party_id` est l'identifiant de l'AP destinataire (typiquement le CN
+/// du certificat AP obtenu via SMP). Si absent, on utilise l'AP ID de
+/// l'émetteur en fallback (ce qui peut fonctionner dans certains cas de test).
 fn build_soap_envelope(
     message_id: &str,
     ap_id: &str,
+    to_party_id: &str,
     action: &str,
     service: &str,
 ) -> String {
@@ -302,7 +318,7 @@ fn build_soap_envelope(
             <eb:Role>{initiator_role}</eb:Role>
           </eb:From>
           <eb:To>
-            <eb:PartyId type="{party_type}">UNKNOWN</eb:PartyId>
+            <eb:PartyId type="{party_type}">{to_party_id}</eb:PartyId>
             <eb:Role>{responder_role}</eb:Role>
           </eb:To>
         </eb:PartyInfo>
@@ -329,6 +345,7 @@ fn build_soap_envelope(
         message_id = xml_escape(message_id),
         party_type = PEPPOL_PARTY_TYPE,
         ap_id = xml_escape(ap_id),
+        to_party_id = xml_escape(to_party_id),
         initiator_role = PEPPOL_INITIATOR_ROLE,
         responder_role = PEPPOL_RESPONDER_ROLE,
         agreement = PEPPOL_AGREEMENT,
@@ -338,29 +355,45 @@ fn build_soap_envelope(
     )
 }
 
-/// Construit le corps MIME multipart (SOAP + SBDH payload).
-fn build_mime_multipart(soap_envelope: &str, sbdh_payload: &str) -> String {
-    let mut body = String::with_capacity(soap_envelope.len() + sbdh_payload.len() + 512);
+/// Compresse le payload SBDH en gzip (requis par PEPPOL AS4 v2.0).
+///
+/// La spécification PEPPOL AS4 exige que le payload soit compressé en gzip
+/// lorsque `CompressionType: application/gzip` est déclaré dans le SOAP envelope.
+fn gzip_compress(data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(data)?;
+    encoder.finish()
+}
 
-    // Part 1 : SOAP Envelope
-    body.push_str(&format!("--{}\r\n", MIME_BOUNDARY));
-    body.push_str("Content-Type: application/soap+xml; charset=UTF-8\r\n");
-    body.push_str("Content-ID: <soap-envelope>\r\n");
-    body.push_str("\r\n");
-    body.push_str(soap_envelope);
-    body.push_str("\r\n");
+/// Construit le corps MIME multipart (SOAP + SBDH payload compressé gzip).
+///
+/// Retourne des bytes car la partie 2 est du binaire gzip.
+fn build_mime_multipart(soap_envelope: &str, sbdh_payload: &str) -> Vec<u8> {
+    // Compresser le SBDH payload en gzip conformément à PEPPOL AS4 v2.0
+    let compressed = gzip_compress(sbdh_payload.as_bytes())
+        .unwrap_or_else(|_| sbdh_payload.as_bytes().to_vec());
 
-    // Part 2 : SBDH + payload
-    body.push_str(&format!("--{}\r\n", MIME_BOUNDARY));
-    body.push_str("Content-Type: application/xml; charset=UTF-8\r\n");
-    body.push_str("Content-ID: <sbdh-payload>\r\n");
-    body.push_str("Content-Transfer-Encoding: binary\r\n");
-    body.push_str("\r\n");
-    body.push_str(sbdh_payload);
-    body.push_str("\r\n");
+    let mut body = Vec::with_capacity(soap_envelope.len() + compressed.len() + 512);
+
+    // Part 1 : SOAP Envelope (texte)
+    body.extend_from_slice(format!("--{}\r\n", MIME_BOUNDARY).as_bytes());
+    body.extend_from_slice(b"Content-Type: application/soap+xml; charset=UTF-8\r\n");
+    body.extend_from_slice(b"Content-ID: <soap-envelope>\r\n");
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(soap_envelope.as_bytes());
+    body.extend_from_slice(b"\r\n");
+
+    // Part 2 : SBDH payload compressé gzip (binaire)
+    body.extend_from_slice(format!("--{}\r\n", MIME_BOUNDARY).as_bytes());
+    body.extend_from_slice(b"Content-Type: application/gzip\r\n");
+    body.extend_from_slice(b"Content-ID: <sbdh-payload>\r\n");
+    body.extend_from_slice(b"Content-Transfer-Encoding: binary\r\n");
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(&compressed);
+    body.extend_from_slice(b"\r\n");
 
     // Fin
-    body.push_str(&format!("--{}--\r\n", MIME_BOUNDARY));
+    body.extend_from_slice(format!("--{}--\r\n", MIME_BOUNDARY).as_bytes());
 
     body
 }
@@ -419,6 +452,7 @@ fn extract_mime_boundary(content_type: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn split_mime_parts(body: &str, boundary: &str) -> Vec<String> {
     let delimiter = format!("--{}", boundary);
     let end_delimiter = format!("--{}--", boundary);
@@ -440,6 +474,163 @@ fn split_mime_parts(body: &str, boundary: &str) -> Vec<String> {
         .collect()
 }
 
+/// Tente de décompresser un contenu gzip binaire. Si ce n'est pas du gzip valide,
+/// retourne les bytes originaux tels quels.
+fn try_gzip_decompress_bytes(data: &[u8]) -> Vec<u8> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+
+    // Vérifier le magic number gzip (1f 8b)
+    if data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+        let mut decoder = GzDecoder::new(data);
+        let mut decompressed = Vec::new();
+        if decoder.read_to_end(&mut decompressed).is_ok() {
+            return decompressed;
+        }
+    }
+    // Pas du gzip ou échec de décompression → retourner tel quel
+    data.to_vec()
+}
+
+/// Sépare les parties MIME en travaillant sur des bytes bruts.
+///
+/// Nécessaire car le payload SBDH peut être compressé gzip (binaire non-UTF-8).
+fn split_mime_parts_binary(body: &[u8], boundary: &str) -> Vec<Vec<u8>> {
+    let delimiter = format!("--{}", boundary);
+    let delimiter_bytes = delimiter.as_bytes();
+    let end_delimiter = format!("--{}--", boundary);
+    let end_delimiter_bytes = end_delimiter.as_bytes();
+
+    let mut parts = Vec::new();
+    let mut start = 0;
+
+    // Trouver chaque occurrence du delimiter
+    while let Some(pos) = find_bytes(&body[start..], delimiter_bytes) {
+        let abs_pos = start + pos;
+        if start > 0 {
+            // Extraire la partie entre le delimiter précédent et celui-ci
+            let part_data = &body[start..abs_pos];
+            if let Some(extracted) = extract_mime_part_body(part_data) {
+                if !extracted.is_empty() {
+                    parts.push(extracted);
+                }
+            }
+        }
+        // Avancer après le delimiter + CRLF
+        start = abs_pos + delimiter_bytes.len();
+        // Sauter le CRLF ou LF après le delimiter
+        if start < body.len() && body[start] == b'\r' {
+            start += 1;
+        }
+        if start < body.len() && body[start] == b'\n' {
+            start += 1;
+        }
+        // Vérifier si c'est le end delimiter
+        if abs_pos + end_delimiter_bytes.len() <= body.len()
+            && &body[abs_pos..abs_pos + end_delimiter_bytes.len()] == end_delimiter_bytes
+        {
+            break;
+        }
+    }
+
+    // Dernière partie (après le dernier delimiter, avant le end delimiter)
+    if start < body.len() {
+        // Chercher le end delimiter
+        let remaining = &body[start..];
+        let end_pos = find_bytes(remaining, delimiter_bytes)
+            .unwrap_or(remaining.len());
+        let part_data = &remaining[..end_pos];
+        if let Some(extracted) = extract_mime_part_body(part_data) {
+            if !extracted.is_empty() {
+                parts.push(extracted);
+            }
+        }
+    }
+
+    parts
+}
+
+/// Recherche une séquence de bytes dans un slice.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Extrait le body d'une partie MIME (après les headers, séparés par \r\n\r\n ou \n\n).
+fn extract_mime_part_body(data: &[u8]) -> Option<Vec<u8>> {
+    // Chercher la séparation headers/body : \r\n\r\n
+    let sep_crlf = b"\r\n\r\n";
+    let sep_lf = b"\n\n";
+
+    let body = if let Some(pos) = find_bytes(data, sep_crlf) {
+        &data[pos + 4..]
+    } else if let Some(pos) = find_bytes(data, sep_lf) {
+        &data[pos + 2..]
+    } else {
+        return None;
+    };
+
+    // Trimmer les \r\n finaux
+    let mut end = body.len();
+    while end > 0 && (body[end - 1] == b'\r' || body[end - 1] == b'\n') {
+        end -= 1;
+    }
+
+    if end == 0 {
+        return None;
+    }
+
+    Some(body[..end].to_vec())
+}
+
+/// Tente d'extraire le CN (Common Name) d'un certificat X.509 base64 (PEM body).
+fn extract_ap_cn_from_cert(cert_b64: &str) -> Option<String> {
+    // Nettoyer le base64 (retirer les en-têtes PEM éventuels et whitespace)
+    let cleaned: String = cert_b64
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect::<Vec<_>>()
+        .join("");
+
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    // Décoder le DER
+    let der = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        &cleaned,
+    ).ok()?;
+
+    // Chercher le CN dans le DER (heuristique : chercher l'OID 2.5.4.3 = 55 04 03)
+    // suivi d'un UTF8String (0x0C) ou PrintableString (0x13)
+    let cn_oid = [0x55u8, 0x04, 0x03];
+    for (i, window) in der.windows(3).enumerate() {
+        if window == cn_oid {
+            // Après l'OID, on a un tag + longueur + valeur
+            let tag_pos = i + 3;
+            if tag_pos + 2 >= der.len() {
+                continue;
+            }
+            let tag = der[tag_pos];
+            if tag != 0x0C && tag != 0x13 {
+                continue;
+            }
+            let len = der[tag_pos + 1] as usize;
+            let val_start = tag_pos + 2;
+            if val_start + len > der.len() {
+                continue;
+            }
+            if let Ok(cn) = std::str::from_utf8(&der[val_start..val_start + len]) {
+                if !cn.is_empty() {
+                    return Some(cn.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -457,6 +648,7 @@ mod tests {
         let soap = build_soap_envelope(
             "test-msg-001@POP000123",
             "POP000123",
+            "POP000456",
             "busdox-docid-qns::urn:oasis:names:specification:ubl:schema:xsd:Invoice-2::Invoice",
             "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0",
         );
@@ -465,6 +657,8 @@ mod tests {
         assert!(soap.contains("eb:UserMessage"));
         assert!(soap.contains("test-msg-001@POP000123"));
         assert!(soap.contains("POP000123"));
+        assert!(soap.contains("POP000456"), "To PartyId doit contenir l'AP destinataire");
+        assert!(!soap.contains("UNKNOWN"), "Ne doit plus contenir UNKNOWN");
         assert!(soap.contains(PEPPOL_AGREEMENT));
         assert!(soap.contains(PEPPOL_DEFAULT_MPC));
         assert!(soap.contains("Invoice"));
@@ -475,13 +669,37 @@ mod tests {
         let soap = "<soap:Envelope/>";
         let sbdh = "<StandardBusinessDocument/>";
         let mime = build_mime_multipart(soap, sbdh);
+        let mime_str = String::from_utf8_lossy(&mime);
 
-        assert!(mime.contains(MIME_BOUNDARY));
-        assert!(mime.contains("application/soap+xml"));
-        assert!(mime.contains("soap-envelope"));
-        assert!(mime.contains("sbdh-payload"));
-        assert!(mime.contains(soap));
-        assert!(mime.contains(sbdh));
+        assert!(mime_str.contains(MIME_BOUNDARY));
+        assert!(mime_str.contains("application/soap+xml"));
+        assert!(mime_str.contains("soap-envelope"));
+        assert!(mime_str.contains("sbdh-payload"));
+        assert!(mime_str.contains(soap), "SOAP envelope doit rester en clair");
+        // Le SBDH est maintenant compressé gzip, on ne le trouvera pas en clair
+        assert!(mime_str.contains("application/gzip"), "Content-Type du payload doit être gzip");
+    }
+
+    #[test]
+    fn test_gzip_compress_decompress_roundtrip() {
+        let original = "<StandardBusinessDocument><Payload>Test data</Payload></StandardBusinessDocument>";
+        let compressed = gzip_compress(original.as_bytes()).unwrap();
+        assert_ne!(compressed, original.as_bytes(), "Compressed doit être différent");
+        // Vérifier le magic number gzip
+        assert_eq!(compressed[0], 0x1f);
+        assert_eq!(compressed[1], 0x8b);
+        // Décompresser via notre fonction utilitaire
+        let decompressed = try_gzip_decompress_bytes(&compressed);
+        assert_eq!(decompressed, original.as_bytes());
+        assert_eq!(std::str::from_utf8(&decompressed).unwrap(), original);
+    }
+
+    #[test]
+    fn test_gzip_decompress_non_gzip_passthrough() {
+        // Si les données ne sont pas du gzip, elles doivent être retournées telles quelles
+        let plain = b"<StandardBusinessDocument/>";
+        let result = try_gzip_decompress_bytes(plain);
+        assert_eq!(result, plain);
     }
 
     #[test]
@@ -489,6 +707,7 @@ mod tests {
         let soap = build_soap_envelope(
             "msg-123@AP",
             "AP001",
+            "AP002",
             "test-action",
             "test-service",
         );
@@ -556,19 +775,25 @@ mod tests {
         let soap = build_soap_envelope(
             "roundtrip-001@AP",
             "AP001",
+            "AP002",
             &msg.document_type_id.to_action(),
             &msg.process_id.to_string(),
         );
-        let mime = build_mime_multipart(&soap, &sbdh_xml);
+        let mime_bytes = build_mime_multipart(&soap, &sbdh_xml);
 
-        // Parse it back
-        let parts = split_mime_parts(&mime, MIME_BOUNDARY);
+        // Parser en binaire (nécessaire car la partie 2 est du gzip)
+        let parts = split_mime_parts_binary(&mime_bytes, MIME_BOUNDARY);
         assert!(parts.len() >= 2, "Doit avoir au moins 2 parties MIME, trouvé {}", parts.len());
 
-        let (msg_id, _, _) = parse_soap_envelope(&parts[0]).unwrap();
+        // Partie 1 : SOAP (texte)
+        let soap_str = std::str::from_utf8(&parts[0]).unwrap();
+        let (msg_id, _, _) = parse_soap_envelope(soap_str).unwrap();
         assert_eq!(msg_id, "roundtrip-001@AP");
 
-        let sbdh_parsed = sbdh::parse_sbdh(&parts[1]).unwrap();
+        // Partie 2 : SBDH compressé gzip → décompresser
+        let sbdh_bytes = try_gzip_decompress_bytes(&parts[1]);
+        let sbdh_str = std::str::from_utf8(&sbdh_bytes).unwrap();
+        let sbdh_parsed = sbdh::parse_sbdh(sbdh_str).unwrap();
         assert_eq!(sbdh_parsed.sender.value, "111111111");
         assert_eq!(sbdh_parsed.receiver.value, "222222222");
         assert!(sbdh_parsed.payload.contains("FA-001"));

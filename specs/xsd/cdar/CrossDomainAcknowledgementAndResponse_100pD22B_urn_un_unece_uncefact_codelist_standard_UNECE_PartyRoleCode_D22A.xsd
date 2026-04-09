@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsd:schema xmlns:clm63035="urn:un:unece:uncefact:codelist:standard:UNECE:PartyRoleCode:D23A"
+<xsd:schema xmlns:clm63035="urn:un:unece:uncefact:codelist:standard:UNECE:PartyRoleCode:D22A"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:PartyRoleCode:D23A"
+    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:PartyRoleCode:D22A"
     elementFormDefault="qualified"
-    version="4.11">
+    version="3.10">
   <xsd:simpleType name="PartyRoleCodeContentType">
     <xsd:restriction base="xsd:token">
       <xsd:enumeration value="AA"/>
@@ -485,7 +485,6 @@
       <xsd:enumeration value="PN"/>
       <xsd:enumeration value="PO"/>
       <xsd:enumeration value="POA"/>
-      <xsd:enumeration value="PP"/>
       <xsd:enumeration value="PQ"/>
       <xsd:enumeration value="PR"/>
       <xsd:enumeration value="PS"/>

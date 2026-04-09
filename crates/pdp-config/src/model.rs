@@ -103,6 +103,9 @@ pub struct EndpointConfig {
     pub archive_path: Option<String>,
     #[serde(default)]
     pub delete_after_read: Option<bool>,
+    /// Chemin vers le fichier known_hosts pour vérification des clés serveur SSH (SFTP)
+    #[serde(default)]
+    pub known_hosts_path: Option<String>,
 }
 
 /// Configuration du destinataire CDAR

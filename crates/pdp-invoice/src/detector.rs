@@ -30,7 +30,7 @@ pub fn detect_document_type(data: &[u8]) -> DocumentType {
 
 /// Détecte le type de document à partir du contenu XML
 fn detect_document_type_from_xml(xml: &str) -> DocumentType {
-    // CDAR : CrossDomainAcknowledgementAndResponse (D23B)
+    // CDAR : CrossDomainAcknowledgementAndResponse (D22B)
     if xml.contains("CrossDomainAcknowledgementAndResponse")
         || xml.contains("uncefact:data:standard:CrossDomainAcknowledgementAndResponse")
     {

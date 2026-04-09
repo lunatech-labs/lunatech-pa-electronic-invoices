@@ -3,7 +3,7 @@
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
     targetNamespace="urn:un:unece:uncefact:identifierlist:standard:ISO:ISOTwo-letterCountryCode:SecondEdition2006"
     elementFormDefault="qualified"
-    version="12.12">
+    version="10.11">
   <xsd:simpleType name="ISOTwoletterCountryCodeContentType">
     <xsd:restriction base="xsd:token">
       <xsd:enumeration value="AD"/>

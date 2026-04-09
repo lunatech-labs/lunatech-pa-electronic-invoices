@@ -521,8 +521,6 @@ pub fn supported_conversions(source: &InvoiceFormat) -> Vec<InvoiceFormat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine as _;
-
     // --- Helpers ---
 
     fn parse_ubl(path: &str) -> InvoiceData {

@@ -135,6 +135,39 @@ impl InvoiceValidator {
             }
         }
 
+        // BR-FR-12 : schemeID du point d'échange vendeur (BT-34-1)
+        // Valeurs autorisées par la norme française : 0002, 0007, 0009, 0037, 0088, 0096,
+        // 0135, 0142, 0151, 0170, 0183, 0184, 0190, 0191, 0192, 0193, 0195, 0196, 0198, 0199,
+        // 0200, 0201, 0202, 0204, 0208, 0209, 0210, 0211, 0212, 0213, 0215, 0216, 0221, 0225, 0230
+        if let Some(ref scheme) = invoice.seller_endpoint_scheme {
+            if !is_valid_eas_scheme(scheme) {
+                errors.push(ValidationIssue {
+                    rule_id: "BR-FR-12".to_string(),
+                    severity: Severity::Error,
+                    field: "seller_endpoint_scheme".to_string(),
+                    message: format!(
+                        "BR-FR-12 : Le schemeID '{}' du point d'échange vendeur (BT-34-1) n'est pas conforme à la liste EAS",
+                        scheme
+                    ),
+                });
+            }
+        }
+
+        // BR-FR-13 : schemeID du point d'échange acheteur (BT-49-1)
+        if let Some(ref scheme) = invoice.buyer_endpoint_scheme {
+            if !is_valid_eas_scheme(scheme) {
+                errors.push(ValidationIssue {
+                    rule_id: "BR-FR-13".to_string(),
+                    severity: Severity::Error,
+                    field: "buyer_endpoint_scheme".to_string(),
+                    message: format!(
+                        "BR-FR-13 : Le schemeID '{}' du point d'échange acheteur (BT-49-1) n'est pas conforme à la liste EAS",
+                        scheme
+                    ),
+                });
+            }
+        }
+
         let has_fatal = errors.iter().any(|e| e.severity == Severity::Fatal || e.severity == Severity::Error);
         let is_valid = report.is_valid() && !has_fatal;
 
@@ -195,6 +228,39 @@ impl InvoiceValidator {
                     message: format!(
                         "BR-FR-04 : Le type de facture '{}' n'est pas autorisé. Types valides : {:?}",
                         tc, VALID_TYPE_CODES
+                    ),
+                });
+            }
+        }
+
+        // BR-FR-12 : schemeID du point d'échange vendeur (BT-34-1)
+        // Valeurs autorisées par la norme française : 0002, 0007, 0009, 0037, 0088, 0096,
+        // 0135, 0142, 0151, 0170, 0183, 0184, 0190, 0191, 0192, 0193, 0195, 0196, 0198, 0199,
+        // 0200, 0201, 0202, 0204, 0208, 0209, 0210, 0211, 0212, 0213, 0215, 0216, 0221, 0225, 0230
+        if let Some(ref scheme) = invoice.seller_endpoint_scheme {
+            if !is_valid_eas_scheme(scheme) {
+                errors.push(ValidationIssue {
+                    rule_id: "BR-FR-12".to_string(),
+                    severity: Severity::Error,
+                    field: "seller_endpoint_scheme".to_string(),
+                    message: format!(
+                        "BR-FR-12 : Le schemeID '{}' du point d'échange vendeur (BT-34-1) n'est pas conforme à la liste EAS",
+                        scheme
+                    ),
+                });
+            }
+        }
+
+        // BR-FR-13 : schemeID du point d'échange acheteur (BT-49-1)
+        if let Some(ref scheme) = invoice.buyer_endpoint_scheme {
+            if !is_valid_eas_scheme(scheme) {
+                errors.push(ValidationIssue {
+                    rule_id: "BR-FR-13".to_string(),
+                    severity: Severity::Error,
+                    field: "buyer_endpoint_scheme".to_string(),
+                    message: format!(
+                        "BR-FR-13 : Le schemeID '{}' du point d'échange acheteur (BT-49-1) n'est pas conforme à la liste EAS",
+                        scheme
                     ),
                 });
             }
@@ -261,6 +327,21 @@ impl InvoiceValidator {
             warnings,
         }
     }
+}
+
+/// Vérifie si un schemeID est valide selon la liste EAS (Electronic Address Scheme)
+/// conforme à EN16931 / PEPPOL BIS 3.0 / XP Z12-012
+fn is_valid_eas_scheme(scheme: &str) -> bool {
+    // Liste EAS extraite de la norme EN16931 et du code list CEF
+    const VALID_EAS: &[&str] = &[
+        "0002", "0007", "0009", "0037", "0060", "0088", "0096",
+        "0097", "0106", "0130", "0135", "0142", "0147", "0151",
+        "0170", "0183", "0184", "0188", "0190", "0191", "0192",
+        "0193", "0195", "0196", "0198", "0199", "0200", "0201",
+        "0202", "0204", "0208", "0209", "0210", "0211", "0212",
+        "0213", "0215", "0216", "0221", "0225", "0230",
+    ];
+    VALID_EAS.contains(&scheme)
 }
 
 #[cfg(test)]
@@ -712,5 +793,92 @@ mod tests {
             e.rule_id.contains("BR-FR-04") || e.message.contains("type") || e.message.contains("999")
         });
         assert!(has_type_error, "Doit contenir une erreur de type : {:?}", result.errors);
+    }
+
+    #[test]
+    fn test_reject_ubl_type_invalide() {
+        let xml = std::fs::read_to_string("../../tests/fixtures/errors/ubl_type_invalide.xml")
+            .expect("Fixture UBL type invalide introuvable");
+        let invoice = crate::ubl::UblParser::new().parse(&xml).unwrap();
+        assert_eq!(invoice.invoice_type_code.as_deref(), Some("999"));
+
+        let validator = InvoiceValidator::new();
+        let result = validator.validate(&invoice);
+        assert!(!result.is_valid, "TypeCode 999 doit être rejeté (BR-FR-04)");
+        let has_type_error = result.errors.iter().any(|e| {
+            e.rule_id.contains("BR-FR-04") || e.message.contains("type") || e.message.contains("999")
+        });
+        assert!(has_type_error, "Doit contenir une erreur de type : {:?}", result.errors);
+    }
+
+    // ===== Tests schemeID validation =====
+
+    #[test]
+    fn test_structural_valid_seller_scheme() {
+        let validator = InvoiceValidator::new();
+        let mut inv = make_valid_invoice();
+        inv.seller_endpoint_id = Some("FR12345678901234".to_string());
+        inv.seller_endpoint_scheme = Some("0002".to_string());
+        let result = validator.validate(&inv);
+        assert!(result.is_valid);
+        assert!(!result.errors.iter().any(|e| e.rule_id == "BR-FR-12"));
+    }
+
+    #[test]
+    fn test_structural_invalid_seller_scheme() {
+        let validator = InvoiceValidator::new();
+        let mut inv = make_valid_invoice();
+        inv.seller_endpoint_id = Some("FR12345678901234".to_string());
+        inv.seller_endpoint_scheme = Some("9999".to_string());
+        let result = validator.validate(&inv);
+        assert!(!result.is_valid);
+        assert!(result.errors.iter().any(|e| e.rule_id == "BR-FR-12"));
+    }
+
+    #[test]
+    fn test_structural_valid_buyer_scheme() {
+        let validator = InvoiceValidator::new();
+        let mut inv = make_valid_invoice();
+        inv.buyer_endpoint_id = Some("DE123456789".to_string());
+        inv.buyer_endpoint_scheme = Some("0088".to_string());
+        let result = validator.validate(&inv);
+        assert!(result.is_valid);
+        assert!(!result.errors.iter().any(|e| e.rule_id == "BR-FR-13"));
+    }
+
+    #[test]
+    fn test_structural_invalid_buyer_scheme() {
+        let validator = InvoiceValidator::new();
+        let mut inv = make_valid_invoice();
+        inv.buyer_endpoint_id = Some("DE123456789".to_string());
+        inv.buyer_endpoint_scheme = Some("XXXX".to_string());
+        let result = validator.validate(&inv);
+        assert!(!result.is_valid);
+        assert!(result.errors.iter().any(|e| e.rule_id == "BR-FR-13"));
+    }
+
+    #[test]
+    fn test_structural_scheme_0225_valid() {
+        let validator = InvoiceValidator::new();
+        let mut inv = make_valid_invoice();
+        inv.seller_endpoint_id = Some("vendeur@example.fr".to_string());
+        inv.seller_endpoint_scheme = Some("0225".to_string());
+        inv.buyer_endpoint_id = Some("acheteur@example.fr".to_string());
+        inv.buyer_endpoint_scheme = Some("0225".to_string());
+        let result = validator.validate(&inv);
+        assert!(result.is_valid);
+    }
+
+    #[test]
+    fn test_structural_no_scheme_no_error() {
+        // Si le schemeID est absent, pas d'erreur BR-FR-12/13
+        // (les Schematrons vérifieront la présence obligatoire)
+        let validator = InvoiceValidator::new();
+        let mut inv = make_valid_invoice();
+        inv.seller_endpoint_scheme = None;
+        inv.buyer_endpoint_scheme = None;
+        let result = validator.validate(&inv);
+        assert!(result.is_valid);
+        assert!(!result.errors.iter().any(|e| e.rule_id == "BR-FR-12" || e.rule_id == "BR-FR-13"));
     }
 }

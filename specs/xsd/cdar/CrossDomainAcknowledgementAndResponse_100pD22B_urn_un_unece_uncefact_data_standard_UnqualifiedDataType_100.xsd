@@ -3,7 +3,7 @@
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
     targetNamespace="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
     elementFormDefault="qualified"
-    version="100.D23B">
+    version="100.D22B">
   <xsd:complexType name="AmountType">
     <xsd:simpleContent>
       <xsd:extension base="xsd:decimal">
@@ -30,9 +30,9 @@
         <xsd:attribute name="listID" type="xsd:token"/>
         <xsd:attribute name="listAgencyID" type="xsd:token"/>
         <xsd:attribute name="listAgencyName" type="xsd:string"/>
+        <xsd:attribute name="listName" type="xsd:string"/>
         <xsd:attribute name="listVersionID" type="xsd:token"/>
         <xsd:attribute name="name" type="xsd:string"/>
-        <xsd:attribute name="listName" type="xsd:string"/>
         <xsd:attribute name="languageID" type="xsd:token"/>
         <xsd:attribute name="listURI" type="xsd:anyURI"/>
         <xsd:attribute name="listSchemeURI" type="xsd:anyURI"/>

@@ -32,6 +32,7 @@
 
 pub mod config;
 pub mod consumer;
+pub mod hostkey;
 pub mod producer;
 
 pub use consumer::SftpConsumer;

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsd:schema xmlns:clm62379="urn:un:unece:uncefact:codelist:standard:UNECE:TimePointFormatCode:D23A"
+<xsd:schema xmlns:clm62379="urn:un:unece:uncefact:codelist:standard:UNECE:TimePointFormatCode:D21B"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:TimePointFormatCode:D23A"
+    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:TimePointFormatCode:D21B"
     elementFormDefault="qualified"
-    version="5.5">
+    version="4.3">
   <xsd:simpleType name="TimePointFormatCodeContentType">
     <xsd:restriction base="xsd:string">
       <xsd:enumeration value="102"/>

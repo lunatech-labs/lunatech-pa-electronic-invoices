@@ -69,7 +69,7 @@ impl std::fmt::Display for FlowStatus {
 pub enum DocumentType {
     /// Facture (UBL Invoice/CreditNote, CII CrossIndustryInvoice, Factur-X)
     Invoice,
-    /// Compte-rendu De Vie (CDAR D23B)
+    /// Compte-rendu De Vie (CDAR D22B)
     Cdar,
     /// Déclaration e-reporting
     EReporting,
@@ -305,6 +305,8 @@ pub struct InvoiceData {
     pub total_ttc: Option<f64>,
     /// BT-110 : Total TVA
     pub total_tax: Option<f64>,
+    /// Montant TVA converti en EUR (pour les factures en devise étrangère, e-reporting TT-52/TT-83)
+    pub tax_amount_eur: Option<f64>,
     /// BT-107 : Total des remises au niveau document
     pub allowance_total_amount: Option<f64>,
     /// BT-108 : Total des charges au niveau document
@@ -363,6 +365,9 @@ pub struct InvoiceData {
     pub payment_bic: Option<String>,
     /// BT-20 : Conditions de paiement (texte libre)
     pub payment_terms: Option<String>,
+    /// Indicateur TVA sur les débits (exigibilité à l'encaissement vs livraison)
+    /// Utilisé pour le e-reporting TT-80 (option de paiement TVA)
+    pub tax_due_on_payment: Option<bool>,
 
     // --- Lignes de facture (BG-25) ---
     pub lines: Vec<InvoiceLine>,
@@ -435,6 +440,7 @@ impl InvoiceData {
             total_ht: None,
             total_ttc: None,
             total_tax: None,
+            tax_amount_eur: None,
             allowance_total_amount: None,
             charge_total_amount: None,
             prepaid_amount: None,
@@ -459,6 +465,7 @@ impl InvoiceData {
             payment_iban: None,
             payment_bic: None,
             payment_terms: None,
+            tax_due_on_payment: None,
             lines: Vec::new(),
             allowance_charges: Vec::new(),
             attachments: Vec::new(),

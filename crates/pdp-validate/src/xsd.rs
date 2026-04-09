@@ -20,7 +20,7 @@ pub enum XsdDocumentType {
     FacturXEN16931,
     /// Factur-X 1.08 EXTENDED (CII embarqué)
     FacturXExtended,
-    /// CDAR D23B
+    /// CDAR D22B
     Cdar,
     /// Flux 1 Full CII D22B
     F1FullCii,
@@ -104,7 +104,7 @@ impl XsdValidator {
                 self.specs_dir.join("xsd/facturx-1.08/EXTENDED/Factur-X_1.08_EXTENDED.xsd")
             }
             XsdDocumentType::Cdar => {
-                self.specs_dir.join("xsd/cdar/CrossDomainAcknowledgementAndResponse_100pD23B.xsd")
+                self.specs_dir.join("xsd/cdar/CrossDomainAcknowledgementAndResponse_100pD22B.xsd")
             }
             XsdDocumentType::F1FullCii => {
                 self.specs_dir.join("xsd/cii/full/uncefact/data/standard/F1FULL_CrossIndustryInvoice_100pD22B.xsd")
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn test_validate_cdar_fixture() {
         let specs = specs_dir();
-        if !specs.join("xsd/cdar/CrossDomainAcknowledgementAndResponse_100pD23B.xsd").exists() {
+        if !specs.join("xsd/cdar/CrossDomainAcknowledgementAndResponse_100pD22B.xsd").exists() {
             eprintln!("XSD CDAR non disponible, test ignoré");
             return;
         }

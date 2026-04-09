@@ -444,6 +444,7 @@ async fn build_router(config: &pdp_config::PdpConfig) -> Result<pdp_core::Router
                     delete_after_read: route_config.source.delete_after_read.unwrap_or(false),
                     timeout_secs: 30,
                     stable_delay_ms: 1000,
+                    known_hosts_path: route_config.source.known_hosts_path.clone(),
                 };
                 Box::new(pdp_sftp::SftpConsumer::new(
                     &format!("{}-sftp-source", route_config.id),

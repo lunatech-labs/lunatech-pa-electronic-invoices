@@ -77,8 +77,9 @@ reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], de
 # Encoding
 base64 = "0.22"
 
-# Hashing (SHA-256 for flow checksums)
+# Hashing (SHA-256 for flow checksums, MD5 for PEPPOL SML DNS)
 sha2 = "0.10"
+md5 = "0.7"
 
 # Archive (tar.gz for PPF flux, zip for general archiving)
 tar = "0.4"

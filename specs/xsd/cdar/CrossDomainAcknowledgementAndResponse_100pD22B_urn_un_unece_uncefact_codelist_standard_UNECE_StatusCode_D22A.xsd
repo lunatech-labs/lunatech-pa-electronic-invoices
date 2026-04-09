@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsd:schema xmlns:clm64405="urn:un:unece:uncefact:codelist:standard:UNECE:StatusCode:D23A"
+<xsd:schema xmlns:clm64405="urn:un:unece:uncefact:codelist:standard:UNECE:StatusCode:D22A"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:StatusCode:D23A"
+    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:StatusCode:D22A"
     elementFormDefault="qualified"
-    version="4.5">
+    version="3.5">
   <xsd:simpleType name="StatusCodeContentType">
     <xsd:restriction base="xsd:token">
       <xsd:enumeration value="1"/>

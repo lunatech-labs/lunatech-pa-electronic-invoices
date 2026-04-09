@@ -5,7 +5,7 @@ use pdp_core::model::InvoiceData;
 use crate::model::*;
 
 /// Générateur de CDV (Compte-rendu De Vie) conformes au format
-/// CrossDomainAcknowledgementAndResponse D23B
+/// CrossDomainAcknowledgementAndResponse D22B
 pub struct CdarGenerator {
     /// SIREN de la PDP émettrice
     pub pdp_siren: String,
@@ -546,7 +546,7 @@ impl CdarGenerator {
             RoleCode::BY, invoice, invoice_type_code, Vec::new())
     }
 
-    /// Sérialise un CDV en XML conforme CrossDomainAcknowledgementAndResponse D23B
+    /// Sérialise un CDV en XML conforme CrossDomainAcknowledgementAndResponse D22B
     pub fn to_xml(&self, cdv: &CdvResponse) -> PdpResult<String> {
         let mut xml = String::with_capacity(4096);
         xml.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>

@@ -1,7 +1,7 @@
-//! # pdp-cdar — Comptes-rendus De Vie (CDV) au format CDAR D23B
+//! # pdp-cdar — Comptes-rendus De Vie (CDV) au format CDAR D22B
 //!
 //! Génération, parsing et traitement des statuts de cycle de vie des factures,
-//! conforme au format UN/CEFACT CrossDomainAcknowledgementAndResponse (CDAR) D23B.
+//! conforme au format UN/CEFACT CrossDomainAcknowledgementAndResponse (CDAR) D22B.
 //!
 //! # Modules
 //!
@@ -19,10 +19,22 @@
 //! | 202 | Reçue | Transmission |
 //! | 204 | Prise en charge | Traitement |
 //! | 205 | Approuvée | Traitement |
+//! | 206 | Approuvée partiellement | Traitement |
 //! | 207 | En litige | Traitement |
+//! | 208 | Suspendue | Traitement |
+//! | 209 | Mise à disposition | Traitement |
 //! | 210 | Refusée | Traitement |
+//! | 211 | En cours de paiement | Traitement |
 //! | 212 | Encaissée | Traitement |
 //! | 213 | Rejetée | Transmission |
+//! | 214 | Complétée | Traitement |
+//! | 215 | Rappelée | Traitement |
+//! | 220 | Escompte accepté | Traitement |
+//! | 225 | Affacturée — Déposée | Affacturage |
+//! | 226 | Affacturée — Émise | Affacturage |
+//! | 227 | Affacturée — Reçue | Affacturage |
+//! | 228 | Affacturée — Prise en charge | Affacturage |
+//! | 501 | Irrecevable | Rejet technique |
 //!
 //! # Exemple : générer un CDV « Déposée »
 //!
@@ -49,7 +61,7 @@
 //!
 //! # Conformité
 //!
-//! - Format : UN/CEFACT CDAR D23B
+//! - Format : UN/CEFACT CDAR D22B
 //! - Règles : BR-FR-CDV-01 à BR-FR-CDV-14
 //! - XSD : `specs/xsd/cdar-d23b/`
 

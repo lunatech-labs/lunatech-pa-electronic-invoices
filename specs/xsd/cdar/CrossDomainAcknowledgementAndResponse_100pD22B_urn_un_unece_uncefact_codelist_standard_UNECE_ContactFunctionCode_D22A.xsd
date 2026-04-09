@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsd:schema xmlns:clm63139ContactTypeCode="urn:un:unece:uncefact:codelist:standard:UNECE:ContactFunctionCode:D23A"
+<xsd:schema xmlns:clm63139ContactTypeCode="urn:un:unece:uncefact:codelist:standard:UNECE:ContactFunctionCode:D22A"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:ContactFunctionCode:D23A"
+    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:ContactFunctionCode:D22A"
     elementFormDefault="qualified"
-    version="4.6">
+    version="3.6">
   <xsd:simpleType name="ContactFunctionCodeContentType">
     <xsd:restriction base="xsd:token">
       <xsd:enumeration value="AA"/>
@@ -91,7 +91,6 @@
       <xsd:enumeration value="PD"/>
       <xsd:enumeration value="PE"/>
       <xsd:enumeration value="PM"/>
-      <xsd:enumeration value="PP"/>
       <xsd:enumeration value="QA"/>
       <xsd:enumeration value="QC"/>
       <xsd:enumeration value="RD"/>

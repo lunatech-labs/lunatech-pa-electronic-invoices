@@ -9,8 +9,6 @@
 //!
 //! Conforme à : PEPPOL SMP Specification, OASIS BDXR SMP v1.0
 
-use sha2::{Digest, Sha256};
-
 use crate::error::PeppolError;
 use crate::model::{DocumentTypeId, ParticipantId, ProcessId, SmpEndpoint, SmpLookupResult};
 
@@ -185,16 +183,14 @@ fn parse_smp_response(xml: &str, process_id: &ProcessId) -> Result<SmpEndpoint, 
     )))
 }
 
-/// MD5 hex digest (utilisé par PEPPOL SML pour le hash DNS)
+/// MD5 hex digest (utilisé par PEPPOL SML pour le hash DNS).
+///
+/// Le SML PEPPOL exige un vrai MD5 (RFC 1321) pour construire le hostname
+/// DNS du SMP. Ce n'est PAS un usage cryptographique — c'est juste un
+/// identifiant de participant hashé pour le DNS.
 fn md5_hex(input: &str) -> String {
-    // Simple MD5 implementation using SHA-256 truncated
-    // Note: In production, use a proper MD5 crate. For now we use
-    // a deterministic hash that's compatible with the SML lookup.
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let result = hasher.finalize();
-    // Use first 16 bytes (128 bits) to simulate MD5 length
-    result[..16].iter().map(|b| format!("{:02x}", b)).collect()
+    let digest = md5::compute(input.as_bytes());
+    format!("{:032x}", digest)
 }
 
 /// URL-encode un ParticipantId pour le SMP
@@ -313,6 +309,27 @@ mod tests {
         let process_id = ProcessId::billing();
         let result = parse_smp_response(xml, &process_id);
         assert!(result.is_err(), "Pas d'endpoint AS4 v2.0 → erreur");
+    }
+
+    #[test]
+    fn test_md5_hex_known_vector() {
+        // Vecteur de test PEPPOL : le hash MD5 de "0088::5798009882004" (Danemark EAN)
+        // doit donner le hash utilisé dans la doc PEPPOL pour le DNS SML
+        let input = "0088::5798009882004";
+        let hash = md5_hex(input);
+        // MD5("0088::5798009882004") = 0e4427bb4279182b21fec6cba1ae756e
+        assert_eq!(hash, "0e4427bb4279182b21fec6cba1ae756e");
+        assert_eq!(hash.len(), 32, "MD5 hex doit faire 32 caractères");
+    }
+
+    #[test]
+    fn test_md5_hex_lowercase_invariant() {
+        // PEPPOL spécifie que l'input doit être en lowercase
+        let h1 = md5_hex("0002::123456789");
+        let h2 = md5_hex("0002::123456789");
+        assert_eq!(h1, h2);
+        // Le résultat doit être en hex lowercase
+        assert_eq!(h1, h1.to_lowercase());
     }
 
     #[test]

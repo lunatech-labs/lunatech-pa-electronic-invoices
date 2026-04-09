@@ -292,8 +292,7 @@ impl AfnorFlowProducer {
                 "CustomerInvoiceLC" => Some(FlowType::CustomerInvoiceLC),
                 "SupplierInvoiceLC" => Some(FlowType::SupplierInvoiceLC),
                 _ => None,
-            })
-            .unwrap_or(FlowType::CustomerInvoice);
+            });
 
         let info = AfnorFlowInfo {
             tracking_id: exchange.id.to_string(),
@@ -329,7 +328,7 @@ impl Producer for AfnorFlowProducer {
 
         let response = self
             .client
-            .envoyer_flux(&flow_info, &filename, &exchange.body)
+            .envoyer_flux(&flow_info, &filename, &exchange.body, None)
             .await
             .map_err(|e| PdpError::RoutingError(format!("AFNOR Flow Service: {}", e)))?;
 

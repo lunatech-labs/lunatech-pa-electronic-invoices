@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsd:schema xmlns:clm61153ReferenceTypeCode="urn:un:unece:uncefact:codelist:standard:UNECE:ReferenceTypeCode:D23A"
+<xsd:schema xmlns:clm61153ReferenceTypeCode="urn:un:unece:uncefact:codelist:standard:UNECE:ReferenceTypeCode:D22A"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:ReferenceTypeCode:D23A"
+    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:ReferenceTypeCode:D22A"
     elementFormDefault="qualified"
-    version="4.11">
+    version="3.11">
   <xsd:simpleType name="ReferenceTypeCodeContentType">
     <xsd:restriction base="xsd:token">
       <xsd:enumeration value="AAA"/>

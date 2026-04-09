@@ -3,13 +3,16 @@ use tracing;
 
 use crate::auth::PisteAuth;
 use crate::error::{ClientError, ClientResult};
-use crate::model::PpfEnvironment;
+use crate::model::{
+    AfnorRequestHeaders, HealthCheckResponse, PpfEnvironment,
+    SearchSirenParams, SearchSiretParams,
+};
 
 // ============================================================
-// PPF Annuaire — Modèles
+// PPF Annuaire — Modeles
 // ============================================================
 
-/// Entreprise (unité légale) identifiée par SIREN
+/// Entreprise (unite legale) identifiee par SIREN
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Siren {
@@ -17,13 +20,13 @@ pub struct Siren {
     pub raison_sociale: Option<String>,
     pub type_entite: Option<String>,
     pub statut_administratif: Option<String>,
-    /// Identifiant de la PDP rattachée
+    /// Identifiant de la PDP rattachee
     pub id_pdp: Option<String>,
-    /// Nom de la PDP rattachée
+    /// Nom de la PDP rattachee
     pub nom_pdp: Option<String>,
 }
 
-/// Établissement identifié par SIRET
+/// Etablissement identifie par SIRET
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Siret {
@@ -37,7 +40,7 @@ pub struct Siret {
     pub statut_administratif: Option<String>,
 }
 
-/// Code de routage (pour déterminer la PDP destinataire)
+/// Code de routage (pour determiner la PDP destinataire)
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingCode {
@@ -47,7 +50,7 @@ pub struct RoutingCode {
     /// Matricule de la PDP (schemeID 0238)
     pub id_pdp: Option<String>,
     pub nom_pdp: Option<String>,
-    /// Code de routage spécifique
+    /// Code de routage specifique
     pub code_routage: Option<String>,
     pub date_debut: Option<String>,
     pub date_fin: Option<String>,
@@ -65,14 +68,14 @@ pub struct DirectoryLine {
     pub statut: Option<String>,
 }
 
-/// Résultat de recherche paginé
+/// Resultat de recherche pagine
 #[derive(Debug, Clone, Deserialize)]
 pub struct SearchResponse<T> {
     pub items: Option<Vec<T>>,
     pub total: Option<u64>,
 }
 
-/// Résultat de résolution de routage
+/// Resultat de resolution de routage
 #[derive(Debug, Clone)]
 pub struct RoutingResolution {
     /// Matricule de la PDP destinataire (0238)
@@ -133,13 +136,21 @@ impl AnnuaireClient {
         }
         if status.as_u16() == 401 {
             self.auth.invalidate().await;
-            return Err(ClientError::TokenExpired);
         }
+
+        let retry_after = response
+            .headers()
+            .get("Retry-After")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
         let body = response.text().await.unwrap_or_default();
-        Err(ClientError::HttpError {
-            status: status.as_u16(),
-            message: format!("{}: {}", operation, body),
-        })
+        Err(ClientError::from_http_response(
+            status.as_u16(),
+            &body,
+            operation,
+            retry_after,
+        ))
     }
 
     /// Consulte une entreprise par SIREN
@@ -159,7 +170,7 @@ impl AnnuaireClient {
         self.handle_response(response, "get_siren").await
     }
 
-    /// Consulte un établissement par SIRET
+    /// Consulte un etablissement par SIRET
     pub async fn get_siret(&self, siret: &str) -> ClientResult<Siret> {
         let url = format!("{}/siret/{}", self.config.base_url(), siret);
         let auth = self.auth_header().await?;
@@ -176,8 +187,8 @@ impl AnnuaireClient {
         self.handle_response(response, "get_siret").await
     }
 
-    /// Recherche de codes de routage pour un SIREN/SIRET donné.
-    /// Permet de déterminer quelle PDP gère le destinataire.
+    /// Recherche de codes de routage pour un SIREN/SIRET donne.
+    /// Permet de determiner quelle PDP gere le destinataire.
     pub async fn rechercher_routage(
         &self,
         siren: Option<&str>,
@@ -211,7 +222,7 @@ impl AnnuaireClient {
         self.handle_response(response, "rechercher_routage").await
     }
 
-    /// Résout le routage pour un destinataire donné (SIREN ou SIRET).
+    /// Resout le routage pour un destinataire donne (SIREN ou SIRET).
     /// Retourne la PDP destinataire ou indique que c'est le PPF.
     pub async fn resoudre_routage(
         &self,
@@ -238,11 +249,11 @@ impl AnnuaireClient {
             }
         }
 
-        // Par défaut, envoyer au PPF
+        // Par defaut, envoyer au PPF
         tracing::warn!(
             buyer_siren = buyer_siren.unwrap_or("N/A"),
             buyer_siret = buyer_siret.unwrap_or("N/A"),
-            "Aucun routage trouvé, envoi au PPF par défaut"
+            "Aucun routage trouve, envoi au PPF par defaut"
         );
 
         Ok(RoutingResolution {
@@ -255,7 +266,7 @@ impl AnnuaireClient {
 }
 
 // ============================================================
-// AFNOR Directory Service Client (PDP↔PDP)
+// AFNOR Directory Service Client (PDP<>PDP) — XP Z12-013 Annexe B
 // ============================================================
 
 /// Configuration du client AFNOR Directory Service
@@ -276,7 +287,7 @@ pub struct AfnorSiren {
     pub id_instance: Option<String>,
 }
 
-/// Établissement AFNOR Directory
+/// Etablissement AFNOR Directory
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AfnorSiret {
@@ -313,7 +324,14 @@ pub struct AfnorDirectoryLine {
     pub end_date: Option<String>,
 }
 
-/// Client pour l'API AFNOR Directory Service (PDP↔PDP)
+/// Client pour l'API AFNOR Directory Service v1.2.0 (PDP<>PDP)
+///
+/// Implemente l'ensemble des endpoints definis dans l'Annexe B de la norme XP Z12-013 :
+/// - SIREN : GET par code-insee, POST search
+/// - SIRET : GET par code-insee, POST search
+/// - Routing codes : GET par siret+code, POST search, POST create
+/// - Directory lines : GET par addressing-id, POST search, POST create
+/// - Health check : GET /v1/healthcheck
 pub struct AfnorDirectoryClient {
     config: AfnorDirectoryConfig,
     auth: PisteAuth,
@@ -334,6 +352,29 @@ impl AfnorDirectoryClient {
         Ok(format!("Bearer {}", token))
     }
 
+    /// Applique les headers optionnels AFNOR
+    fn apply_headers(
+        &self,
+        mut builder: reqwest::RequestBuilder,
+        headers: Option<&AfnorRequestHeaders>,
+    ) -> reqwest::RequestBuilder {
+        if let Some(h) = headers {
+            if let Some(ref id) = h.request_id {
+                builder = builder.header("Request-Id", id.as_str());
+            }
+            if let Some(ref org) = h.organization_id {
+                builder = builder.header("Organization-Id", org.as_str());
+            }
+            if let Some(ref lang) = h.accept_language {
+                builder = builder.header("Accept-Language", lang.as_str());
+            }
+        } else {
+            // Default Accept-Language pour le Directory Service
+            builder = builder.header("Accept-Language", "fr");
+        }
+        builder
+    }
+
     async fn handle_response<T: serde::de::DeserializeOwned>(
         &self,
         response: reqwest::Response,
@@ -345,131 +386,307 @@ impl AfnorDirectoryClient {
         }
         if status.as_u16() == 401 {
             self.auth.invalidate().await;
-            return Err(ClientError::TokenExpired);
         }
+
+        let retry_after = response
+            .headers()
+            .get("Retry-After")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
         let body = response.text().await.unwrap_or_default();
-        Err(ClientError::HttpError {
-            status: status.as_u16(),
-            message: format!("{}: {}", operation, body),
-        })
+        Err(ClientError::from_http_response(
+            status.as_u16(),
+            &body,
+            operation,
+            retry_after,
+        ))
     }
 
-    /// Consulte une entreprise par SIREN dans l'annuaire AFNOR
-    pub async fn get_siren(&self, siren: &str) -> ClientResult<AfnorSiren> {
-        let url = format!(
+    // ============================================================
+    // SIREN — GET + POST search
+    // ============================================================
+
+    /// Consulte une entreprise par SIREN dans l'annuaire AFNOR.
+    /// Correspond a `GET /v1/siren/code-insee:{siren}`
+    ///
+    /// Le parametre `fields` permet de selectionner les champs retournes.
+    pub async fn get_siren(
+        &self,
+        siren: &str,
+        fields: Option<&[&str]>,
+        headers: Option<&AfnorRequestHeaders>,
+    ) -> ClientResult<AfnorSiren> {
+        let mut url = format!(
             "{}/v1/siren/code-insee:{}",
             self.config.base_url, siren
         );
+        if let Some(f) = fields {
+            let fields_str = f.join(",");
+            url = format!("{}?fields={}", url, fields_str);
+        }
         let auth = self.auth_header().await?;
 
-        let response = self
+        let builder = self
             .http
             .get(&url)
-            .header("Authorization", auth)
-            .header("Accept-Language", "fr")
-            .send()
-            .await?;
+            .header("Authorization", auth);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
 
         self.handle_response(response, "afnor_get_siren").await
     }
 
-    /// Consulte un établissement par SIRET dans l'annuaire AFNOR
-    pub async fn get_siret(&self, siret: &str) -> ClientResult<AfnorSiret> {
-        let url = format!(
+    /// Recherche d'entreprises par SIREN avec criteres.
+    /// Correspond a `POST /v1/siren/search`
+    pub async fn search_siren(
+        &self,
+        params: &SearchSirenParams,
+        headers: Option<&AfnorRequestHeaders>,
+    ) -> ClientResult<SearchResponse<AfnorSiren>> {
+        let url = format!("{}/v1/siren/search", self.config.base_url);
+        let auth = self.auth_header().await?;
+
+        let builder = self
+            .http
+            .post(&url)
+            .header("Authorization", auth)
+            .json(params);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
+
+        self.handle_response(response, "afnor_search_siren").await
+    }
+
+    // ============================================================
+    // SIRET — GET + POST search
+    // ============================================================
+
+    /// Consulte un etablissement par SIRET dans l'annuaire AFNOR.
+    /// Correspond a `GET /v1/siret/code-insee:{siret}`
+    pub async fn get_siret(
+        &self,
+        siret: &str,
+        fields: Option<&[&str]>,
+        headers: Option<&AfnorRequestHeaders>,
+    ) -> ClientResult<AfnorSiret> {
+        let mut url = format!(
             "{}/v1/siret/code-insee:{}",
             self.config.base_url, siret
         );
+        if let Some(f) = fields {
+            let fields_str = f.join(",");
+            url = format!("{}?fields={}", url, fields_str);
+        }
         let auth = self.auth_header().await?;
 
-        let response = self
+        let builder = self
             .http
             .get(&url)
-            .header("Authorization", auth)
-            .header("Accept-Language", "fr")
-            .send()
-            .await?;
+            .header("Authorization", auth);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
 
         self.handle_response(response, "afnor_get_siret").await
     }
 
-    /// Recherche de codes de routage AFNOR
+    /// Recherche d'etablissements par SIRET avec criteres.
+    /// Correspond a `POST /v1/siret/search`
+    pub async fn search_siret(
+        &self,
+        params: &SearchSiretParams,
+        headers: Option<&AfnorRequestHeaders>,
+    ) -> ClientResult<SearchResponse<AfnorSiret>> {
+        let url = format!("{}/v1/siret/search", self.config.base_url);
+        let auth = self.auth_header().await?;
+
+        let builder = self
+            .http
+            .post(&url)
+            .header("Authorization", auth)
+            .json(params);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
+
+        self.handle_response(response, "afnor_search_siret").await
+    }
+
+    // ============================================================
+    // Routing codes — GET + POST search + POST create
+    // ============================================================
+
+    /// Recupere un code de routage specifique par SIRET et identifiant.
+    /// Correspond a `GET /v1/routing-code/siret:{siret}/code:{routing_id}`
+    pub async fn get_routing_code(
+        &self,
+        siret: &str,
+        routing_id: &str,
+        headers: Option<&AfnorRequestHeaders>,
+    ) -> ClientResult<AfnorRoutingCode> {
+        let url = format!(
+            "{}/v1/routing-code/siret:{}/code:{}",
+            self.config.base_url, siret, routing_id
+        );
+        let auth = self.auth_header().await?;
+
+        let builder = self
+            .http
+            .get(&url)
+            .header("Authorization", auth);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
+
+        self.handle_response(response, "afnor_get_routing_code").await
+    }
+
+    /// Recherche de codes de routage AFNOR.
+    /// Correspond a `POST /v1/routing-code/search`
     pub async fn search_routing_codes(
         &self,
         criteria: &serde_json::Value,
+        headers: Option<&AfnorRequestHeaders>,
     ) -> ClientResult<SearchResponse<AfnorRoutingCode>> {
         let url = format!("{}/v1/routing-code/search", self.config.base_url);
         let auth = self.auth_header().await?;
 
-        let response = self
+        let builder = self
             .http
             .post(&url)
             .header("Authorization", auth)
-            .json(criteria)
-            .send()
-            .await?;
+            .json(criteria);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
 
         self.handle_response(response, "afnor_search_routing_codes")
             .await
     }
 
-    /// Crée un code de routage AFNOR
+    /// Cree un code de routage AFNOR.
+    /// Correspond a `POST /v1/routing-code`
     pub async fn create_routing_code(
         &self,
         routing_code: &AfnorRoutingCode,
+        headers: Option<&AfnorRequestHeaders>,
     ) -> ClientResult<AfnorRoutingCode> {
         let url = format!("{}/v1/routing-code", self.config.base_url);
         let auth = self.auth_header().await?;
 
-        let response = self
+        let builder = self
             .http
             .post(&url)
             .header("Authorization", auth)
-            .json(routing_code)
-            .send()
-            .await?;
+            .json(routing_code);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
 
         self.handle_response(response, "afnor_create_routing_code")
             .await
     }
 
-    /// Recherche de lignes d'annuaire AFNOR
+    // ============================================================
+    // Directory lines — GET + POST search + POST create
+    // ============================================================
+
+    /// Recupere une ligne d'annuaire par son identifiant d'adressage.
+    /// Correspond a `GET /v1/directory-line/code:{addressing_id}`
+    pub async fn get_directory_line(
+        &self,
+        addressing_id: &str,
+        headers: Option<&AfnorRequestHeaders>,
+    ) -> ClientResult<AfnorDirectoryLine> {
+        let url = format!(
+            "{}/v1/directory-line/code:{}",
+            self.config.base_url, addressing_id
+        );
+        let auth = self.auth_header().await?;
+
+        let builder = self
+            .http
+            .get(&url)
+            .header("Authorization", auth);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
+
+        self.handle_response(response, "afnor_get_directory_line")
+            .await
+    }
+
+    /// Recherche de lignes d'annuaire AFNOR.
+    /// Correspond a `POST /v1/directory-line/search`
     pub async fn search_directory_lines(
         &self,
         criteria: &serde_json::Value,
+        headers: Option<&AfnorRequestHeaders>,
     ) -> ClientResult<SearchResponse<AfnorDirectoryLine>> {
         let url = format!("{}/v1/directory-line/search", self.config.base_url);
         let auth = self.auth_header().await?;
 
-        let response = self
+        let builder = self
             .http
             .post(&url)
             .header("Authorization", auth)
-            .json(criteria)
-            .send()
-            .await?;
+            .json(criteria);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
 
         self.handle_response(response, "afnor_search_directory_lines")
             .await
     }
 
-    /// Crée une ligne d'annuaire AFNOR
+    /// Cree une ligne d'annuaire AFNOR.
+    /// Correspond a `POST /v1/directory-line`
     pub async fn create_directory_line(
         &self,
         line: &AfnorDirectoryLine,
+        headers: Option<&AfnorRequestHeaders>,
     ) -> ClientResult<AfnorDirectoryLine> {
         let url = format!("{}/v1/directory-line", self.config.base_url);
         let auth = self.auth_header().await?;
 
-        let response = self
+        let builder = self
             .http
             .post(&url)
             .header("Authorization", auth)
-            .json(line)
-            .send()
-            .await?;
+            .json(line);
+
+        let builder = self.apply_headers(builder, headers);
+
+        let response = builder.send().await?;
 
         self.handle_response(response, "afnor_create_directory_line")
             .await
+    }
+
+    // ============================================================
+    // Health check — GET /v1/healthcheck
+    // ============================================================
+
+    /// Verifie l'etat du Directory Service.
+    /// Correspond a `GET /v1/healthcheck`
+    pub async fn healthcheck(&self) -> ClientResult<HealthCheckResponse> {
+        let url = format!("{}/v1/healthcheck", self.config.base_url);
+
+        let response = self.http.get(&url).send().await?;
+
+        self.handle_response(response, "directory_healthcheck").await
     }
 }
 

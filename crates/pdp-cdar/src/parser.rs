@@ -4,7 +4,7 @@ use roxmltree::Document;
 use crate::model::*;
 
 /// Parser de CDV (Compte-rendu De Vie) au format
-/// CrossDomainAcknowledgementAndResponse D23B
+/// CrossDomainAcknowledgementAndResponse D22B
 pub struct CdarParser;
 
 impl CdarParser {
@@ -12,7 +12,7 @@ impl CdarParser {
         Self
     }
 
-    /// Parse un XML CDV conforme D23B en structure CdvResponse
+    /// Parse un XML CDV conforme D22B en structure CdvResponse
     pub fn parse(&self, xml: &str) -> PdpResult<CdvResponse> {
         let doc = Document::parse(xml)
             .map_err(|e| PdpError::CdarError(format!("XML CDV invalide: {}", e)))?;

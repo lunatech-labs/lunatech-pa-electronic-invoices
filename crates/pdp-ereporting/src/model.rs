@@ -89,8 +89,12 @@ pub struct TransactionsReport {
     /// TG-7 : Période de transmission
     pub period_start: String,
     pub period_end: String,
-    /// TG-8 : Factures
+    /// TG-8 : Factures (flux 10.1 — transactions détaillées)
+    #[serde(default)]
     pub invoices: Vec<TransactionInvoice>,
+    /// TG-31 : Transactions agrégées (flux 10.3)
+    #[serde(default)]
+    pub aggregated_transactions: Vec<AggregatedTransaction>,
 }
 
 /// TG-8 : Facture dans un rapport de transactions
@@ -283,6 +287,85 @@ pub struct InvoiceLine {
 pub struct LineNote {
     pub code: Option<String>,
     pub comment: Option<String>,
+}
+
+// ============================================================
+// Flux 10.3 : Transactions agregees (TG-31)
+// ============================================================
+
+/// Categorie de transaction pour l'e-reporting agrege
+/// Determine a partir de l'analyse des lignes de facture
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum TransactionCategory {
+    /// TLB1 : Livraison de biens
+    TLB1,
+    /// TPS1 : Prestation de services
+    TPS1,
+    /// TNT1 : Opération non taxable en France
+    TNT1,
+    /// TMA1 : Opération sous le régime de la marge
+    TMA1,
+}
+
+impl TransactionCategory {
+    pub fn code(&self) -> &str {
+        match self {
+            Self::TLB1 => "TLB1",
+            Self::TPS1 => "TPS1",
+            Self::TNT1 => "TNT1",
+            Self::TMA1 => "TMA1",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "TLB1" => Some(Self::TLB1),
+            "TPS1" => Some(Self::TPS1),
+            "TNT1" => Some(Self::TNT1),
+            "TMA1" => Some(Self::TMA1),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for TransactionCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.code())
+    }
+}
+
+/// TG-31 : Transaction agrégée dans un rapport de transactions (flux 10.3)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregatedTransaction {
+    /// TT-77 : Date de la transaction (YYYYMMDD)
+    pub date: String,
+    /// TT-78 : Code devise
+    pub currency_code: String,
+    /// TT-80 : Option de paiement TVA (debit / non-debit)
+    pub vat_payment_option: Option<String>,
+    /// TT-81 : Categorie de transaction
+    pub category: TransactionCategory,
+    /// TT-82 : Montant cumule HT
+    pub cumulative_amount_ht: f64,
+    /// TT-83 : Montant cumule TVA (toujours en EUR)
+    pub cumulative_tax_amount_eur: f64,
+    /// TT-85 : Nombre de transactions
+    pub transaction_count: u32,
+    /// TG-32 : Ventilation par taux de TVA
+    pub tax_subtotals: Vec<AggregatedTaxSubTotal>,
+}
+
+/// TG-32 : Ventilation TVA d'une transaction agrégée
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregatedTaxSubTotal {
+    /// TT-86 : Base d'imposition cumulée
+    pub taxable_amount: f64,
+    /// TT-87 : Montant TVA cumulé
+    pub tax_amount: f64,
+    /// TT-88 : Code catégorie TVA
+    pub tax_category_code: String,
+    /// TT-89 : Taux de TVA
+    pub tax_percent: f64,
 }
 
 /// TB-3 : Rapport de paiements (flux 10.2 / 10.4) — conforme payment.xsd

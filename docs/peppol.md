@@ -83,7 +83,7 @@ let endpoint = ParticipantId::from_french_endpoint("123456789_FACTURES");
 let ubl_inv = DocumentTypeId::ubl_invoice();       // UBL 2.1 Invoice
 let ubl_cn  = DocumentTypeId::ubl_credit_note();   // UBL 2.1 CreditNote
 let cii     = DocumentTypeId::cii_invoice();        // CII D16B
-let cdar    = DocumentTypeId::cdar();               // CDAR D23B
+let cdar    = DocumentTypeId::cdar();               // CDAR D22B
 
 // Processus
 let billing = ProcessId::billing();  // Peppol BIS Billing 3.0
@@ -270,7 +270,7 @@ peppol:
 | Facture UBL | `urn:oasis:...:Invoice-2::Invoice##...billing:3.0::2.1` | UBL 2.1 |
 | Avoir UBL | `urn:oasis:...:CreditNote-2::CreditNote##...billing:3.0::2.1` | UBL 2.1 |
 | Facture CII | `urn:un:unece:...:CrossIndustryInvoice:100::...::D16B` | CII D16B |
-| CDAR | `urn:un:unece:...:CrossDomainAcknowledgementAndResponse:100::...::D23B` | CDAR D23B |
+| CDAR | `urn:un:unece:...:CrossDomainAcknowledgementAndResponse:100::...::D23B` | CDAR D22B |
 
 ## Flux de données
 

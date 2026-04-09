@@ -37,7 +37,10 @@ impl Producer for SftpProducer {
 
         // Connexion SSH
         let ssh_config = russh::client::Config::default();
-        let sh = ClientHandler;
+        let sh = ClientHandler::new(
+            self.config.known_hosts_path.as_deref(),
+            &self.config.host,
+        );
 
         let mut session = russh::client::connect(
             std::sync::Arc::new(ssh_config),
@@ -111,8 +114,21 @@ impl Producer for SftpProducer {
     }
 }
 
-/// Handler SSH client minimal
-struct ClientHandler;
+/// Handler SSH client avec vérification optionnelle de la clé serveur
+struct ClientHandler {
+    /// Clé publique SSH attendue du serveur (encodée en hexadécimal)
+    /// Si None, la vérification est désactivée (dev mode)
+    known_host_key: Option<String>,
+}
+
+impl ClientHandler {
+    fn new(known_hosts_path: Option<&str>, host: &str) -> Self {
+        let known_host_key = known_hosts_path.and_then(|path| {
+            crate::hostkey::lookup_host_key(path, host)
+        });
+        Self { known_host_key }
+    }
+}
 
 #[async_trait]
 impl russh::client::Handler for ClientHandler {
@@ -120,9 +136,30 @@ impl russh::client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &russh_keys::key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        tracing::warn!("Vérification de la clé serveur SSH désactivée (dev mode)");
-        Ok(true)
+        match &self.known_host_key {
+            Some(expected_key) => {
+                let actual = crate::hostkey::key_to_string(server_public_key);
+                if actual == *expected_key {
+                    tracing::info!("Clé serveur SSH vérifiée (conforme au known_hosts)");
+                    Ok(true)
+                } else {
+                    tracing::error!(
+                        expected = %expected_key,
+                        actual = %actual,
+                        "Clé serveur SSH invalide — possible attaque MITM"
+                    );
+                    Ok(false)
+                }
+            }
+            None => {
+                tracing::warn!(
+                    "Vérification de la clé serveur SSH désactivée (known_hosts non configuré). \
+                     En production, configurez known_hosts_path dans SftpConfig."
+                );
+                Ok(true)
+            }
+        }
     }
 }

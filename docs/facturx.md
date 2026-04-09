@@ -33,7 +33,7 @@ cargo test -p pdp-transform -- export_conversions_with_attachments --ignored --n
 Le pipeline applique 3 niveaux de validation :
 
 1. **Validation métier** — champs obligatoires, cohérence des montants
-2. **Validation XSD** — conformité structurelle (UBL 2.1, CII D22B, CDAR D23B)
+2. **Validation XSD** — conformité structurelle (UBL 2.1, CII D22B, CDAR D22B)
 3. **Validation Schematron** — règles EN16931 V1.3.15 + BR-FR V1.2.0 (via Saxon XSLT 2.0)
 
 Les spécifications sont dans `specs/` :

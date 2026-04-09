@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<xsd:schema xmlns:clm61373="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentStatusCode:D23A"
+<xsd:schema xmlns:clm61373="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentStatusCode:D22A"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentStatusCode:D23A"
+    targetNamespace="urn:un:unece:uncefact:codelist:standard:UNECE:DocumentStatusCode:D22A"
     elementFormDefault="qualified"
-    version="4.10">
+    version="3.9">
   <xsd:simpleType name="DocumentStatusCodeContentType">
     <xsd:restriction base="xsd:token">
       <xsd:enumeration value="1"/>
@@ -56,7 +56,6 @@
       <xsd:enumeration value="48"/>
       <xsd:enumeration value="49"/>
       <xsd:enumeration value="50"/>
-      <xsd:enumeration value="51"/>
     </xsd:restriction>
   </xsd:simpleType>
 </xsd:schema>

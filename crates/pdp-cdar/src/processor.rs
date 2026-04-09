@@ -215,7 +215,7 @@ fn determine_cdar_source(exchange: &Exchange) -> String {
 }
 
 /// Processor qui génère un CDV (Compte-rendu De Vie) après traitement d'une facture.
-/// Il ajoute le XML CDV conforme D23B dans les propriétés de l'exchange.
+/// Il ajoute le XML CDV conforme D22B dans les propriétés de l'exchange.
 pub struct CdarProcessor {
     generator: CdarGenerator,
 }
@@ -293,7 +293,7 @@ impl Processor for CdarProcessor {
 /// Processor qui parse les CDV (Compte-rendu De Vie) reçus du PPF ou d'une PDP
 /// et met à jour le statut de l'exchange en conséquence.
 ///
-/// Entrée : exchange.body contient le XML CDV D23B
+/// Entrée : exchange.body contient le XML CDV D22B
 /// Sortie : propriétés cdv.* renseignées, status mis à jour
 pub struct CdvReceptionProcessor {
     parser: CdarParser,

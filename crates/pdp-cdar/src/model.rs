@@ -608,7 +608,7 @@ pub struct ReferencedDocument {
 }
 
 /// CDV (Compte-rendu De Vie) — CrossDomainAcknowledgementAndResponse
-/// Conforme au schéma XSD D23B et aux Schematrons BR-FR-CDV
+/// Conforme au schéma XSD D22B et aux Schematrons BR-FR-CDV
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CdvResponse {
     // --- ExchangedDocumentContext ---
