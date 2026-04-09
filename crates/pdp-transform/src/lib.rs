@@ -115,6 +115,7 @@ pub mod processor;
 pub mod ppf_flux1;
 pub mod xslt_engine;
 pub mod fop_engine;
+pub mod typst_engine;
 pub mod facturx_generator;
 #[cfg(feature = "saxonc_ffi")]
 pub mod saxonc_ffi;
@@ -123,5 +124,6 @@ pub use converter::{convert, convert_to, xslt_transform, ConversionResult, Outpu
 pub use processor::TransformProcessor;
 pub use xslt_engine::{XsltEngine, XsltTransform};
 pub use fop_engine::{FopEngine, SourceSyntax, XsltBackend, detect_xslt_backend};
+pub use typst_engine::TypstPdfEngine;
 pub use facturx_generator::{FacturXGenerator, FacturXLevel, FacturXResult};
 pub use ppf_flux1::{PpfFlux1Processor, Flux1ProfileStrategy};

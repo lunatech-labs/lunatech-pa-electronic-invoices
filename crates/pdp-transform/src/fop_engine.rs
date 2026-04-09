@@ -102,8 +102,7 @@ pub struct FopEngine {
     lang: String,
     /// Backend XSLT détecté
     xslt_backend: XsltBackend,
-    /// Chemin vers le fop-config résolu (pré-calculé au new()) — utilisé uniquement avec le fallback Java
-    #[cfg(not(feature = "fop_native"))]
+    /// Chemin vers le fop-config résolu (pré-calculé au new())
     resolved_fop_config: Option<PathBuf>,
     /// Processeur SaxonC in-process (FFI, pas de fork/exec) — optionnel
     #[cfg(feature = "saxonc_ffi")]
@@ -115,11 +114,7 @@ impl FopEngine {
         let backend = detect_xslt_backend().unwrap_or(XsltBackend::SaxonJ);
         tracing::info!(backend = %backend, "Moteur XSLT détecté");
 
-        #[cfg(not(feature = "fop_native"))]
         let resolved = Self::resolve_fop_config_static(specs_dir);
-
-        #[cfg(feature = "fop_native")]
-        tracing::info!("FOP natif Rust activé (pas de subprocess Java)");
 
         #[cfg(feature = "saxonc_ffi")]
         let saxonc = {
@@ -134,7 +129,6 @@ impl FopEngine {
             specs_dir: specs_dir.to_path_buf(),
             lang: "fr".to_string(),
             xslt_backend: backend,
-            #[cfg(not(feature = "fop_native"))]
             resolved_fop_config: resolved,
             #[cfg(feature = "saxonc_ffi")]
             saxonc,
@@ -143,7 +137,6 @@ impl FopEngine {
 
     /// Construit le moteur avec un backend XSLT explicite.
     pub fn with_backend(specs_dir: &Path, backend: XsltBackend) -> Self {
-        #[cfg(not(feature = "fop_native"))]
         let resolved = Self::resolve_fop_config_static(specs_dir);
 
         #[cfg(feature = "saxonc_ffi")]
@@ -153,7 +146,6 @@ impl FopEngine {
             specs_dir: specs_dir.to_path_buf(),
             lang: "fr".to_string(),
             xslt_backend: backend,
-            #[cfg(not(feature = "fop_native"))]
             resolved_fop_config: resolved,
             #[cfg(feature = "saxonc_ffi")]
             saxonc,
@@ -476,8 +468,6 @@ impl FopEngine {
     }
 
     /// Résout le fichier fop-config en remplaçant {SPECS_DIR} par le chemin absolu.
-    /// Utilisé uniquement avec le fallback Java (sans feature fop_native).
-    #[cfg(not(feature = "fop_native"))]
     fn resolve_fop_config_static(specs_dir: &Path) -> Option<PathBuf> {
         let fop_config = specs_dir.join("fop/fop-facturx.xconf");
         if !fop_config.exists() {
@@ -505,110 +495,7 @@ impl FopEngine {
         Some(tmp_config)
     }
 
-    /// Construit la FontConfig avec les polices SourceSansPro et SourceSerifPro embarquées.
-    #[cfg(feature = "fop_native")]
-    fn build_font_config(&self) -> fop_render::FontConfig {
-        let fonts_dir = self.specs_dir.join("xslt/mustang/fonts");
-        let mut font_config = fop_render::FontConfig::new();
-
-        // SourceSansPro (sans-serif)
-        let sans_mappings = [
-            ("SourceSansPro", "SourceSansPro-Regular.ttf"),
-            ("SourceSansPro-Bold", "SourceSansPro-Bold.ttf"),
-            ("SourceSansPro-Italic", "SourceSansPro-It.ttf"),
-            ("SourceSansPro-BoldItalic", "SourceSansPro-BoldIt.ttf"),
-        ];
-
-        // SourceSerifPro (serif)
-        let serif_mappings = [
-            ("SourceSerifPro", "SourceSerifPro-Regular.ttf"),
-            ("SourceSerifPro-Bold", "SourceSerifPro-Bold.ttf"),
-            ("SourceSerifPro-Italic", "SourceSerifPro-It.ttf"),
-            ("SourceSerifPro-BoldItalic", "SourceSerifPro-BoldIt.ttf"),
-        ];
-
-        for (name, file) in sans_mappings.iter().chain(serif_mappings.iter()) {
-            let path = fonts_dir.join(file);
-            if path.exists() {
-                font_config.add_mapping(name, path);
-            } else {
-                tracing::warn!(font = %file, "Police introuvable: {}", path.display());
-            }
-        }
-
-        font_config
-    }
-
-    /// Corrige les propriétés XSL-FO incompatibles avec fop-rs.
-    /// Les stylesheets Mustang produisent `line-height="0pt"` que Java FOP tolère
-    /// mais que fop-rs rejette (validation stricte).
-    #[cfg(feature = "fop_native")]
-    fn sanitize_fo(fo_xml: &str) -> String {
-        fo_xml
-            .replace(r#"line-height="0pt""#, r#"line-height="normal""#)
-            .replace(r#"line-height="0mm""#, r#"line-height="normal""#)
-            .replace(r#"line-height="0""#, r#"line-height="normal""#)
-    }
-
-    /// Étape 3 : XSL-FO → PDF via fop-rs (Rust natif, in-process).
-    #[cfg(feature = "fop_native")]
-    pub fn render_fo_to_pdf(&self, fo_xml: &str) -> PdpResult<Vec<u8>> {
-        use std::io::Cursor;
-
-        tracing::debug!(fo_len = fo_xml.len(), "Rendu FO→PDF via fop-rs natif");
-
-        // Sanitiser le FO pour compatibilité fop-rs (line-height="0pt" → "normal")
-        let fo_xml = Self::sanitize_fo(fo_xml);
-
-        // Étape 1 : Parser le XSL-FO en arbre FO
-        let fo_tree = fop_core::FoTreeBuilder::new()
-            .parse(Cursor::new(fo_xml.as_str()))
-            .map_err(|e| PdpError::TransformError {
-                source_format: "FO".to_string(),
-                target_format: "PDF".to_string(),
-                message: format!("fop-rs: parsing XSL-FO échoué: {}", e),
-            })?;
-
-        // Étape 2 : Layout (arbre FO → arbre de zones/pages)
-        let area_tree = fop_layout::LayoutEngine::new()
-            .layout(&fo_tree)
-            .map_err(|e| PdpError::TransformError {
-                source_format: "FO".to_string(),
-                target_format: "PDF".to_string(),
-                message: format!("fop-rs: layout échoué: {}", e),
-            })?;
-
-        // Étape 3 : Rendu PDF avec polices configurées (render_with_fo pour bookmarks)
-        let font_config = self.build_font_config();
-        let pdf_doc = fop_render::PdfRenderer::with_system_fonts()
-            .with_font_config(font_config)
-            .render_with_fo(&area_tree, &fo_tree)
-            .map_err(|e| PdpError::TransformError {
-                source_format: "FO".to_string(),
-                target_format: "PDF".to_string(),
-                message: format!("fop-rs: rendu PDF échoué: {}", e),
-            })?;
-
-        let pdf = pdf_doc.to_bytes().map_err(|e| PdpError::TransformError {
-            source_format: "FO".to_string(),
-            target_format: "PDF".to_string(),
-            message: format!("fop-rs: sérialisation PDF échouée: {}", e),
-        })?;
-
-        if pdf.len() < 5 || &pdf[0..5] != b"%PDF-" {
-            return Err(PdpError::TransformError {
-                source_format: "FO".to_string(),
-                target_format: "PDF".to_string(),
-                message: "Le fichier généré par fop-rs n'est pas un PDF valide".to_string(),
-            });
-        }
-
-        tracing::debug!(pdf_size = pdf.len(), "PDF généré via fop-rs natif");
-        Ok(pdf)
-    }
-
-    /// Étape 3 : XSL-FO → PDF via Apache FOP (subprocess Java) — fallback.
-    #[cfg(not(feature = "fop_native"))]
+    /// Étape 3 : XSL-FO → PDF via Apache FOP (subprocess Java).
     pub fn render_fo_to_pdf(&self, fo_xml: &str) -> PdpResult<Vec<u8>> {
         let tmp_dir = std::env::temp_dir();
         let id = uuid::Uuid::new_v4();

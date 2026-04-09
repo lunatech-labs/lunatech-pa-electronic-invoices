@@ -57,19 +57,26 @@ pub struct FacturXResult {
 /// Générateur Factur-X complet.
 pub struct FacturXGenerator {
     fop_engine: FopEngine,
+    typst_engine: crate::typst_engine::TypstPdfEngine,
     level: FacturXLevel,
 }
 
 impl FacturXGenerator {
     pub fn new(fop_engine: FopEngine) -> Self {
+        let specs_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../specs");
         Self {
             fop_engine,
+            typst_engine: crate::typst_engine::TypstPdfEngine::new(specs_dir),
             level: FacturXLevel::EN16931,
         }
     }
 
     pub fn from_specs_dir(specs_dir: &std::path::Path) -> Self {
-        Self::new(FopEngine::new(specs_dir))
+        Self {
+            fop_engine: FopEngine::new(specs_dir),
+            typst_engine: crate::typst_engine::TypstPdfEngine::new(specs_dir.to_path_buf()),
+            level: FacturXLevel::EN16931,
+        }
     }
 
     pub fn from_manifest_dir() -> Self {
@@ -132,13 +139,24 @@ impl FacturXGenerator {
             }
         };
 
-        // Étape 1 : Générer le PDF visuel via FOP
-        tracing::info!(
-            invoice = %invoice.invoice_number,
-            source = %source_syntax,
-            "Génération du PDF visuel via pipeline FOP"
-        );
-        let base_pdf = self.fop_engine.generate_pdf(raw_xml, source_syntax)?;
+        // Étape 1 : Générer le PDF visuel (Typst prioritaire, FOP Java fallback)
+        let base_pdf = match self.typst_engine.generate_pdf(invoice) {
+            Ok(pdf) => {
+                tracing::info!(
+                    invoice = %invoice.invoice_number,
+                    "PDF visuel généré via Typst"
+                );
+                pdf
+            }
+            Err(e) => {
+                tracing::warn!(
+                    invoice = %invoice.invoice_number,
+                    error = %e,
+                    "Typst échoué, fallback FOP Java"
+                );
+                self.fop_engine.generate_pdf(raw_xml, source_syntax)?
+            }
+        };
 
         // Étape 2 : Embarquer le XML CII + pièces jointes dans le PDF
         let final_pdf = self.embed_in_pdf(

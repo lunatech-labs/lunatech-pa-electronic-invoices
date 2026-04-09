@@ -39,9 +39,9 @@ roxmltree = "0.19"
 
 # PDF
 lopdf = "0.32"
-fop-core = "0.1"
-fop-layout = "0.1"
-fop-render = { version = "0.1", default-features = false }
+typst-as-lib = { version = "0.15", features = ["typst-kit-fonts"] }
+typst-pdf = "0.14"
+typst = "0.14"
 
 # SFTP
 russh = "0.44"

@@ -435,6 +435,9 @@ fn detect_source_syntax(invoice: &InvoiceData) -> crate::fop_engine::SourceSynta
 }
 
 /// Convertit vers PDF visuel seul (sans XML embarqué, sans métadonnées Factur-X).
+///
+/// Utilise le moteur Typst (in-process, ~100ms) comme backend principal.
+/// Fallback sur FOP Java si Typst échoue.
 fn convert_to_pdf(invoice: &InvoiceData) -> PdpResult<ConversionResult> {
     // Si on a déjà un PDF (Factur-X source), le retourner
     if let Some(ref pdf) = invoice.raw_pdf {
@@ -445,6 +448,22 @@ fn convert_to_pdf(invoice: &InvoiceData) -> PdpResult<ConversionResult> {
         });
     }
 
+    // Essayer d'abord Typst (rapide, in-process)
+    let typst = crate::typst_engine::TypstPdfEngine::from_manifest_dir();
+    match typst.generate_pdf(invoice) {
+        Ok(pdf) => {
+            return Ok(ConversionResult {
+                content: pdf,
+                output_format: OutputFormat::PDF,
+                suggested_filename: make_output_filename(&invoice.invoice_number, OutputFormat::PDF),
+            });
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Typst PDF échoué, fallback FOP Java");
+        }
+    }
+
+    // Fallback FOP Java (nécessite raw_xml + Saxon + FOP installés)
     let raw_xml = invoice.raw_xml.as_deref().ok_or_else(|| {
         PdpError::TransformError {
             source_format: invoice.source_format.to_string(),
