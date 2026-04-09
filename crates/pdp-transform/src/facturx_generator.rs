@@ -249,15 +249,16 @@ impl FacturXGenerator {
             // factur-x.xml en premier
             arr.push(Object::String("factur-x.xml".into(), StringFormat::Literal));
             arr.push(Object::Reference(xml_filespec_id));
-            // Pièces jointes
-            for (i, att) in attachments.iter().enumerate() {
+            // Pièces jointes (seules celles avec embedded_content ont un filespec)
+            let mut filespec_idx = 1; // 0 = factur-x.xml
+            for att in attachments.iter() {
                 if att.embedded_content.is_some() {
                     let filename = att.filename.as_deref()
                         .or(att.id.as_deref())
                         .unwrap_or("attachment.bin");
                     arr.push(Object::String(filename.into(), StringFormat::Literal));
-                    // +1 car filespec_ids[0] = factur-x.xml
-                    arr.push(Object::Reference(filespec_ids[i + 1]));
+                    arr.push(Object::Reference(filespec_ids[filespec_idx]));
+                    filespec_idx += 1;
                 }
             }
             arr
@@ -1255,6 +1256,503 @@ mod tests {
     #[test]
     fn test_facturx_from_ubl_remises_multitva_schematron() {
         assert_facturx_valid("../../tests/fixtures/ubl/facture_ubl_remises_multitva.xml", "UBL");
+    }
+
+    // ===== Tests d'attachements (BG-24) =====
+
+    /// Helper : extrait le contenu binaire d'un fichier embarqué par nom depuis un PDF.
+    fn extract_embedded_file(pdf: &[u8], filename: &str) -> Option<Vec<u8>> {
+        let doc = lopdf::Document::load_mem(pdf).expect("Relecture PDF échouée");
+        for (_id, obj) in doc.objects.iter() {
+            if let Ok(dict) = obj.as_dict() {
+                if let Ok(f) = dict.get(b"F") {
+                    if let Ok(s) = f.as_str() {
+                        if s == filename.as_bytes() {
+                            if let Ok(ef) = dict.get(b"EF") {
+                                if let Ok(ef_dict) = ef.as_dict() {
+                                    if let Ok(f_ref) = ef_dict.get(b"F") {
+                                        if let Ok(stream_id) = f_ref.as_reference() {
+                                            if let Ok(stream_obj) = doc.get_object(stream_id) {
+                                                if let lopdf::Object::Stream(ref stream) = stream_obj {
+                                                    let mut s = stream.clone();
+                                                    let _ = s.decompress();
+                                                    return Some(s.content.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Helper : liste tous les noms de fichiers embarqués dans un PDF.
+    fn list_embedded_filenames(pdf: &[u8]) -> Vec<String> {
+        let doc = lopdf::Document::load_mem(pdf).expect("Relecture PDF échouée");
+        let mut names = Vec::new();
+        for (_id, obj) in doc.objects.iter() {
+            if let Ok(dict) = obj.as_dict() {
+                if let Ok(type_val) = dict.get(b"Type") {
+                    if type_val.as_name_str().ok() == Some("Filespec") {
+                        if let Ok(f) = dict.get(b"F") {
+                            if let Ok(s) = f.as_str() {
+                                names.push(String::from_utf8_lossy(s).to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        names
+    }
+
+    /// Helper : vérifie l'AFRelationship d'un filespec par nom de fichier.
+    fn get_af_relationship(pdf: &[u8], filename: &str) -> Option<String> {
+        let doc = lopdf::Document::load_mem(pdf).expect("Relecture PDF échouée");
+        for (_id, obj) in doc.objects.iter() {
+            if let Ok(dict) = obj.as_dict() {
+                if let Ok(f) = dict.get(b"F") {
+                    if let Ok(s) = f.as_str() {
+                        if s == filename.as_bytes() {
+                            if let Ok(af_rel) = dict.get(b"AFRelationship") {
+                                return af_rel.as_name_str().ok().map(|s| s.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Helper : crée une facture CII de base avec attachements.
+    fn invoice_with_attachments(attachments: Vec<InvoiceAttachment>) -> InvoiceData {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let parser = pdp_invoice::cii::CiiParser::new();
+        let mut invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+        invoice.attachments = attachments;
+        invoice
+    }
+
+    #[test]
+    fn test_attachment_multiple_types_pdf_png_csv() {
+        // Tester l'embarquement de 3 types de fichiers différents
+        let pdf_content = b"%PDF-1.4 fake pdf content for testing purposes only";
+        let png_content = b"\x89PNG\r\n\x1a\n fake png content";
+        let csv_content = b"col1;col2;col3\nval1;val2;val3\n";
+
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-PDF".to_string()),
+                description: Some("Bon de commande PDF".to_string()),
+                external_uri: None,
+                embedded_content: Some(pdf_content.to_vec()),
+                mime_code: Some("application/pdf".to_string()),
+                filename: Some("bon_commande.pdf".to_string()),
+            },
+            InvoiceAttachment {
+                id: Some("ATT-PNG".to_string()),
+                description: Some("Photo produit".to_string()),
+                external_uri: None,
+                embedded_content: Some(png_content.to_vec()),
+                mime_code: Some("image/png".to_string()),
+                filename: Some("photo.png".to_string()),
+            },
+            InvoiceAttachment {
+                id: Some("ATT-CSV".to_string()),
+                description: Some("Détail lignes".to_string()),
+                external_uri: None,
+                embedded_content: Some(csv_content.to_vec()),
+                mime_code: Some("text/csv".to_string()),
+                filename: Some("details.csv".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X avec 3 PJ échouée");
+
+        // Vérifier le PDF de base
+        assert_eq!(&result.pdf[0..5], b"%PDF-");
+
+        // Vérifier que tous les fichiers sont embarqués
+        let filenames = list_embedded_filenames(&result.pdf);
+        assert!(filenames.contains(&"factur-x.xml".to_string()),
+            "Doit contenir factur-x.xml, trouvé: {:?}", filenames);
+        assert!(filenames.contains(&"bon_commande.pdf".to_string()),
+            "Doit contenir bon_commande.pdf, trouvé: {:?}", filenames);
+        assert!(filenames.contains(&"photo.png".to_string()),
+            "Doit contenir photo.png, trouvé: {:?}", filenames);
+        assert!(filenames.contains(&"details.csv".to_string()),
+            "Doit contenir details.csv, trouvé: {:?}", filenames);
+
+        // Vérifier le contenu extrait de chaque attachement
+        let extracted_pdf = extract_embedded_file(&result.pdf, "bon_commande.pdf")
+            .expect("bon_commande.pdf doit être extractible");
+        assert_eq!(extracted_pdf, pdf_content, "Contenu PDF doit être identique");
+
+        let extracted_png = extract_embedded_file(&result.pdf, "photo.png")
+            .expect("photo.png doit être extractible");
+        assert_eq!(extracted_png, png_content, "Contenu PNG doit être identique");
+
+        let extracted_csv = extract_embedded_file(&result.pdf, "details.csv")
+            .expect("details.csv doit être extractible");
+        assert_eq!(extracted_csv, csv_content, "Contenu CSV doit être identique");
+    }
+
+    #[test]
+    fn test_attachment_af_relationship_supplement() {
+        // Les pièces jointes BG-24 doivent avoir AFRelationship=Supplement
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-001".to_string()),
+                description: Some("Document joint".to_string()),
+                external_uri: None,
+                embedded_content: Some(b"test content".to_vec()),
+                mime_code: Some("text/plain".to_string()),
+                filename: Some("document.txt".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+
+        // factur-x.xml → Data
+        assert_eq!(
+            get_af_relationship(&result.pdf, "factur-x.xml"),
+            Some("Data".to_string()),
+            "factur-x.xml doit avoir AFRelationship=Data"
+        );
+
+        // Pièce jointe → Supplement
+        assert_eq!(
+            get_af_relationship(&result.pdf, "document.txt"),
+            Some("Supplement".to_string()),
+            "Les pièces jointes BG-24 doivent avoir AFRelationship=Supplement"
+        );
+    }
+
+    #[test]
+    fn test_attachment_af_array_contains_all_files() {
+        // Le AF array du catalogue doit référencer tous les fichiers (factur-x.xml + PJ)
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-001".to_string()),
+                description: None,
+                external_uri: None,
+                embedded_content: Some(b"content1".to_vec()),
+                mime_code: Some("text/plain".to_string()),
+                filename: Some("file1.txt".to_string()),
+            },
+            InvoiceAttachment {
+                id: Some("ATT-002".to_string()),
+                description: None,
+                external_uri: None,
+                embedded_content: Some(b"content2".to_vec()),
+                mime_code: Some("application/octet-stream".to_string()),
+                filename: Some("file2.bin".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF échouée");
+
+        // Vérifier AF array dans le catalogue
+        let catalog_id = doc.trailer.get(b"Root").unwrap().as_reference().unwrap();
+        let catalog = doc.get_object(catalog_id).unwrap().as_dict().unwrap();
+        let af_array = catalog.get(b"AF").expect("AF manquant").as_array().expect("AF doit être un tableau");
+
+        // 3 entrées : factur-x.xml + file1.txt + file2.bin
+        assert_eq!(af_array.len(), 3,
+            "AF doit contenir 3 entrées (factur-x.xml + 2 PJ), trouvé: {}", af_array.len());
+
+        // Vérifier le Names/EmbeddedFiles name tree
+        let names_ref = catalog.get(b"Names").unwrap().as_reference().unwrap();
+        let names_dict = doc.get_object(names_ref).unwrap().as_dict().unwrap();
+        let ef_ref = names_dict.get(b"EmbeddedFiles").unwrap().as_reference().unwrap();
+        let ef_dict = doc.get_object(ef_ref).unwrap().as_dict().unwrap();
+        let names_array = ef_dict.get(b"Names").unwrap().as_array().unwrap();
+
+        // 6 entrées : 3 paires (nom, ref)
+        assert_eq!(names_array.len(), 6,
+            "Names doit contenir 6 entrées (3 paires nom+ref), trouvé: {}", names_array.len());
+
+        // Vérifier l'ordre : factur-x.xml en premier
+        let first_name = names_array[0].as_str().unwrap();
+        assert_eq!(first_name, b"factur-x.xml", "Premier fichier doit être factur-x.xml");
+    }
+
+    #[test]
+    fn test_attachment_external_uri_only_not_embedded() {
+        // Les pièces jointes avec URI externe uniquement (sans embedded_content)
+        // ne doivent PAS être embarquées dans le PDF
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-EXT".to_string()),
+                description: Some("Document externe".to_string()),
+                external_uri: Some("https://example.com/doc.pdf".to_string()),
+                embedded_content: None,
+                mime_code: Some("application/pdf".to_string()),
+                filename: Some("doc_externe.pdf".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+
+        let filenames = list_embedded_filenames(&result.pdf);
+        assert!(filenames.contains(&"factur-x.xml".to_string()),
+            "Doit contenir factur-x.xml");
+        assert!(!filenames.contains(&"doc_externe.pdf".to_string()),
+            "Les PJ avec URI externe uniquement ne doivent pas être embarquées dans le PDF");
+    }
+
+    #[test]
+    fn test_attachment_empty_content_not_embedded() {
+        // Les pièces jointes sans contenu embarqué ne doivent pas être dans le PDF
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-EMPTY".to_string()),
+                description: Some("Référence sans contenu".to_string()),
+                external_uri: None,
+                embedded_content: None,
+                mime_code: None,
+                filename: Some("vide.txt".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+
+        let filenames = list_embedded_filenames(&result.pdf);
+        assert_eq!(filenames.len(), 1, "Seul factur-x.xml doit être embarqué");
+        assert!(filenames.contains(&"factur-x.xml".to_string()));
+    }
+
+    #[test]
+    fn test_attachment_mime_type_preserved() {
+        // Vérifier que le MIME type est bien enregistré dans le stream embarqué
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-XML".to_string()),
+                description: Some("Bordereau XML".to_string()),
+                external_uri: None,
+                embedded_content: Some(b"<root>test</root>".to_vec()),
+                mime_code: Some("application/xml".to_string()),
+                filename: Some("bordereau.xml".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF échouée");
+
+        // Trouver le filespec de bordereau.xml et vérifier le Subtype du stream
+        for (_id, obj) in doc.objects.iter() {
+            if let Ok(dict) = obj.as_dict() {
+                if let Ok(f) = dict.get(b"F") {
+                    if let Ok(s) = f.as_str() {
+                        if s == b"bordereau.xml" {
+                            let ef = dict.get(b"EF").unwrap().as_dict().unwrap();
+                            let stream_ref = ef.get(b"F").unwrap().as_reference().unwrap();
+                            let stream_obj = doc.get_object(stream_ref).unwrap();
+                            if let lopdf::Object::Stream(ref stream) = stream_obj {
+                                let subtype = stream.dict.get(b"Subtype")
+                                    .expect("Stream doit avoir Subtype");
+                                assert_eq!(subtype.as_name_str().unwrap(), "application/xml",
+                                    "Subtype doit correspondre au MIME type");
+                                let params = stream.dict.get(b"Params")
+                                    .expect("Stream doit avoir Params")
+                                    .as_dict().unwrap();
+                                let size = params.get(b"Size").unwrap()
+                                    .as_i64().unwrap();
+                                assert_eq!(size, 17, "Size doit correspondre à la taille du contenu");
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        panic!("bordereau.xml introuvable dans le PDF");
+    }
+
+    #[test]
+    fn test_attachment_filename_fallback_to_id() {
+        // Sans filename, le nom doit fallback sur l'id
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("BON-CMD-2025".to_string()),
+                description: Some("Bon de commande".to_string()),
+                external_uri: None,
+                embedded_content: Some(b"contenu test".to_vec()),
+                mime_code: Some("text/plain".to_string()),
+                filename: None, // pas de filename
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+
+        let filenames = list_embedded_filenames(&result.pdf);
+        assert!(filenames.contains(&"BON-CMD-2025".to_string()),
+            "Sans filename, doit utiliser l'id comme nom. Trouvé: {:?}", filenames);
+    }
+
+    #[test]
+    fn test_attachment_filename_fallback_to_default() {
+        // Sans filename ni id, doit utiliser "attachment.bin"
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: None,
+                description: None,
+                external_uri: None,
+                embedded_content: Some(b"contenu anonyme".to_vec()),
+                mime_code: None,
+                filename: None,
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+
+        let filenames = list_embedded_filenames(&result.pdf);
+        assert!(filenames.contains(&"attachment.bin".to_string()),
+            "Sans filename ni id, doit utiliser 'attachment.bin'. Trouvé: {:?}", filenames);
+    }
+
+    #[test]
+    fn test_attachment_large_binary() {
+        // Tester avec un fichier binaire plus volumineux (100 Ko)
+        let large_content: Vec<u8> = (0..100_000).map(|i| (i % 256) as u8).collect();
+
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-LARGE".to_string()),
+                description: Some("Fichier volumineux".to_string()),
+                external_uri: None,
+                embedded_content: Some(large_content.clone()),
+                mime_code: Some("application/octet-stream".to_string()),
+                filename: Some("large_file.bin".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X avec PJ volumineuse échouée");
+
+        // Extraire et vérifier l'intégrité du contenu
+        let extracted = extract_embedded_file(&result.pdf, "large_file.bin")
+            .expect("large_file.bin doit être extractible");
+        assert_eq!(extracted.len(), 100_000,
+            "Taille du fichier extrait doit être 100 Ko");
+        assert_eq!(extracted, large_content,
+            "Contenu du fichier volumineux doit être identique après extraction");
+    }
+
+    #[test]
+    fn test_attachment_pdfa3_compliance_with_attachments() {
+        // Vérifier que la structure PDF/A-3 reste valide avec des pièces jointes
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-001".to_string()),
+                description: Some("PJ test".to_string()),
+                external_uri: None,
+                embedded_content: Some(b"test pdfa3 compliance".to_vec()),
+                mime_code: Some("text/plain".to_string()),
+                filename: Some("test_compliance.txt".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF échouée");
+        let catalog_id = doc.trailer.get(b"Root").unwrap().as_reference().unwrap();
+        let catalog = doc.get_object(catalog_id).unwrap().as_dict().unwrap();
+
+        // PDF/A-3 : MarkInfo.Marked=true
+        let mark_info = catalog.get(b"MarkInfo")
+            .expect("MarkInfo manquant (PDF/A)")
+            .as_dict().unwrap();
+        assert_eq!(mark_info.get(b"Marked").unwrap().as_bool().unwrap(), true);
+
+        // PDF/A-3 : Metadata stream XMP
+        let metadata_ref = catalog.get(b"Metadata")
+            .expect("Metadata manquant (PDF/A-3)");
+        let metadata_id = metadata_ref.as_reference().unwrap();
+        let metadata_obj = doc.get_object(metadata_id).unwrap();
+        let xmp_bytes = match metadata_obj {
+            lopdf::Object::Stream(ref stream) => {
+                let mut s = stream.clone();
+                let _ = s.decompress();
+                s.content
+            }
+            _ => panic!("Metadata doit être un Stream"),
+        };
+        let xmp = String::from_utf8_lossy(&xmp_bytes);
+        assert!(xmp.contains("pdfaid:part>3</pdfaid:part"),
+            "XMP doit déclarer PDF/A part=3");
+        assert!(xmp.contains("pdfaid:conformance>A</pdfaid:conformance>"),
+            "XMP doit déclarer conformance=A");
+
+        // PDF/A-3 : AF array doit contenir factur-x.xml + PJ
+        let af_array = catalog.get(b"AF").unwrap().as_array().unwrap();
+        assert_eq!(af_array.len(), 2, "AF doit contenir factur-x.xml + 1 PJ");
+
+        // PDF/A-3 : Names/EmbeddedFiles
+        let names_ref = catalog.get(b"Names").unwrap().as_reference().unwrap();
+        let names_dict = doc.get_object(names_ref).unwrap().as_dict().unwrap();
+        assert!(names_dict.get(b"EmbeddedFiles").is_ok(),
+            "Names doit avoir EmbeddedFiles");
+    }
+
+    #[test]
+    fn test_attachment_mixed_embedded_and_external() {
+        // Mélange de PJ avec contenu embarqué et PJ avec URI externe
+        // Seules les PJ embarquées doivent être dans le PDF
+        let invoice = invoice_with_attachments(vec![
+            InvoiceAttachment {
+                id: Some("ATT-EMB".to_string()),
+                description: Some("Embarquée".to_string()),
+                external_uri: None,
+                embedded_content: Some(b"embedded content".to_vec()),
+                mime_code: Some("text/plain".to_string()),
+                filename: Some("embedded.txt".to_string()),
+            },
+            InvoiceAttachment {
+                id: Some("ATT-EXT".to_string()),
+                description: Some("Externe".to_string()),
+                external_uri: Some("https://example.com/external.pdf".to_string()),
+                embedded_content: None,
+                mime_code: Some("application/pdf".to_string()),
+                filename: Some("external.pdf".to_string()),
+            },
+            InvoiceAttachment {
+                id: Some("ATT-BOTH".to_string()),
+                description: Some("Les deux".to_string()),
+                external_uri: Some("https://example.com/both.pdf".to_string()),
+                embedded_content: Some(b"both content".to_vec()),
+                mime_code: Some("application/pdf".to_string()),
+                filename: Some("both.pdf".to_string()),
+            },
+        ]);
+
+        let result = generator().generate(&invoice)
+            .expect("Génération Factur-X échouée");
+
+        let filenames = list_embedded_filenames(&result.pdf);
+        // factur-x.xml + embedded.txt + both.pdf = 3
+        assert_eq!(filenames.len(), 3,
+            "Doit contenir 3 fichiers (factur-x.xml + 2 embarquées). Trouvé: {:?}", filenames);
+        assert!(filenames.contains(&"embedded.txt".to_string()));
+        assert!(filenames.contains(&"both.pdf".to_string()));
+        assert!(!filenames.contains(&"external.pdf".to_string()),
+            "PJ externe seule ne doit pas être embarquée");
     }
 
     #[test]
