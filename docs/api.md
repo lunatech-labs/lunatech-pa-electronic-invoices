@@ -6,8 +6,8 @@ La librairie `pdp-transform` fournit une API unifiée pour convertir entre tous 
 
 | Source ↓ / Cible → | CII | UBL | Factur-X | PDF |
 |---------------------|-----|-----|----------|-----|
-| **UBL**             | ✅ XSLT | — | ✅ XSLT+FOP+lopdf | ✅ FOP |
-| **CII**             | — | ✅ XSLT | ✅ FOP+lopdf | ✅ FOP |
+| **UBL**             | ✅ XSLT | — | ✅ XSLT+Typst+lopdf | ✅ Typst |
+| **CII**             | — | ✅ XSLT | ✅ Typst+lopdf | ✅ Typst |
 | **Factur-X**        | ✅ extraction | ✅ extraction+XSLT | — | ✅ retourne PDF |
 
 ## Utilisation rapide

@@ -5,21 +5,22 @@
 - **Rust** 1.93+
 - **Elasticsearch** 8.x (traçabilité + archivage, un index par SIREN)
 - **libxml2-dev** + pkg-config (validation XSD)
-- **SaxonC-HE** 12.9 natif (XSLT 2.0 : validation Schematron + transformation PDF)
+- **SaxonC-HE** 12.9 natif (XSLT 2.0 : validation Schematron + transformation UBL↔CII)
   - Si `libsaxonc-he` est installée (`/usr/local/lib`), les transformations XSLT s'exécutent **in-process via FFI** (pas de fork/exec, ~25-30% plus rapide)
   - Sinon, fallback automatique vers le CLI `transform` ou `saxon`
-- **Apache FOP** 2.11 (génération PDF Factur-X)
 - **qpdf** (correction header binaire PDF/A)
 - **veraPDF** (optionnel, validation PDF/A-3a)
 
+> **Note** : La génération PDF utilise **Typst** (compilé en natif dans le binaire, aucune dépendance externe). Apache FOP n'est plus nécessaire.
+
 ```bash
 # macOS
-brew install pkgconf saxon fop qpdf
+brew install pkgconf saxon qpdf
 brew install verapdf  # optionnel, pour la validation PDF/A
 
 # Debian/Ubuntu
-apt-get install pkg-config libxml2-dev default-jre-headless qpdf
-# Saxon et FOP : voir Dockerfile pour les URLs de téléchargement
+apt-get install pkg-config libxml2-dev qpdf
+# Saxon : voir Dockerfile pour les URLs de téléchargement
 ```
 
 ## Elasticsearch

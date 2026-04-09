@@ -43,7 +43,7 @@ Les rapports HTML Criterion sont générés dans `target/criterion/`.
 
 ## Génération de fixtures
 
-Les fixtures Factur-X sont des PDF/A-3a conformes générés via le pipeline complet (FOP + lopdf + qpdf).
+Les fixtures Factur-X sont des PDF/A-3a conformes générés via le pipeline complet (Typst + lopdf + qpdf).
 
 ```bash
 # Régénérer les fixtures Factur-X (3 fichiers : facture, avoir, rectificative)

@@ -2,17 +2,15 @@
 //!
 //! Pipeline complète :
 //! 1. Génère le XML CII (si source UBL, via ubl_to_cii)
-//! 2. Génère le PDF visuel via FOP (CII/UBL → XR → FO → PDF)
+//! 2. Génère le PDF visuel via Typst (in-process, ~100ms)
 //! 3. Embarque le XML CII comme `factur-x.xml` (AF relationship) dans le PDF
 //! 4. Embarque les pièces jointes additionnelles (BG-24)
 //! 5. Ajoute les métadonnées XMP Factur-X (PDF/A-3a)
 //!
-//! Utilise lopdf pour la manipulation PDF post-FOP.
+//! Utilise lopdf pour la manipulation PDF post-Typst.
 
 use pdp_core::error::{PdpError, PdpResult};
 use pdp_core::model::{InvoiceAttachment, InvoiceData, InvoiceFormat};
-
-use crate::fop_engine::{FopEngine, SourceSyntax};
 
 /// Niveau de conformité Factur-X
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,16 +54,13 @@ pub struct FacturXResult {
 
 /// Générateur Factur-X complet.
 pub struct FacturXGenerator {
-    fop_engine: FopEngine,
     typst_engine: crate::typst_engine::TypstPdfEngine,
     level: FacturXLevel,
 }
 
 impl FacturXGenerator {
-    pub fn new(fop_engine: FopEngine) -> Self {
-        let specs_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../specs");
+    pub fn new(specs_dir: std::path::PathBuf) -> Self {
         Self {
-            fop_engine,
             typst_engine: crate::typst_engine::TypstPdfEngine::new(specs_dir),
             level: FacturXLevel::EN16931,
         }
@@ -73,14 +68,14 @@ impl FacturXGenerator {
 
     pub fn from_specs_dir(specs_dir: &std::path::Path) -> Self {
         Self {
-            fop_engine: FopEngine::new(specs_dir),
             typst_engine: crate::typst_engine::TypstPdfEngine::new(specs_dir.to_path_buf()),
             level: FacturXLevel::EN16931,
         }
     }
 
     pub fn from_manifest_dir() -> Self {
-        Self::new(FopEngine::from_manifest_dir())
+        let specs_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../specs");
+        Self::new(specs_dir)
     }
 
     pub fn with_level(mut self, level: FacturXLevel) -> Self {
@@ -94,7 +89,7 @@ impl FacturXGenerator {
     /// - Si source = UBL : convertit d'abord en CII via ubl_to_cii
     /// - Si source = FacturX : retourne le raw_pdf existant
     ///
-    /// Le PDF visuel est généré via la pipeline FOP (CII/UBL → XR → FO → PDF),
+    /// Le PDF visuel est généré via Typst (in-process, ~100ms),
     /// puis le XML CII et les pièces jointes sont embarqués via lopdf.
     pub fn generate(&self, invoice: &InvoiceData) -> PdpResult<FacturXResult> {
         // Si on a déjà un PDF Factur-X, le retourner tel quel
@@ -119,44 +114,28 @@ impl FacturXGenerator {
             }
         })?;
 
-        // Déterminer la syntaxe source et obtenir le XML CII pour l'embarquement
-        let (source_syntax, cii_xml) = match invoice.source_format {
-            InvoiceFormat::CII => (SourceSyntax::CII, raw_xml.to_string()),
+        // Déterminer le XML CII pour l'embarquement
+        let cii_xml = match invoice.source_format {
+            InvoiceFormat::CII => raw_xml.to_string(),
             InvoiceFormat::UBL => {
                 let engine = crate::xslt_engine::XsltEngine::from_manifest_dir();
-                let cii = engine.ubl_to_cii(raw_xml)?;
-                // Détecter UBL CreditNote pour le pipeline FOP
-                let syntax = if raw_xml.contains("<CreditNote") {
-                    SourceSyntax::UBLCreditNote
-                } else {
-                    SourceSyntax::UBL
-                };
-                (syntax, cii)
+                engine.ubl_to_cii(raw_xml)?
             }
             InvoiceFormat::FacturX => {
                 // Pas de raw_pdf (déjà géré ci-dessus), on a juste le XML
-                (SourceSyntax::CII, raw_xml.to_string())
+                raw_xml.to_string()
             }
         };
 
-        // Étape 1 : Générer le PDF visuel (Typst prioritaire, FOP Java fallback)
-        let base_pdf = match self.typst_engine.generate_pdf(invoice) {
-            Ok(pdf) => {
-                tracing::info!(
-                    invoice = %invoice.invoice_number,
-                    "PDF visuel généré via Typst"
-                );
-                pdf
-            }
-            Err(e) => {
-                tracing::warn!(
-                    invoice = %invoice.invoice_number,
-                    error = %e,
-                    "Typst échoué, fallback FOP Java"
-                );
-                self.fop_engine.generate_pdf(raw_xml, source_syntax)?
-            }
-        };
+        // Étape 1 : Générer le PDF visuel via Typst
+        let base_pdf = self.typst_engine.generate_pdf(invoice).map_err(|e| {
+            tracing::error!(
+                invoice = %invoice.invoice_number,
+                error = %e,
+                "Échec génération PDF via Typst"
+            );
+            e
+        })?;
 
         // Détecter le niveau Factur-X depuis le profile_id du XML CII
         let effective_level = Self::detect_level_from_xml(&cii_xml).unwrap_or(self.level);
@@ -214,7 +193,7 @@ impl FacturXGenerator {
             PdpError::TransformError {
                 source_format: "PDF".to_string(),
                 target_format: "Factur-X".to_string(),
-                message: format!("Impossible de charger le PDF FOP: {}", e),
+                message: format!("Impossible de charger le PDF Typst: {}", e),
             }
         })?;
 
@@ -416,8 +395,8 @@ r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
       </dc:description>
       <xmp:CreateDate>{now}</xmp:CreateDate>
       <xmp:ModifyDate>{now}</xmp:ModifyDate>
-      <xmp:CreatorTool>pdp-facture (Mustang/FOP pipeline)</xmp:CreatorTool>
-      <pdf:Producer>Apache FOP + pdp-facture</pdf:Producer>
+      <xmp:CreatorTool>pdp-facture (Typst)</xmp:CreatorTool>
+      <pdf:Producer>Typst + pdp-facture</pdf:Producer>
       <pdfaid:part>3</pdfaid:part>
       <pdfaid:conformance>A</pdfaid:conformance>
       <fx:DocumentFileName>factur-x.xml</fx:DocumentFileName>
@@ -1300,6 +1279,16 @@ mod tests {
     #[test]
     fn test_facturx_from_ubl_remises_multitva_schematron() {
         assert_facturx_valid("../../tests/fixtures/ubl/facture_ubl_remises_multitva.xml", "UBL");
+    }
+
+    #[test]
+    fn test_facturx_from_ubl_avoir_schematron() {
+        assert_facturx_valid("../../tests/fixtures/ubl/facture_ubl_002_avoir.xml", "UBL");
+    }
+
+    #[test]
+    fn test_facturx_from_ubl_rectificative_schematron() {
+        assert_facturx_valid("../../tests/fixtures/ubl/facture_rectificative_ubl_384.xml", "UBL");
     }
 
     // ===== Tests d'attachements (BG-24) =====

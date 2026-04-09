@@ -44,14 +44,14 @@ Mesuré sur macOS ARM64 (Apple Silicon), facture simple 3 lignes, `cargo bench`.
 | Factur-X → CII (extraction)            | 253 ns | **~4 000 000/s** |
 | Factur-X → UBL (extraction + XSLT)     | 24 ms  | **~42/s**        |
 | Factur-X → PDF (retourne PDF existant) | 2.2 µs | **~450 000/s**   |
-| UBL → PDF (SaxonC FFI + FOP)           | 1.44 s | **~0.69/s**      |
-| CII → PDF (SaxonC FFI + FOP)           | 1.53 s | **~0.65/s**      |
-| UBL → Factur-X (SaxonC FFI + FOP + lopdf) | 1.48 s | **~0.68/s**   |
-| CII → Factur-X (SaxonC FFI + FOP + lopdf) | 1.51 s | **~0.66/s**   |
+| UBL → PDF (Typst in-process)           | 5.0 ms | **~200/s**       |
+| CII → PDF (Typst in-process)           | 5.5 ms | **~182/s**       |
+| UBL → Factur-X (XSLT + Typst + lopdf) | 33 ms  | **~30/s**        |
+| CII → Factur-X (Typst + lopdf)        | 14 ms  | **~71/s**        |
 
 > XSLT UBL↔CII : SaxonC natif est **~30× plus rapide** que SaxonJ (17 ms vs 490 ms).
-> PDF/Factur-X : **SaxonC FFI in-process** (pas de fork/exec) réduit la pipeline de **~25-30%** par rapport au CLI.
-> Le goulot restant est Apache FOP (~1 s), pas XSLT.
+> PDF via Typst (in-process) : **~280× plus rapide** que l'ancien pipeline Apache FOP Java (5 ms vs 1.4 s).
+> Factur-X CII : **~106× plus rapide** (14 ms vs 1.5 s). Le goulot est maintenant XSLT, plus la génération PDF.
 
 ## Pipeline complet (parse + XSD + Schematron + transform)
 
@@ -59,8 +59,8 @@ Mesuré sur macOS ARM64 (Apple Silicon), facture simple 3 lignes, `cargo bench`.
 |----------|-------------|
 | Réception CII : parse + validation + transform → UBL | **~122 ms (~8/s)** |
 | Réception UBL : parse + validation + transform → CII | **~148 ms (~7/s)** |
-| Réception CII → Factur-X (validate + SaxonC FFI + FOP + lopdf) | **~1.6 s** |
-| Réception UBL → Factur-X (validate + SaxonC FFI + FOP + lopdf) | **~1.6 s** |
+| Réception CII → Factur-X (validate + Typst + lopdf) | **~115 ms (~9/s)** |
+| Réception UBL → Factur-X (validate + XSLT + Typst + lopdf) | **~165 ms (~6/s)** |
 | Réception Factur-X → CII (parse PDF + validate + extract) | ~200 ms |
 | Réception Factur-X → UBL (parse PDF + validate + XSLT) | ~224 ms |
 

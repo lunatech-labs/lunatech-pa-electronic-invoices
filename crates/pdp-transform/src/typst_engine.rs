@@ -1,4 +1,4 @@
-//! Moteur PDF basé sur Typst — remplacement in-process d'Apache FOP.
+//! Moteur PDF basé sur Typst — génération PDF in-process (~5ms).
 //!
 //! Pipeline : InvoiceData → JSON dict → Typst compilation → PDF bytes
 //! Avantages : ~50-100ms vs ~1.4s (FOP Java), pas de JVM, PDF/A-3a natif.

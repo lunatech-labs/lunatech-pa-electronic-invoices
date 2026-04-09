@@ -2,10 +2,10 @@
 //!
 //! Usage: cargo test -p pdp-invoice --test generate_facturx_fixtures -- --ignored --nocapture
 //!
-//! Ce script utilise le pipeline complet FacturXGenerator (FOP + lopdf + qpdf)
+//! Ce script utilise le pipeline complet FacturXGenerator (Typst + lopdf + qpdf)
 //! pour produire des PDF/A-3a conformes, validés par veraPDF.
 //!
-//! Prérequis: fop, saxon, qpdf installés (brew install fop qpdf)
+//! Prérequis: saxon, qpdf installés (brew install qpdf)
 
 /// Génère un PDF Factur-X conforme PDF/A-3a via le pipeline complet.
 /// Retourne les bytes du PDF.

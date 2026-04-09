@@ -5,9 +5,9 @@
 //! # Pipeline de transformation
 //!
 //! ```text
-//! UBL ──XSLT──▶ CII ──FOP──▶ PDF
+//! UBL ──XSLT──▶ CII ──Typst──▶ PDF
 //!  │              │              │
-//!  ├──XSLT+FOP+lopdf──▶ Factur-X (PDF/A-3a + XML embarqué)
+//!  ├──XSLT+Typst+lopdf──▶ Factur-X (PDF/A-3a + XML embarqué)
 //!  │              │
 //! CII ──XSLT──▶ UBL
 //! ```
@@ -16,7 +16,7 @@
 //!
 //! - **[`converter`]** — API unifiée [`convert_to`] pour les 9 chemins de conversion
 //! - **[`xslt_engine`]** — Moteur XSLT 2.0 (UBL↔CII) via Saxon-HE
-//! - **[`fop_engine`]** — Pipeline PDF : CII/UBL → XR → XSL-FO → PDF via Apache FOP
+//! - **[`typst_engine`]** — Génération PDF in-process via Typst (~100ms)
 //! - **[`facturx_generator`]** — Génération Factur-X PDF/A-3a (XML embarqué + pièces jointes)
 //! - **[`processor`]** — Processor pipeline [`TransformProcessor`]
 //!
@@ -24,8 +24,8 @@
 //!
 //! | Source | → CII | → UBL | → Factur-X | → PDF |
 //! |--------|-------|-------|------------|-------|
-//! | **UBL** | ✅ XSLT | — | ✅ XSLT+FOP+lopdf | ✅ FOP |
-//! | **CII** | — | ✅ XSLT | ✅ FOP+lopdf | ✅ FOP |
+//! | **UBL** | ✅ XSLT | — | ✅ XSLT+Typst+lopdf | ✅ Typst |
+//! | **CII** | — | ✅ XSLT | ✅ Typst+lopdf | ✅ Typst |
 //! | **Factur-X** | ✅ extraction | ✅ extraction+XSLT | — | ✅ identité |
 //!
 //! # Exemple : conversion UBL → CII
@@ -107,14 +107,13 @@
 //! # Dépendances externes
 //!
 //! - **Saxon-HE** (SaxonC natif ou SaxonJ Java) — transformations XSLT 2.0
-//! - **Apache FOP** — rendu XSL-FO → PDF
+//! - **Typst** — génération PDF in-process (~100ms)
 //! - **qpdf** — correction header binaire PDF/A-3
 
 pub mod converter;
 pub mod processor;
 pub mod ppf_flux1;
 pub mod xslt_engine;
-pub mod fop_engine;
 pub mod typst_engine;
 pub mod facturx_generator;
 #[cfg(feature = "saxonc_ffi")]
@@ -123,7 +122,6 @@ pub mod saxonc_ffi;
 pub use converter::{convert, convert_to, xslt_transform, ConversionResult, OutputFormat, supported_conversions, supported_output_formats};
 pub use processor::TransformProcessor;
 pub use xslt_engine::{XsltEngine, XsltTransform};
-pub use fop_engine::{FopEngine, SourceSyntax, XsltBackend, detect_xslt_backend};
 pub use typst_engine::TypstPdfEngine;
 pub use facturx_generator::{FacturXGenerator, FacturXLevel, FacturXResult};
 pub use ppf_flux1::{PpfFlux1Processor, Flux1ProfileStrategy};

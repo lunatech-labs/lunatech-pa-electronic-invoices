@@ -156,8 +156,8 @@ impl ConversionResult {
 ///
 /// | Source | → CII | → UBL | → Factur-X | → PDF |
 /// |--------|-------|-------|------------|-------|
-/// | UBL | XSLT | — | XSLT+FOP+lopdf | FOP |
-/// | CII | — | XSLT | FOP+lopdf | FOP |
+/// | UBL | XSLT | — | XSLT+Typst+lopdf | Typst |
+/// | CII | — | XSLT | Typst+lopdf | Typst |
 /// | Factur-X | extraction | extraction+XSLT | — | retourne PDF |
 ///
 /// # Exemples
@@ -391,7 +391,7 @@ fn convert_to_facturx(invoice: &InvoiceData) -> PdpResult<ConversionResult> {
                 invoice = %invoice.invoice_number,
                 level = %result.level,
                 pdf_size = result.pdf.len(),
-                "Factur-X PDF/A-3 généré via pipeline FOP"
+                "Factur-X PDF/A-3 généré via Typst"
             );
             Ok(ConversionResult {
                 content: result.pdf,
@@ -400,44 +400,18 @@ fn convert_to_facturx(invoice: &InvoiceData) -> PdpResult<ConversionResult> {
             })
         }
         Err(e) => {
-            tracing::warn!(
-                invoice = %invoice.invoice_number,
-                error = %e,
-                "Pipeline FOP indisponible, fallback sur XML CII seul"
-            );
-            let cii_xml = match invoice.source_format {
-                InvoiceFormat::CII => invoice.raw_xml.clone().unwrap_or_default(),
-                _ => xslt_transform(invoice, InvoiceFormat::CII)?,
-            };
-            Ok(ConversionResult {
-                content: cii_xml.into_bytes(),
-                output_format: OutputFormat::FacturX,
-                suggested_filename: make_output_filename(&invoice.invoice_number, OutputFormat::FacturX),
+            Err(PdpError::TransformError {
+                source_format: invoice.source_format.to_string(),
+                target_format: "Factur-X".to_string(),
+                message: format!("Échec génération Factur-X: {}", e),
             })
-        }
-    }
-}
-
-/// Détecte la syntaxe source pour le pipeline FOP (CII, UBL Invoice ou UBL CreditNote).
-fn detect_source_syntax(invoice: &InvoiceData) -> crate::fop_engine::SourceSyntax {
-    match invoice.source_format {
-        InvoiceFormat::CII | InvoiceFormat::FacturX => crate::fop_engine::SourceSyntax::CII,
-        InvoiceFormat::UBL => {
-            // Détecter si c'est un CreditNote UBL (root element <CreditNote>)
-            if let Some(ref xml) = invoice.raw_xml {
-                if xml.contains("<CreditNote") {
-                    return crate::fop_engine::SourceSyntax::UBLCreditNote;
-                }
-            }
-            crate::fop_engine::SourceSyntax::UBL
         }
     }
 }
 
 /// Convertit vers PDF visuel seul (sans XML embarqué, sans métadonnées Factur-X).
 ///
-/// Utilise le moteur Typst (in-process, ~100ms) comme backend principal.
-/// Fallback sur FOP Java si Typst échoue.
+/// Utilise le moteur Typst (in-process, ~100ms).
 fn convert_to_pdf(invoice: &InvoiceData) -> PdpResult<ConversionResult> {
     // Si on a déjà un PDF (Factur-X source), le retourner
     if let Some(ref pdf) = invoice.raw_pdf {
@@ -448,33 +422,8 @@ fn convert_to_pdf(invoice: &InvoiceData) -> PdpResult<ConversionResult> {
         });
     }
 
-    // Essayer d'abord Typst (rapide, in-process)
     let typst = crate::typst_engine::TypstPdfEngine::from_manifest_dir();
-    match typst.generate_pdf(invoice) {
-        Ok(pdf) => {
-            return Ok(ConversionResult {
-                content: pdf,
-                output_format: OutputFormat::PDF,
-                suggested_filename: make_output_filename(&invoice.invoice_number, OutputFormat::PDF),
-            });
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "Typst PDF échoué, fallback FOP Java");
-        }
-    }
-
-    // Fallback FOP Java (nécessite raw_xml + Saxon + FOP installés)
-    let raw_xml = invoice.raw_xml.as_deref().ok_or_else(|| {
-        PdpError::TransformError {
-            source_format: invoice.source_format.to_string(),
-            target_format: "PDF".to_string(),
-            message: "Pas de XML brut disponible pour la génération PDF".to_string(),
-        }
-    })?;
-
-    let fop = crate::fop_engine::FopEngine::from_manifest_dir();
-    let syntax = detect_source_syntax(invoice);
-    let pdf = fop.generate_pdf(raw_xml, syntax)?;
+    let pdf = typst.generate_pdf(invoice)?;
 
     Ok(ConversionResult {
         content: pdf,
@@ -587,7 +536,7 @@ mod tests {
             assert!(result.suggested_filename.ends_with("_facturx.pdf"));
         } else {
             let xml = String::from_utf8(result.content).unwrap();
-            assert!(xml.contains("CrossIndustryInvoice"), "Fallback CII si FOP absent");
+            assert!(xml.contains("CrossIndustryInvoice"));
         }
     }
 
