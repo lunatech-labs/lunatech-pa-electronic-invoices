@@ -126,6 +126,9 @@
                     <ram:CityName>Lyon</ram:CityName>
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">456789012_STATUTS</ram:URIID>
+                </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
                     <ram:ID schemeID="VA">FR45678901234</ram:ID>
                 </ram:SpecifiedTaxRegistration>
@@ -142,6 +145,9 @@
                     <ram:CityName>Lyon</ram:CityName>
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
+                <ram:URIUniversalCommunication>
+                    <ram:URIID schemeID="0225">321654987</ram:URIID>
+                </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
                     <ram:ID schemeID="VA">FR32165498765</ram:ID>
                 </ram:SpecifiedTaxRegistration>
@@ -151,20 +157,20 @@
             </ram:BuyerOrderReferencedDocument>
                 <ram:AdditionalReferencedDocument>
           <ram:IssuerAssignedID>ATT-PDF-001</ram:IssuerAssignedID>
-          <ram:Name>Bon de commande</ram:Name>
           <ram:TypeCode>916</ram:TypeCode>
+          <ram:Name>Bon de commande</ram:Name>
           <ram:AttachmentBinaryObject mimeCode="application/pdf" filename="bon_commande.pdf">JVBERi0xLjQgZmFrZSBib24gZGUgY29tbWFuZGUgcG91ciB0ZXN0</ram:AttachmentBinaryObject>
         </ram:AdditionalReferencedDocument>
         <ram:AdditionalReferencedDocument>
           <ram:IssuerAssignedID>ATT-PNG-002</ram:IssuerAssignedID>
-          <ram:Name>Photo chantier</ram:Name>
           <ram:TypeCode>916</ram:TypeCode>
+          <ram:Name>Photo chantier</ram:Name>
           <ram:AttachmentBinaryObject mimeCode="image/png" filename="photo_chantier.png">iVBORw0KGgoAAAANSUhEUg==</ram:AttachmentBinaryObject>
         </ram:AdditionalReferencedDocument>
         <ram:AdditionalReferencedDocument>
           <ram:IssuerAssignedID>ATT-CSV-003</ram:IssuerAssignedID>
-          <ram:Name>Détail des lignes</ram:Name>
           <ram:TypeCode>916</ram:TypeCode>
+          <ram:Name>Détail des lignes</ram:Name>
           <ram:AttachmentBinaryObject mimeCode="text/csv" filename="detail_lignes.csv">cmVmO3F0ZTtwdTt0b3RhbApBMDAxOzEwOzI1LjAwOzI1MC4wMApBMDAyOzU7MTIuNTA7NjIuNTAKQTAwMzszOzguNzU7MjYuMjU=</ram:AttachmentBinaryObject>
         </ram:AdditionalReferencedDocument>
 </ram:ApplicableHeaderTradeAgreement>

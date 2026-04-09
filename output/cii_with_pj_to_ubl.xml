@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 		****************************************************************************************************************************************************************************************************
-		This XML Instance has been created by converting a Cross Indistry Invoice D16B to the UBL format. The transformation stylesheet version was: 1.0 and the transformation took place: 2026-02-09T08:40:49.766531+01:00
+		This XML Instance has been created by converting a Cross Indistry Invoice D16B to the UBL format. The transformation stylesheet version was: 1.0 and the transformation took place: 2026-04-09T21:13:31.947365+02:00
 		****************************************************************************************************************************************************************************************************
 		-->
 <inv:Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -42,6 +42,7 @@
    </cac:AdditionalDocumentReference>
    <cac:AccountingSupplierParty>
       <cac:Party>
+         <cbc:EndpointID schemeID="0225">456789012_STATUTS</cbc:EndpointID>
          <cac:PartyIdentification>
             <cbc:ID>FOURNISSEUR-IT-001</cbc:ID>
          </cac:PartyIdentification>
@@ -70,6 +71,7 @@
    </cac:AccountingSupplierParty>
    <cac:AccountingCustomerParty>
       <cac:Party>
+         <cbc:EndpointID schemeID="0225">321654987</cbc:EndpointID>
          <cac:PartyIdentification>
             <cbc:ID>CLIENT-INDUS-042</cbc:ID>
          </cac:PartyIdentification>
