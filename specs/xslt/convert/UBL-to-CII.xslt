@@ -331,10 +331,14 @@
       <xsl:for-each select="cac:AdditionalDocumentReference">
         <ram:AdditionalReferencedDocument>
           <ram:IssuerAssignedID><xsl:value-of select="cbc:ID"/></ram:IssuerAssignedID>
+          <!-- BT-124 : External document location (URIID avant TypeCode per XSD xs:sequence) -->
+          <xsl:if test="cac:Attachment/cac:ExternalReference/cbc:URI">
+            <ram:URIID><xsl:value-of select="cac:Attachment/cac:ExternalReference/cbc:URI"/></ram:URIID>
+          </xsl:if>
+          <ram:TypeCode>916</ram:TypeCode>
           <xsl:if test="cbc:DocumentDescription">
             <ram:Name><xsl:value-of select="cbc:DocumentDescription"/></ram:Name>
           </xsl:if>
-          <ram:TypeCode>916</ram:TypeCode>
           <!-- BT-125 : Attached document (binary) -->
           <xsl:if test="cac:Attachment/cbc:EmbeddedDocumentBinaryObject">
             <ram:AttachmentBinaryObject>
@@ -346,10 +350,6 @@
               </xsl:attribute>
               <xsl:value-of select="cac:Attachment/cbc:EmbeddedDocumentBinaryObject"/>
             </ram:AttachmentBinaryObject>
-          </xsl:if>
-          <!-- BT-124 : External document location -->
-          <xsl:if test="cac:Attachment/cac:ExternalReference/cbc:URI">
-            <ram:URIID><xsl:value-of select="cac:Attachment/cac:ExternalReference/cbc:URI"/></ram:URIID>
           </xsl:if>
         </ram:AdditionalReferencedDocument>
       </xsl:for-each>

@@ -113,13 +113,69 @@ fn generate_facturx_with_attachments(project_root: &Path, output_dir: &Path) {
     // Ajouter des pièces jointes
     use pdp_core::model::InvoiceAttachment;
 
-    // PJ 1 : un petit PDF fictif (header PDF minimal)
-    let fake_pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
+    // PJ 1 : un vrai petit PDF (bon de commande) généré via lopdf
+    let bon_commande_pdf = {
+        use lopdf::{Document, Object, Stream, StringFormat};
+        use lopdf::dictionary;
+
+        let mut doc = Document::with_version("1.4");
+
+        // Police Helvetica
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+
+        // Contenu de la page
+        let content = b"BT /F1 16 Tf 50 750 Td (Bon de commande BC-001) Tj ET\n\
+            BT /F1 12 Tf 50 700 Td (Client: Ma Societe SAS) Tj ET\n\
+            BT /F1 12 Tf 50 670 Td (Date: 2025-01-15) Tj ET\n\
+            BT /F1 12 Tf 50 640 Td (Ref: Prestation de conseil informatique) Tj ET";
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.to_vec()));
+
+        // Resources
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+
+        // Page
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Contents" => content_id,
+            "Resources" => resources_id,
+        });
+
+        // Pages
+        let pages_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        });
+
+        // Mettre à jour le Parent de la page
+        doc.get_object_mut(page_id).unwrap()
+            .as_dict_mut().unwrap()
+            .set("Parent", pages_id);
+
+        // Catalog
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+
+        doc.trailer.set("Root", catalog_id);
+
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).expect("Génération PDF bon de commande");
+        buf
+    };
     invoice.attachments.push(InvoiceAttachment {
         id: Some("BC-001".to_string()),
         description: Some("Bon de commande".to_string()),
         external_uri: None,
-        embedded_content: Some(fake_pdf.to_vec()),
+        embedded_content: Some(bon_commande_pdf),
         mime_code: Some("application/pdf".to_string()),
         filename: Some("bon_commande.pdf".to_string()),
     });
