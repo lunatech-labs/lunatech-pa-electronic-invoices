@@ -40,6 +40,6 @@ Les spécifications sont dans `specs/` :
 - `specs/xsd/` — Schémas XSD (UBL base/full, CII base/full, CDAR)
 - `specs/schematron/` — Schematrons EN16931 et BR-FR
 - `specs/xslt/` — XSLT compilés pour EN16931 et BR-FR
-- `specs/xslt/mustang/` — Stylesheets Mustang (CII/UBL → XR), fonts TTF, profils ICC
+- `specs/fonts/` — Polices TTF Source Sans/Serif Pro pour la génération PDF
 - `specs/typst/` — Template Typst pour la génération PDF
 - `specs/examples/` — Exemples officiels EN16931 et XP Z12

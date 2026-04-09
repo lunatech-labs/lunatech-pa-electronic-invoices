@@ -106,7 +106,7 @@
 //!
 //! # Dépendances externes
 //!
-//! - **Saxon-HE** (SaxonC natif ou SaxonJ Java) — transformations XSLT 2.0
+//! - **Saxon-HE** (SaxonJ Java ou SaxonC CLI) — transformations XSLT 2.0
 //! - **Typst** — génération PDF in-process (~100ms)
 //! - **qpdf** — correction header binaire PDF/A-3
 
@@ -116,9 +116,6 @@ pub mod ppf_flux1;
 pub mod xslt_engine;
 pub mod typst_engine;
 pub mod facturx_generator;
-#[cfg(feature = "saxonc_ffi")]
-pub mod saxonc_ffi;
-
 pub use converter::{convert, convert_to, xslt_transform, ConversionResult, OutputFormat, supported_conversions, supported_output_formats};
 pub use processor::TransformProcessor;
 pub use xslt_engine::{XsltEngine, XsltTransform};

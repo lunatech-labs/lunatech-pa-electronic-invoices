@@ -24,9 +24,6 @@ typst-as-lib = { workspace = true }
 typst-pdf = { workspace = true }
 typst = { workspace = true }
 
-[features]
-saxonc_ffi = []
-
 [dev-dependencies]
 criterion = { workspace = true }
 

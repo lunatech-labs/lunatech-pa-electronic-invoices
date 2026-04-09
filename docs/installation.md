@@ -5,9 +5,8 @@
 - **Rust** 1.93+
 - **Elasticsearch** 8.x (traçabilité + archivage, un index par SIREN)
 - **libxml2-dev** + pkg-config (validation XSD)
-- **SaxonC-HE** 12.9 natif (XSLT 2.0 : validation Schematron + transformation UBL↔CII)
-  - Si `libsaxonc-he` est installée (`/usr/local/lib`), les transformations XSLT s'exécutent **in-process via FFI** (pas de fork/exec, ~25-30% plus rapide)
-  - Sinon, fallback automatique vers le CLI `transform` ou `saxon`
+- **Saxon-HE** (XSLT 2.0 : validation Schematron + transformation UBL↔CII)
+  - Via le CLI `transform` (SaxonC) ou `saxon` (SaxonJ)
 - **qpdf** (correction header binaire PDF/A)
 - **veraPDF** (optionnel, validation PDF/A-3a)
 

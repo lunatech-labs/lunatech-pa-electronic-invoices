@@ -44,9 +44,9 @@ impl TypstPdfEngine {
         })
     }
 
-    /// Charge les polices TTF depuis specs/xslt/mustang/fonts/.
+    /// Charge les polices TTF depuis specs/fonts/.
     fn load_fonts(&self) -> Vec<Vec<u8>> {
-        let fonts_dir = self.specs_dir.join("xslt/mustang/fonts");
+        let fonts_dir = self.specs_dir.join("fonts");
         let font_files = [
             "SourceSansPro-Regular.ttf",
             "SourceSansPro-Bold.ttf",
