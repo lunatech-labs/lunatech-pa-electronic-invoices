@@ -3,19 +3,21 @@
 ## Lancer les tests
 
 ```bash
-# Tous les tests (405 tests)
+# Tous les tests (750+ tests)
 cargo test --workspace
 
 # Tests par crate
-cargo test -p pdp-core         #  47 tests (pipeline, routing, model, archive ZIP/tar.gz)
-cargo test -p pdp-invoice      # 105 tests (parsing UBL/CII/Factur-X + validation métier)
-cargo test -p pdp-validate     #  17 tests (XSD + Schematron EN16931 + BR-FR)
-cargo test -p pdp-cdar         #  86 tests (génération + parsing + réception CDV)
-cargo test -p pdp-ereporting   #   7 tests (transactions + paiements + XML)
-cargo test -p pdp-client       #  33 tests (PPF nommage/tar.gz + AFNOR + annuaire)
+cargo test -p pdp-core         #  72 tests (pipeline, routing, model, archive ZIP/tar.gz)
+cargo test -p pdp-invoice      # 125 tests (parsing UBL/CII/Factur-X + validation métier)
+cargo test -p pdp-validate     #  24 tests (XSD + Schematron EN16931 + BR-FR)
+cargo test -p pdp-cdar         #  92 tests (génération + parsing + réception CDV)
+cargo test -p pdp-ereporting   #  22 tests (transactions + paiements + XML)
+cargo test -p pdp-peppol       #  53 tests (Peppol BIS 3.0 + SMP + SML)
+cargo test -p pdp-client       #  36 tests (PPF nommage/tar.gz + AFNOR + annuaire)
+cargo test -p pdp-sftp         #   7 tests (transfert SFTP)
 cargo test -p pdp-config       #   3 tests
-cargo test -p pdp-trace        #   3 tests
-cargo test -p pdp-transform    #  93 tests (UBL↔CII↔Factur-X↔PDF + pièces jointes multi-types + veraPDF + SaxonC FFI)
+cargo test -p pdp-trace        #   5 tests
+cargo test -p pdp-transform    # 187 tests (UBL↔CII↔Factur-X↔PDF + profils + pièces jointes + Typst + veraPDF)
 
 # Tests avec sortie détaillée
 cargo test --workspace -- --nocapture
