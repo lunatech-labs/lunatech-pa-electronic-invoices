@@ -19,8 +19,12 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 lopdf = { workspace = true }
+fop-core = { workspace = true, optional = true }
+fop-layout = { workspace = true, optional = true }
+fop-render = { workspace = true, optional = true }
 
 [features]
+fop_native = ["fop-core", "fop-layout", "fop-render"]
 saxonc_ffi = []
 
 [dev-dependencies]
