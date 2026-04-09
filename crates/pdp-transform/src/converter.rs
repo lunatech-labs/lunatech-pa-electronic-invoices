@@ -952,13 +952,17 @@ mod tests {
 
         let mut pj_xml = String::new();
         for att in &attachments {
+            // Ordre XSD : IssuerAssignedID, URIID, LineID, TypeCode, Name, AttachmentBinaryObject
             pj_xml.push_str("        <ram:AdditionalReferencedDocument>\n");
             pj_xml.push_str(&format!("          <ram:IssuerAssignedID>{}</ram:IssuerAssignedID>\n",
                 att.id.as_deref().unwrap_or("ATT")));
+            if let Some(ref uri) = att.external_uri {
+                pj_xml.push_str(&format!("          <ram:URIID>{}</ram:URIID>\n", uri));
+            }
+            pj_xml.push_str("          <ram:TypeCode>916</ram:TypeCode>\n");
             if let Some(ref desc) = att.description {
                 pj_xml.push_str(&format!("          <ram:Name>{}</ram:Name>\n", desc));
             }
-            pj_xml.push_str("          <ram:TypeCode>916</ram:TypeCode>\n");
             if let Some(ref content) = att.embedded_content {
                 let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, content);
                 let mime = att.mime_code.as_deref().unwrap_or("application/octet-stream");
@@ -967,9 +971,6 @@ mod tests {
                     "          <ram:AttachmentBinaryObject mimeCode=\"{}\" filename=\"{}\">{}</ram:AttachmentBinaryObject>\n",
                     mime, fname, b64
                 ));
-            }
-            if let Some(ref uri) = att.external_uri {
-                pj_xml.push_str(&format!("          <ram:URIID>{}</ram:URIID>\n", uri));
             }
             pj_xml.push_str("        </ram:AdditionalReferencedDocument>\n");
         }
@@ -1607,13 +1608,17 @@ mod tests {
         let raw_cii = cii_invoice.raw_xml.as_ref().unwrap().clone();
         let mut pj_cii_xml = String::new();
         for att in &attachments {
+            // Ordre XSD : IssuerAssignedID, URIID, LineID, TypeCode, Name, AttachmentBinaryObject
             pj_cii_xml.push_str("        <ram:AdditionalReferencedDocument>\n");
             pj_cii_xml.push_str(&format!("          <ram:IssuerAssignedID>{}</ram:IssuerAssignedID>\n",
                 att.id.as_deref().unwrap_or("ATT")));
+            if let Some(ref uri) = att.external_uri {
+                pj_cii_xml.push_str(&format!("          <ram:URIID>{}</ram:URIID>\n", uri));
+            }
+            pj_cii_xml.push_str("          <ram:TypeCode>916</ram:TypeCode>\n");
             if let Some(ref desc) = att.description {
                 pj_cii_xml.push_str(&format!("          <ram:Name>{}</ram:Name>\n", desc));
             }
-            pj_cii_xml.push_str("          <ram:TypeCode>916</ram:TypeCode>\n");
             if let Some(ref content) = att.embedded_content {
                 let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, content);
                 let mime = att.mime_code.as_deref().unwrap_or("application/octet-stream");

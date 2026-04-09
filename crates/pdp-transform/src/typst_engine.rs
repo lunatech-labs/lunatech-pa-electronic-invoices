@@ -265,8 +265,73 @@ impl TypstPdfEngine {
             });
         }
 
+        // Supprimer les annotations de lien (Typst auto-détecte les URL/IBAN)
+        // pour conformité PDF/A-3 (clause 6.5.1 interdit certaines actions)
+        let pdf_bytes = Self::strip_link_annotations(pdf_bytes)?;
+
         tracing::debug!(pdf_size = pdf_bytes.len(), "PDF généré via Typst");
         Ok(pdf_bytes)
+    }
+
+    /// Supprime les annotations de type Link du PDF pour conformité PDF/A-3.
+    /// Typst peut générer des annotations URI (auto-détection de liens) qui
+    /// contiennent des actions GoTo interdites par ISO 19005-3 clause 6.5.1.
+    fn strip_link_annotations(pdf_bytes: Vec<u8>) -> PdpResult<Vec<u8>> {
+        use lopdf::{Document, Object, ObjectId};
+
+        let mut doc = Document::load_mem(&pdf_bytes).map_err(|e| PdpError::TransformError {
+            source_format: "PDF".to_string(),
+            target_format: "PDF".to_string(),
+            message: format!("Impossible de charger le PDF pour nettoyage annotations: {}", e),
+        })?;
+
+        // Phase 1 : identifier les annotations Link (lecture seule)
+        let mut link_annot_ids: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
+        for (_id, obj) in &doc.objects {
+            if let Object::Dictionary(dict) = obj {
+                if let Ok(Object::Name(subtype)) = dict.get(b"Subtype") {
+                    if subtype == b"Link" {
+                        link_annot_ids.insert(*_id);
+                    }
+                }
+            }
+        }
+
+        if link_annot_ids.is_empty() {
+            return Ok(pdf_bytes);
+        }
+
+        // Phase 2 : supprimer les références aux annotations Link dans les pages
+        let page_ids: Vec<_> = doc.page_iter().collect();
+        for page_id in page_ids {
+            if let Ok(page) = doc.get_object_mut(page_id) {
+                if let Object::Dictionary(ref mut dict) = page {
+                    if let Ok(Object::Array(ref annots)) = dict.get(b"Annots") {
+                        let filtered: Vec<Object> = annots.iter().filter(|obj| {
+                            if let Object::Reference(id) = obj {
+                                return !link_annot_ids.contains(id);
+                            }
+                            true
+                        }).cloned().collect();
+
+                        if filtered.is_empty() {
+                            dict.remove(b"Annots");
+                        } else {
+                            dict.set(b"Annots", Object::Array(filtered));
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).map_err(|e| PdpError::TransformError {
+            source_format: "PDF".to_string(),
+            target_format: "PDF".to_string(),
+            message: format!("Impossible de sauvegarder le PDF nettoyé: {}", e),
+        })?;
+
+        Ok(buf)
     }
 }
 
