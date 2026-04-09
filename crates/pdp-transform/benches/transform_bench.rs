@@ -120,7 +120,7 @@ fn bench_convert_api(c: &mut Criterion) {
 }
 
 // ============================================================
-// UBL/CII → PDF (FOP pipeline)
+// UBL/CII → PDF (Typst)
 // ============================================================
 
 fn bench_to_pdf(c: &mut Criterion) {
@@ -132,7 +132,6 @@ fn bench_to_pdf(c: &mut Criterion) {
     let cii_inv = cii_parser.parse(&cii_xml).unwrap();
 
     let mut group = c.benchmark_group("transform_to_pdf");
-    group.sample_size(10);
 
     group.bench_function("ubl_to_pdf", |b| {
         b.iter(|| convert_to(black_box(&ubl_inv), OutputFormat::PDF).unwrap())
@@ -146,7 +145,7 @@ fn bench_to_pdf(c: &mut Criterion) {
 }
 
 // ============================================================
-// UBL/CII → Factur-X (XSLT + FOP + lopdf)
+// UBL/CII → Factur-X (XSLT + Typst + lopdf)
 // ============================================================
 
 fn bench_to_facturx(c: &mut Criterion) {
@@ -158,7 +157,6 @@ fn bench_to_facturx(c: &mut Criterion) {
     let cii_inv = cii_parser.parse(&cii_xml).unwrap();
 
     let mut group = c.benchmark_group("transform_to_facturx");
-    group.sample_size(10);
 
     group.bench_function("ubl_to_facturx", |b| {
         b.iter(|| convert_to(black_box(&ubl_inv), OutputFormat::FacturX).unwrap())

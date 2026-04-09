@@ -5,27 +5,27 @@ Le pipeline Factur-X génère des PDFs conformes **PDF/A-3a** (Tagged PDF, acces
 ## Pipeline
 
 ```
-CII/UBL XML ──▶ Saxon (cii-xr.xsl) ──▶ Saxon (xr-pdf.xsl) ──▶ FOP (PDF/A-3a)
-                                                                     │
-                                                              lopdf (embed XML)
-                                                                     │
-                                                              qpdf (fix header)
-                                                                     ▼
-                                                              Factur-X PDF/A-3a
+CII/UBL XML ──▶ Typst (invoice.typ) ──▶ PDF visuel (~5 ms)
+                                              │
+                                       lopdf (embed XML + PJ)
+                                              │
+                                       qpdf (fix header)
+                                              ▼
+                                       Factur-X PDF/A-3a
 ```
 
-- **Apache FOP** — génère le PDF visuel avec fonts embarquées (SourceSansPro/SourceSerifPro TTF), profil ICC sRGB, Tagged PDF
+- **Typst** — génère le PDF visuel in-process (~5 ms), fonts embarquées (SourceSansPro TTF), Tagged PDF
 - **lopdf** — embarque `factur-x.xml` (AFRelationship=Data), pièces jointes BG-24, métadonnées XMP Factur-X
 - **qpdf** — corrige le header binaire PDF/A (lopdf ne l'écrit pas)
 
 ## Générer des exemples
 
 ```bash
-# Exemples Factur-X (sans pièces jointes) dans output/
-cargo test -p pdp-transform -- export_facturx_examples --ignored --nocapture
+# 13 exemples PDF (CII, UBL, Factur-X, avec/sans PJ) dans output/sample_pdfs/
+cargo run -p pdp-transform --example generate_sample_pdfs
 
-# Exemples avec pièces jointes (PDF, PNG, CSV) dans output/
-cargo test -p pdp-transform -- export_conversions_with_attachments --ignored --nocapture
+# Exemples Factur-X multi-profils dans output/
+cargo test -p pdp-transform -- export_facturx_examples --ignored --nocapture
 ```
 
 ## Validation
@@ -40,6 +40,6 @@ Les spécifications sont dans `specs/` :
 - `specs/xsd/` — Schémas XSD (UBL base/full, CII base/full, CDAR)
 - `specs/schematron/` — Schematrons EN16931 et BR-FR
 - `specs/xslt/` — XSLT compilés pour EN16931 et BR-FR
-- `specs/xslt/mustang/` — Stylesheets Mustang (CII/UBL → XR → FO), fonts TTF, profils ICC
-- `specs/fop/` — Configuration Apache FOP pour PDF/A-3a
+- `specs/xslt/mustang/` — Stylesheets Mustang (CII/UBL → XR), fonts TTF, profils ICC
+- `specs/typst/` — Template Typst pour la génération PDF
 - `specs/examples/` — Exemples officiels EN16931 et XP Z12

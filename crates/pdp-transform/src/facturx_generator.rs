@@ -2,17 +2,15 @@
 //!
 //! Pipeline complète :
 //! 1. Génère le XML CII (si source UBL, via ubl_to_cii)
-//! 2. Génère le PDF visuel via FOP (CII/UBL → XR → FO → PDF)
+//! 2. Génère le PDF visuel via Typst (in-process, ~100ms)
 //! 3. Embarque le XML CII comme `factur-x.xml` (AF relationship) dans le PDF
 //! 4. Embarque les pièces jointes additionnelles (BG-24)
 //! 5. Ajoute les métadonnées XMP Factur-X (PDF/A-3a)
 //!
-//! Utilise lopdf pour la manipulation PDF post-FOP.
+//! Utilise lopdf pour la manipulation PDF post-Typst.
 
 use pdp_core::error::{PdpError, PdpResult};
 use pdp_core::model::{InvoiceAttachment, InvoiceData, InvoiceFormat};
-
-use crate::fop_engine::{FopEngine, SourceSyntax};
 
 /// Niveau de conformité Factur-X
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,24 +54,28 @@ pub struct FacturXResult {
 
 /// Générateur Factur-X complet.
 pub struct FacturXGenerator {
-    fop_engine: FopEngine,
+    typst_engine: crate::typst_engine::TypstPdfEngine,
     level: FacturXLevel,
 }
 
 impl FacturXGenerator {
-    pub fn new(fop_engine: FopEngine) -> Self {
+    pub fn new(specs_dir: std::path::PathBuf) -> Self {
         Self {
-            fop_engine,
+            typst_engine: crate::typst_engine::TypstPdfEngine::new(specs_dir),
             level: FacturXLevel::EN16931,
         }
     }
 
     pub fn from_specs_dir(specs_dir: &std::path::Path) -> Self {
-        Self::new(FopEngine::new(specs_dir))
+        Self {
+            typst_engine: crate::typst_engine::TypstPdfEngine::new(specs_dir.to_path_buf()),
+            level: FacturXLevel::EN16931,
+        }
     }
 
     pub fn from_manifest_dir() -> Self {
-        Self::new(FopEngine::from_manifest_dir())
+        let specs_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../specs");
+        Self::new(specs_dir)
     }
 
     pub fn with_level(mut self, level: FacturXLevel) -> Self {
@@ -87,7 +89,7 @@ impl FacturXGenerator {
     /// - Si source = UBL : convertit d'abord en CII via ubl_to_cii
     /// - Si source = FacturX : retourne le raw_pdf existant
     ///
-    /// Le PDF visuel est généré via la pipeline FOP (CII/UBL → XR → FO → PDF),
+    /// Le PDF visuel est généré via Typst (in-process, ~100ms),
     /// puis le XML CII et les pièces jointes sont embarqués via lopdf.
     pub fn generate(&self, invoice: &InvoiceData) -> PdpResult<FacturXResult> {
         // Si on a déjà un PDF Factur-X, le retourner tel quel
@@ -112,33 +114,31 @@ impl FacturXGenerator {
             }
         })?;
 
-        // Déterminer la syntaxe source et obtenir le XML CII pour l'embarquement
-        let (source_syntax, cii_xml) = match invoice.source_format {
-            InvoiceFormat::CII => (SourceSyntax::CII, raw_xml.to_string()),
+        // Déterminer le XML CII pour l'embarquement
+        let cii_xml = match invoice.source_format {
+            InvoiceFormat::CII => raw_xml.to_string(),
             InvoiceFormat::UBL => {
                 let engine = crate::xslt_engine::XsltEngine::from_manifest_dir();
-                let cii = engine.ubl_to_cii(raw_xml)?;
-                // Détecter UBL CreditNote pour le pipeline FOP
-                let syntax = if raw_xml.contains("<CreditNote") {
-                    SourceSyntax::UBLCreditNote
-                } else {
-                    SourceSyntax::UBL
-                };
-                (syntax, cii)
+                engine.ubl_to_cii(raw_xml)?
             }
             InvoiceFormat::FacturX => {
                 // Pas de raw_pdf (déjà géré ci-dessus), on a juste le XML
-                (SourceSyntax::CII, raw_xml.to_string())
+                raw_xml.to_string()
             }
         };
 
-        // Étape 1 : Générer le PDF visuel via FOP
-        tracing::info!(
-            invoice = %invoice.invoice_number,
-            source = %source_syntax,
-            "Génération du PDF visuel via pipeline FOP"
-        );
-        let base_pdf = self.fop_engine.generate_pdf(raw_xml, source_syntax)?;
+        // Étape 1 : Générer le PDF visuel via Typst
+        let base_pdf = self.typst_engine.generate_pdf(invoice).map_err(|e| {
+            tracing::error!(
+                invoice = %invoice.invoice_number,
+                error = %e,
+                "Échec génération PDF via Typst"
+            );
+            e
+        })?;
+
+        // Détecter le niveau Factur-X depuis le profile_id du XML CII
+        let effective_level = Self::detect_level_from_xml(&cii_xml).unwrap_or(self.level);
 
         // Étape 2 : Embarquer le XML CII + pièces jointes dans le PDF
         let final_pdf = self.embed_in_pdf(
@@ -146,14 +146,34 @@ impl FacturXGenerator {
             &cii_xml,
             &invoice.attachments,
             &invoice.invoice_number,
+            effective_level,
         )?;
 
         Ok(FacturXResult {
             pdf: final_pdf,
             cii_xml,
             filename: self.make_filename(&invoice.invoice_number),
-            level: self.level,
+            level: effective_level,
         })
+    }
+
+    /// Détecte le niveau Factur-X depuis le profile_id dans le XML CII.
+    fn detect_level_from_xml(cii_xml: &str) -> Option<FacturXLevel> {
+        // Chercher le GuidelineSpecifiedDocumentContextParameter > ID
+        // Ordre important : les profils spécifiques avant EN16931 (qui est un préfixe commun)
+        if cii_xml.contains("urn:factur-x.eu:1p0:extended") {
+            Some(FacturXLevel::Extended)
+        } else if cii_xml.contains("urn:factur-x.eu:1p0:basicwl") {
+            Some(FacturXLevel::BasicWL)
+        } else if cii_xml.contains("urn:factur-x.eu:1p0:basic") {
+            Some(FacturXLevel::Basic)
+        } else if cii_xml.contains("urn:factur-x.eu:1p0:minimum") {
+            Some(FacturXLevel::Minimum)
+        } else if cii_xml.contains("urn:cen.eu:en16931:2017") {
+            Some(FacturXLevel::EN16931)
+        } else {
+            None
+        }
     }
 
     /// Embarque le XML CII et les pièces jointes dans un PDF existant.
@@ -164,6 +184,7 @@ impl FacturXGenerator {
         cii_xml: &str,
         attachments: &[InvoiceAttachment],
         invoice_number: &str,
+        level: FacturXLevel,
     ) -> PdpResult<Vec<u8>> {
         use lopdf::{Document, Object, Stream, StringFormat};
         use lopdf::dictionary;
@@ -172,7 +193,7 @@ impl FacturXGenerator {
             PdpError::TransformError {
                 source_format: "PDF".to_string(),
                 target_format: "Factur-X".to_string(),
-                message: format!("Impossible de charger le PDF FOP: {}", e),
+                message: format!("Impossible de charger le PDF Typst: {}", e),
             }
         })?;
 
@@ -280,7 +301,7 @@ impl FacturXGenerator {
             .collect();
 
         // --- 4. Ajouter les métadonnées XMP Factur-X ---
-        let xmp = self.build_xmp_metadata(invoice_number);
+        let xmp = self.build_xmp_metadata(invoice_number, level);
         let xmp_stream = Stream::new(
             dictionary! {
                 "Type" => "Metadata",
@@ -340,9 +361,9 @@ impl FacturXGenerator {
     }
 
     /// Construit les métadonnées XMP pour PDF/A-3a + Factur-X.
-    fn build_xmp_metadata(&self, invoice_number: &str) -> String {
+    fn build_xmp_metadata(&self, invoice_number: &str, level: FacturXLevel) -> String {
         let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S+00:00");
-        let level = self.level.as_str();
+        let level = level.as_str();
 
         format!(
 r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
@@ -374,8 +395,8 @@ r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
       </dc:description>
       <xmp:CreateDate>{now}</xmp:CreateDate>
       <xmp:ModifyDate>{now}</xmp:ModifyDate>
-      <xmp:CreatorTool>pdp-facture (Mustang/FOP pipeline)</xmp:CreatorTool>
-      <pdf:Producer>Apache FOP + pdp-facture</pdf:Producer>
+      <xmp:CreatorTool>pdp-facture (Typst)</xmp:CreatorTool>
+      <pdf:Producer>Typst + pdp-facture</pdf:Producer>
       <pdfaid:part>3</pdfaid:part>
       <pdfaid:conformance>A</pdfaid:conformance>
       <fx:DocumentFileName>factur-x.xml</fx:DocumentFileName>
@@ -522,7 +543,8 @@ mod tests {
         assert_eq!(&result.pdf[0..5], b"%PDF-");
         assert!(result.cii_xml.contains("CrossIndustryInvoice"));
         assert!(result.filename.contains("facturx.pdf"));
-        assert_eq!(result.level, FacturXLevel::EN16931);
+        // Le fixture CII déclare le profil Extended
+        assert_eq!(result.level, FacturXLevel::Extended);
     }
 
     #[test]
@@ -585,7 +607,7 @@ mod tests {
     #[test]
     fn test_facturx_xmp_metadata() {
         let gen = generator();
-        let xmp = gen.build_xmp_metadata("FA-2025-TEST");
+        let xmp = gen.build_xmp_metadata("FA-2025-TEST", FacturXLevel::EN16931);
         assert!(xmp.contains("pdfaid:part>3</pdfaid:part"));
         assert!(xmp.contains("pdfaid:conformance>A</pdfaid:conformance>"));
         assert!(xmp.contains("fx:DocumentFileName>factur-x.xml</fx:DocumentFileName"));
@@ -646,8 +668,9 @@ mod tests {
             "XMP doit déclarer fx:DocumentFileName=factur-x.xml");
         assert!(xmp.contains("fx:DocumentType>INVOICE</fx:DocumentType"),
             "XMP doit déclarer fx:DocumentType=INVOICE");
-        assert!(xmp.contains("fx:ConformanceLevel>EN 16931</fx:ConformanceLevel"),
-            "XMP doit déclarer fx:ConformanceLevel");
+        // Le fixture CII déclare le profil Extended
+        assert!(xmp.contains("fx:ConformanceLevel>EXTENDED</fx:ConformanceLevel"),
+            "XMP doit déclarer fx:ConformanceLevel cohérent avec le XML (EXTENDED)");
         assert!(xmp.contains("fx:Version>1.0</fx:Version"),
             "XMP doit déclarer fx:Version=1.0");
 
@@ -1258,6 +1281,16 @@ mod tests {
         assert_facturx_valid("../../tests/fixtures/ubl/facture_ubl_remises_multitva.xml", "UBL");
     }
 
+    #[test]
+    fn test_facturx_from_ubl_avoir_schematron() {
+        assert_facturx_valid("../../tests/fixtures/ubl/facture_ubl_002_avoir.xml", "UBL");
+    }
+
+    #[test]
+    fn test_facturx_from_ubl_rectificative_schematron() {
+        assert_facturx_valid("../../tests/fixtures/ubl/facture_rectificative_ubl_384.xml", "UBL");
+    }
+
     // ===== Tests d'attachements (BG-24) =====
 
     /// Helper : extrait le contenu binaire d'un fichier embarqué par nom depuis un PDF.
@@ -1819,5 +1852,394 @@ mod tests {
         }
 
         println!("\n📂 Fichiers générés dans : {}", out_dir.display());
+    }
+
+    // =====================================================================
+    // Tests de détection de profil et cohérence XMP
+    // =====================================================================
+
+    #[test]
+    fn test_detect_level_extended() {
+        let xml = r#"<ram:ID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</ram:ID>"#;
+        assert_eq!(FacturXGenerator::detect_level_from_xml(xml), Some(FacturXLevel::Extended));
+    }
+
+    #[test]
+    fn test_detect_level_en16931() {
+        let xml = r#"<ram:ID>urn:cen.eu:en16931:2017</ram:ID>"#;
+        assert_eq!(FacturXGenerator::detect_level_from_xml(xml), Some(FacturXLevel::EN16931));
+    }
+
+    #[test]
+    fn test_detect_level_basic() {
+        let xml = r#"<ram:ID>urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic</ram:ID>"#;
+        assert_eq!(FacturXGenerator::detect_level_from_xml(xml), Some(FacturXLevel::Basic));
+    }
+
+    #[test]
+    fn test_detect_level_basicwl() {
+        let xml = r#"<ram:ID>urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basicwl</ram:ID>"#;
+        assert_eq!(FacturXGenerator::detect_level_from_xml(xml), Some(FacturXLevel::BasicWL));
+    }
+
+    #[test]
+    fn test_detect_level_minimum() {
+        let xml = r#"<ram:ID>urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:minimum</ram:ID>"#;
+        assert_eq!(FacturXGenerator::detect_level_from_xml(xml), Some(FacturXLevel::Minimum));
+    }
+
+    #[test]
+    fn test_detect_level_unknown() {
+        let xml = r#"<ram:ID>some:unknown:profile</ram:ID>"#;
+        assert_eq!(FacturXGenerator::detect_level_from_xml(xml), None);
+    }
+
+    /// Vérifie la cohérence XMP ↔ XML pour chaque profil Factur-X.
+    #[test]
+    fn test_xmp_level_matches_xml_profile() {
+        let profiles: &[(&str, FacturXLevel)] = &[
+            ("MINIMUM", FacturXLevel::Minimum),
+            ("BASIC WL", FacturXLevel::BasicWL),
+            ("BASIC", FacturXLevel::Basic),
+            ("EN 16931", FacturXLevel::EN16931),
+            ("EXTENDED", FacturXLevel::Extended),
+        ];
+        let gen = generator();
+        for (expected_str, level) in profiles {
+            let xmp = gen.build_xmp_metadata("TEST-001", *level);
+            let tag = format!("fx:ConformanceLevel>{}</fx:ConformanceLevel>", expected_str);
+            assert!(
+                xmp.contains(&tag),
+                "XMP pour {:?} doit contenir '{}', XMP={}",
+                level, tag, &xmp[..200]
+            );
+        }
+    }
+
+    // =====================================================================
+    // Tests Factur-X avec différents profils (CII)
+    // =====================================================================
+
+    /// Helper : modifie le profile_id dans le XML CII et le InvoiceData parsé.
+    fn set_cii_profile(xml: &str, invoice: &mut InvoiceData, profile_uri: &str) -> String {
+        let new_xml = xml.replace(
+            "urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended",
+            profile_uri,
+        );
+        invoice.profile_id = Some(profile_uri.to_string());
+        invoice.raw_xml = Some(new_xml.clone());
+        new_xml
+    }
+
+    #[test]
+    fn test_facturx_cii_profile_extended() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+        assert_eq!(result.level, FacturXLevel::Extended);
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        let xmp = extract_xmp(&doc);
+        assert!(xmp.contains("fx:ConformanceLevel>EXTENDED</fx:ConformanceLevel>"));
+    }
+
+    #[test]
+    fn test_facturx_cii_profile_en16931() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let mut invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+        set_cii_profile(&cii_xml, &mut invoice, "urn:cen.eu:en16931:2017");
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+        assert_eq!(result.level, FacturXLevel::EN16931);
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        let xmp = extract_xmp(&doc);
+        assert!(xmp.contains("fx:ConformanceLevel>EN 16931</fx:ConformanceLevel>"));
+    }
+
+    #[test]
+    fn test_facturx_cii_profile_basic() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let mut invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+        set_cii_profile(&cii_xml, &mut invoice, "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic");
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+        assert_eq!(result.level, FacturXLevel::Basic);
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        let xmp = extract_xmp(&doc);
+        assert!(xmp.contains("fx:ConformanceLevel>BASIC</fx:ConformanceLevel>"));
+    }
+
+    // =====================================================================
+    // Tests Factur-X depuis UBL avec vérification profil
+    // =====================================================================
+
+    #[test]
+    fn test_facturx_ubl_profile_extended() {
+        let ubl_xml = std::fs::read_to_string("../../tests/fixtures/ubl/facture_ubl_001.xml")
+            .expect("Fixture UBL introuvable");
+        let invoice = pdp_invoice::UblParser::new().parse(&ubl_xml).expect("Parse UBL");
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+        // Le XSLT copie le profil UBL → CII, vérifier la cohérence
+        let detected = FacturXGenerator::detect_level_from_xml(&result.cii_xml);
+        assert_eq!(result.level, detected.unwrap_or(FacturXLevel::EN16931));
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        let xmp = extract_xmp(&doc);
+        let expected_tag = format!(
+            "fx:ConformanceLevel>{}</fx:ConformanceLevel>",
+            result.level.as_str()
+        );
+        assert!(xmp.contains(&expected_tag),
+            "XMP doit contenir {} pour profil {:?}", expected_tag, result.level);
+    }
+
+    // =====================================================================
+    // Tests Factur-X avec pièces jointes + vérification profil
+    // =====================================================================
+
+    #[test]
+    fn test_facturx_with_pdf_attachment_valid() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let mut invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+
+        // Générer un vrai petit PDF via lopdf
+        let attachment_pdf = make_valid_pdf("Bon de commande BC-001");
+
+        invoice.attachments.push(InvoiceAttachment {
+            id: Some("BC-001".to_string()),
+            description: Some("Bon de commande".to_string()),
+            external_uri: None,
+            embedded_content: Some(attachment_pdf),
+            mime_code: Some("application/pdf".to_string()),
+            filename: Some("bon_commande.pdf".to_string()),
+        });
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+        assert_eq!(result.level, FacturXLevel::Extended);
+
+        // Vérifier que le PDF embarqué est trouvable
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        assert!(find_embedded_file(&doc, b"bon_commande.pdf"), "bon_commande.pdf doit être embarqué");
+        assert!(find_embedded_file(&doc, b"factur-x.xml"), "factur-x.xml doit être embarqué");
+    }
+
+    #[test]
+    fn test_facturx_with_csv_attachment() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let mut invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+
+        invoice.attachments.push(InvoiceAttachment {
+            id: Some("DET-001".to_string()),
+            description: Some("Détail prestations".to_string()),
+            external_uri: None,
+            embedded_content: Some(b"Article;Qte;PU\nConseil;10;100.00\n".to_vec()),
+            mime_code: Some("text/csv".to_string()),
+            filename: Some("detail.csv".to_string()),
+        });
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        assert!(find_embedded_file(&doc, b"detail.csv"), "detail.csv doit être embarqué");
+        assert!(find_embedded_file(&doc, b"factur-x.xml"), "factur-x.xml doit être embarqué");
+    }
+
+    #[test]
+    fn test_facturx_with_external_uri_only() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let mut invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+
+        // PJ avec URI externe uniquement (pas de contenu embarqué)
+        invoice.attachments.push(InvoiceAttachment {
+            id: Some("DEVIS-001".to_string()),
+            description: Some("Devis original".to_string()),
+            external_uri: Some("https://example.com/devis/001.pdf".to_string()),
+            embedded_content: None,
+            mime_code: None,
+            filename: None,
+        });
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+
+        // Seul factur-x.xml doit être embarqué (pas de fichier pour l'URI externe)
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        assert!(find_embedded_file(&doc, b"factur-x.xml"), "factur-x.xml doit être embarqué");
+    }
+
+    #[test]
+    fn test_facturx_with_multiple_attachments_and_profile() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let mut invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+
+        // 3 pièces jointes : PDF, CSV, URI externe
+        invoice.attachments.push(InvoiceAttachment {
+            id: Some("BC-001".to_string()),
+            description: Some("Bon de commande".to_string()),
+            external_uri: None,
+            embedded_content: Some(make_valid_pdf("Bon de commande")),
+            mime_code: Some("application/pdf".to_string()),
+            filename: Some("bon_commande.pdf".to_string()),
+        });
+        invoice.attachments.push(InvoiceAttachment {
+            id: Some("DET-001".to_string()),
+            description: Some("Détail".to_string()),
+            external_uri: None,
+            embedded_content: Some(b"col1;col2\nval1;val2\n".to_vec()),
+            mime_code: Some("text/csv".to_string()),
+            filename: Some("detail.csv".to_string()),
+        });
+        invoice.attachments.push(InvoiceAttachment {
+            id: Some("EXT-001".to_string()),
+            description: Some("Externe".to_string()),
+            external_uri: Some("https://example.com/doc.pdf".to_string()),
+            embedded_content: None,
+            mime_code: None,
+            filename: None,
+        });
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+        assert_eq!(result.level, FacturXLevel::Extended);
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        assert!(find_embedded_file(&doc, b"factur-x.xml"));
+        assert!(find_embedded_file(&doc, b"bon_commande.pdf"));
+        assert!(find_embedded_file(&doc, b"detail.csv"));
+
+        // Vérifier la cohérence XMP
+        let xmp = extract_xmp(&doc);
+        assert!(xmp.contains("fx:ConformanceLevel>EXTENDED</fx:ConformanceLevel>"));
+        assert!(xmp.contains("pdfaid:part>3</pdfaid:part>"));
+    }
+
+    #[test]
+    fn test_facturx_ubl_with_attachments() {
+        let ubl_xml = std::fs::read_to_string("../../tests/fixtures/ubl/facture_ubl_001.xml")
+            .expect("Fixture UBL introuvable");
+        let mut invoice = pdp_invoice::UblParser::new().parse(&ubl_xml).expect("Parse UBL");
+
+        invoice.attachments.push(InvoiceAttachment {
+            id: Some("PJ-001".to_string()),
+            description: Some("Pièce jointe UBL".to_string()),
+            external_uri: None,
+            embedded_content: Some(make_valid_pdf("PJ depuis UBL")),
+            mime_code: Some("application/pdf".to_string()),
+            filename: Some("pj_ubl.pdf".to_string()),
+        });
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        assert!(find_embedded_file(&doc, b"factur-x.xml"));
+        assert!(find_embedded_file(&doc, b"pj_ubl.pdf"));
+
+        // Vérifier cohérence profil XMP ↔ XML CII embarqué
+        let xmp = extract_xmp(&doc);
+        let detected = FacturXGenerator::detect_level_from_xml(&result.cii_xml);
+        if let Some(level) = detected {
+            let tag = format!("fx:ConformanceLevel>{}</fx:ConformanceLevel>", level.as_str());
+            assert!(xmp.contains(&tag), "XMP profil incohérent avec XML CII embarqué");
+        }
+    }
+
+    #[test]
+    fn test_facturx_no_attachments_still_has_xml() {
+        let cii_xml = std::fs::read_to_string("../../tests/fixtures/cii/facture_cii_001.xml")
+            .expect("Fixture CII introuvable");
+        let invoice = pdp_invoice::CiiParser::new().parse(&cii_xml).expect("Parse CII");
+        assert!(invoice.attachments.is_empty());
+
+        let result = generator().generate(&invoice).expect("Génération échouée");
+
+        let doc = lopdf::Document::load_mem(&result.pdf).expect("Relecture PDF");
+        assert!(find_embedded_file(&doc, b"factur-x.xml"),
+            "Même sans PJ, factur-x.xml doit être embarqué");
+    }
+
+    // =====================================================================
+    // Helpers pour les tests
+    // =====================================================================
+
+    /// Génère un vrai petit PDF valide via lopdf.
+    fn make_valid_pdf(title: &str) -> Vec<u8> {
+        use lopdf::{Document, Stream};
+        use lopdf::dictionary;
+
+        let mut doc = Document::with_version("1.4");
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let content = format!("BT /F1 12 Tf 50 750 Td ({}) Tj ET", title);
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.into_bytes()));
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Contents" => content_id,
+            "Resources" => resources_id,
+        });
+        let pages_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        });
+        doc.get_object_mut(page_id).unwrap()
+            .as_dict_mut().unwrap()
+            .set("Parent", pages_id);
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).expect("Génération PDF");
+        buf
+    }
+
+    /// Extrait le XMP metadata d'un document PDF.
+    fn extract_xmp(doc: &lopdf::Document) -> String {
+        let catalog_id = doc.trailer.get(b"Root").unwrap()
+            .as_reference().unwrap();
+        let catalog = doc.get_object(catalog_id).unwrap()
+            .as_dict().unwrap();
+        let metadata_id = catalog.get(b"Metadata").unwrap()
+            .as_reference().unwrap();
+        let metadata_obj = doc.get_object(metadata_id).unwrap();
+        match metadata_obj {
+            lopdf::Object::Stream(ref stream) => {
+                let mut s = stream.clone();
+                let _ = s.decompress();
+                String::from_utf8_lossy(&s.content).to_string()
+            }
+            _ => panic!("Metadata doit être un Stream"),
+        }
+    }
+
+    /// Vérifie qu'un fichier embarqué existe dans le PDF.
+    fn find_embedded_file(doc: &lopdf::Document, filename: &[u8]) -> bool {
+        for (_id, obj) in doc.objects.iter() {
+            if let Ok(dict) = obj.as_dict() {
+                if let Ok(f) = dict.get(b"F") {
+                    if let Ok(s) = f.as_str() {
+                        if s == filename { return true; }
+                    }
+                }
+            }
+        }
+        false
     }
 }

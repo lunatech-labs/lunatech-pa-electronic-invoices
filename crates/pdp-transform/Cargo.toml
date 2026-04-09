@@ -11,6 +11,7 @@ pdp-validate = { path = "../pdp-validate" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 quick-xml = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
@@ -19,12 +20,11 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 lopdf = { workspace = true }
-fop-core = { workspace = true, optional = true }
-fop-layout = { workspace = true, optional = true }
-fop-render = { workspace = true, optional = true }
+typst-as-lib = { workspace = true }
+typst-pdf = { workspace = true }
+typst = { workspace = true }
 
 [features]
-fop_native = ["fop-core", "fop-layout", "fop-render"]
 saxonc_ffi = []
 
 [dev-dependencies]

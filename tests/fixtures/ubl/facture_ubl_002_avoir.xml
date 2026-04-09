@@ -96,6 +96,11 @@
         </cac:TaxSubtotal>
     </cac:TaxTotal>
 
+    <!-- BT-20 : Payment terms (requis par BR-CO-25 si BT-115 > 0) -->
+    <cac:PaymentTerms>
+        <cbc:Note>Remboursement sous 30 jours</cbc:Note>
+    </cac:PaymentTerms>
+
     <!-- Totaux -->
     <cac:LegalMonetaryTotal>
         <cbc:LineExtensionAmount currencyID="EUR">8500.00</cbc:LineExtensionAmount>

@@ -331,10 +331,14 @@
       <xsl:for-each select="cac:AdditionalDocumentReference">
         <ram:AdditionalReferencedDocument>
           <ram:IssuerAssignedID><xsl:value-of select="cbc:ID"/></ram:IssuerAssignedID>
+          <!-- BT-124 : External document location (URIID avant TypeCode per XSD xs:sequence) -->
+          <xsl:if test="cac:Attachment/cac:ExternalReference/cbc:URI">
+            <ram:URIID><xsl:value-of select="cac:Attachment/cac:ExternalReference/cbc:URI"/></ram:URIID>
+          </xsl:if>
+          <ram:TypeCode>916</ram:TypeCode>
           <xsl:if test="cbc:DocumentDescription">
             <ram:Name><xsl:value-of select="cbc:DocumentDescription"/></ram:Name>
           </xsl:if>
-          <ram:TypeCode>916</ram:TypeCode>
           <!-- BT-125 : Attached document (binary) -->
           <xsl:if test="cac:Attachment/cbc:EmbeddedDocumentBinaryObject">
             <ram:AttachmentBinaryObject>
@@ -346,10 +350,6 @@
               </xsl:attribute>
               <xsl:value-of select="cac:Attachment/cbc:EmbeddedDocumentBinaryObject"/>
             </ram:AttachmentBinaryObject>
-          </xsl:if>
-          <!-- BT-124 : External document location -->
-          <xsl:if test="cac:Attachment/cac:ExternalReference/cbc:URI">
-            <ram:URIID><xsl:value-of select="cac:Attachment/cac:ExternalReference/cbc:URI"/></ram:URIID>
           </xsl:if>
         </ram:AdditionalReferencedDocument>
       </xsl:for-each>
@@ -501,28 +501,7 @@
         </ram:SpecifiedTradePaymentTerms>
       </xsl:if>
 
-      <!-- BT-25/26 : Preceding Invoice reference -->
-      <xsl:for-each select="cac:BillingReference/cac:InvoiceDocumentReference">
-        <ram:InvoiceReferencedDocument>
-          <ram:IssuerAssignedID><xsl:value-of select="cbc:ID"/></ram:IssuerAssignedID>
-          <xsl:if test="cbc:IssueDate">
-            <ram:FormattedIssueDateTime>
-              <qdt:DateTimeString format="102">
-                <xsl:value-of select="translate(cbc:IssueDate, '-', '')"/>
-              </qdt:DateTimeString>
-            </ram:FormattedIssueDateTime>
-          </xsl:if>
-        </ram:InvoiceReferencedDocument>
-      </xsl:for-each>
-
-      <!-- BT-19 : Buyer accounting reference -->
-      <xsl:if test="cbc:AccountingCost">
-        <ram:ReceivableSpecifiedTradeAccountingAccount>
-          <ram:ID><xsl:value-of select="cbc:AccountingCost"/></ram:ID>
-        </ram:ReceivableSpecifiedTradeAccountingAccount>
-      </xsl:if>
-
-      <!-- BG-22 : Document totals -->
+      <!-- BG-22 : Document totals (avant InvoiceReferencedDocument per XSD xs:sequence) -->
       <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         <!-- BT-106 : Sum of Invoice line net amount -->
         <ram:LineTotalAmount><xsl:value-of select="cac:LegalMonetaryTotal/cbc:LineExtensionAmount"/></ram:LineTotalAmount>
@@ -552,6 +531,27 @@
         <!-- BT-115 : Amount due for payment -->
         <ram:DuePayableAmount><xsl:value-of select="cac:LegalMonetaryTotal/cbc:PayableAmount"/></ram:DuePayableAmount>
       </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+
+      <!-- BT-25/26 : Preceding Invoice reference (après MonetarySummation per XSD xs:sequence) -->
+      <xsl:for-each select="cac:BillingReference/cac:InvoiceDocumentReference">
+        <ram:InvoiceReferencedDocument>
+          <ram:IssuerAssignedID><xsl:value-of select="cbc:ID"/></ram:IssuerAssignedID>
+          <xsl:if test="cbc:IssueDate">
+            <ram:FormattedIssueDateTime>
+              <qdt:DateTimeString format="102">
+                <xsl:value-of select="translate(cbc:IssueDate, '-', '')"/>
+              </qdt:DateTimeString>
+            </ram:FormattedIssueDateTime>
+          </xsl:if>
+        </ram:InvoiceReferencedDocument>
+      </xsl:for-each>
+
+      <!-- BT-19 : Buyer accounting reference -->
+      <xsl:if test="cbc:AccountingCost">
+        <ram:ReceivableSpecifiedTradeAccountingAccount>
+          <ram:ID><xsl:value-of select="cbc:AccountingCost"/></ram:ID>
+        </ram:ReceivableSpecifiedTradeAccountingAccount>
+      </xsl:if>
     </ram:ApplicableHeaderTradeSettlement>
   </xsl:template>
 

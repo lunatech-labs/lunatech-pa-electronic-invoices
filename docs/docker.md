@@ -1,6 +1,6 @@
 # Conteneurisation (Docker / Podman)
 
-Le projet est conteneurisé avec toutes les dépendances (Saxon-HE 12.9, Apache FOP 2.11, qpdf, libxml2, JRE).
+Le projet est conteneurisé avec toutes les dépendances (Saxon-HE 12.9, qpdf, libxml2). La génération PDF utilise Typst (compilé en natif, aucune JRE requise).
 La traçabilité et l'archivage utilisent **Elasticsearch** (un index par SIREN).
 
 ## Prérequis : Elasticsearch
