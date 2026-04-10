@@ -47,6 +47,7 @@
 //! ```
 
 pub mod archive;
+pub mod channel;
 pub mod exchange;
 pub mod processor;
 pub mod reception;
@@ -59,6 +60,7 @@ pub mod model;
 pub use exchange::Exchange;
 pub use processor::Processor;
 pub use endpoint::{Endpoint, EndpointType};
+pub use channel::ChannelConsumer;
 pub use route::{Route, RouteBuilder};
 pub use router::Router;
 pub use error::PdpError;

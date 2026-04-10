@@ -69,6 +69,7 @@ pub mod model;
 pub mod generator;
 pub mod parser;
 pub mod processor;
+pub mod cdv_return;
 
 pub use model::{
     CdvResponse, CdarResponse, CdvTypeCode, InvoiceStatusCode, TransmissionStatusCode,
@@ -78,3 +79,4 @@ pub use model::{
 pub use generator::CdarGenerator;
 pub use parser::CdarParser;
 pub use processor::{CdarProcessor, CdvReceptionProcessor, DocumentTypeRouter, IrrecevabiliteProcessor};
+pub use cdv_return::CdvReturnProcessor;

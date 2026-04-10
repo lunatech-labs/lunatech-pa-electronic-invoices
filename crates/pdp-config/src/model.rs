@@ -35,6 +35,10 @@ pub struct HttpServerConfig {
     /// Secret HMAC pour la vérification des signatures webhook
     #[serde(default)]
     pub webhook_secret: Option<String>,
+    /// Tokens Bearer autorisés pour l'authentification API
+    /// Si absent ou vide, l'authentification est désactivée (mode développement)
+    #[serde(default)]
+    pub bearer_tokens: Option<Vec<String>>,
 }
 
 fn default_http_host() -> String {
@@ -262,6 +266,10 @@ pub struct PpfSftpConfigYaml {
     /// Chemin vers le fichier known_hosts (optionnel)
     #[serde(default)]
     pub known_hosts_path: Option<String>,
+    /// Chemin vers le fichier de persistance du numéro de séquence (optionnel)
+    /// Si absent, le compteur repart de initial_sequence à chaque redémarrage
+    #[serde(default)]
+    pub sequence_file: Option<String>,
 }
 
 fn default_sftp_port() -> u16 {

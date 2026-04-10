@@ -15,6 +15,7 @@ use axum::{
     Router,
     extract::{Multipart, Path, State},
     http::StatusCode,
+    middleware,
     response::IntoResponse,
     routing::{get, post},
     Json,
@@ -38,6 +39,8 @@ pub struct AppState {
     pub webhook_secret: Option<String>,
     /// Store pour la traçabilité
     pub trace_store: Option<Arc<pdp_trace::TraceStore>>,
+    /// Tokens Bearer autorisés pour l'authentification API (si None ou vide, pas d'auth)
+    pub bearer_tokens: Option<Vec<String>>,
 }
 
 /// Flux entrant reçu via l'API HTTP
@@ -103,16 +106,74 @@ pub struct ErrorResponse {
 
 /// Construit le routeur Axum avec tous les endpoints AFNOR
 pub fn build_api_router(state: Arc<AppState>) -> Router {
-    Router::new()
-        // AFNOR Flow Service endpoints
+    // Endpoints protégés par Bearer token (flows + webhooks)
+    let protected_routes = Router::new()
         .route("/v1/flows", post(handle_receive_flow))
         .route("/v1/flows/{flow_id}", get(handle_get_flow))
-        // Webhook callback
         .route("/v1/webhooks/callback", post(handle_webhook_callback))
-        // Health check
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+        .with_state(state.clone());
+
+    // Endpoints publics (healthcheck)
+    let public_routes = Router::new()
         .route("/v1/healthcheck", get(handle_healthcheck))
-        // État partagé
-        .with_state(state)
+        .with_state(state);
+
+    Router::new()
+        .merge(protected_routes)
+        .merge(public_routes)
+}
+
+/// Middleware d'authentification Bearer token pour les endpoints protégés.
+///
+/// Si aucun token n'est configuré (`bearer_tokens` absent ou vide), toutes les
+/// requêtes sont acceptées (mode développement). Sinon, le header
+/// `Authorization: Bearer <token>` est vérifié.
+async fn auth_middleware(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    // Si pas de tokens configurés, tout passe (mode développement)
+    let tokens = match &state.bearer_tokens {
+        Some(tokens) if !tokens.is_empty() => tokens,
+        _ => return next.run(req).await,
+    };
+
+    // Vérifier le header Authorization
+    let auth_header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
+
+    match auth_header {
+        Some(header) if header.starts_with("Bearer ") => {
+            let token = &header[7..];
+            if tokens.iter().any(|t| t == token) {
+                next.run(req).await
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse {
+                        error: "INVALID_TOKEN".to_string(),
+                        message: "Token invalide".to_string(),
+                    }),
+                )
+                    .into_response()
+            }
+        }
+        _ => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "MISSING_TOKEN".to_string(),
+                message: "Header Authorization Bearer requis".to_string(),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 // ============================================================
@@ -510,7 +571,7 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt; // for `oneshot`
 
-    /// Helper: create an AppState for tests (with webhook secret)
+    /// Helper: create an AppState for tests (with webhook secret, no bearer auth)
     fn test_app_state() -> Arc<AppState> {
         let (tx, _rx) = tokio::sync::mpsc::channel(10);
         Arc::new(AppState {
@@ -519,6 +580,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
+            bearer_tokens: None,
         })
     }
 
@@ -531,6 +593,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
+            bearer_tokens: None,
         })
     }
 
@@ -543,8 +606,22 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
+            bearer_tokens: None,
         });
         (state, rx)
+    }
+
+    /// Helper: create an AppState with bearer token auth enabled
+    fn test_app_state_with_auth() -> Arc<AppState> {
+        let (tx, _rx) = tokio::sync::mpsc::channel(10);
+        Arc::new(AppState {
+            pdp_name: "PDP Test".to_string(),
+            pdp_matricule: "9999".to_string(),
+            flow_sender: tx,
+            webhook_secret: None,
+            trace_store: None,
+            bearer_tokens: Some(vec!["valid-token-123".to_string(), "valid-token-456".to_string()]),
+        })
     }
 
     /// Helper: build a multipart body with both flowInfo and file parts
@@ -968,6 +1045,140 @@ mod tests {
         let resp_bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&resp_bytes).unwrap();
         assert_eq!(json["status"], "ok");
+    }
+
+    // ---------------------------------------------------------------
+    // Tests d'authentification Bearer token
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_auth_valid_bearer_token() {
+        let state = test_app_state_with_auth();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/healthcheck")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        // Le healthcheck ne doit PAS exiger d'auth
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_flows_requires_token() {
+        let state = test_app_state_with_auth();
+        let app = build_api_router(state);
+
+        let file_content = b"<Invoice>test</Invoice>";
+        let flow_info = valid_flow_info_json();
+        let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
+
+        // Requête SANS token
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["error"], "MISSING_TOKEN");
+    }
+
+    #[tokio::test]
+    async fn test_auth_flows_accepts_valid_token() {
+        let (state, mut rx) = {
+            let (tx, rx) = tokio::sync::mpsc::channel(10);
+            let state = Arc::new(AppState {
+                pdp_name: "PDP Test".to_string(),
+                pdp_matricule: "9999".to_string(),
+                flow_sender: tx,
+                webhook_secret: None,
+                trace_store: None,
+                bearer_tokens: Some(vec!["my-secret-token".to_string()]),
+            });
+            (state, rx)
+        };
+        let app = build_api_router(state);
+
+        let file_content = b"<Invoice>test</Invoice>";
+        let flow_info = valid_flow_info_json();
+        let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .header("Authorization", "Bearer my-secret-token")
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        let inbound = rx.try_recv().unwrap();
+        assert_eq!(inbound.flow_info.tracking_id, "TRACK-001");
+    }
+
+    #[tokio::test]
+    async fn test_auth_flows_rejects_invalid_token() {
+        let state = test_app_state_with_auth();
+        let app = build_api_router(state);
+
+        let file_content = b"<Invoice>test</Invoice>";
+        let flow_info = valid_flow_info_json();
+        let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .header("Authorization", "Bearer wrong-token")
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["error"], "INVALID_TOKEN");
+    }
+
+    #[tokio::test]
+    async fn test_auth_no_tokens_configured_allows_all() {
+        // bearer_tokens = None → pas d'auth requise, le flux doit passer
+        let (tx, _rx) = tokio::sync::mpsc::channel(10);
+        let state = Arc::new(AppState {
+            pdp_name: "PDP Test".to_string(),
+            pdp_matricule: "9999".to_string(),
+            flow_sender: tx,
+            webhook_secret: None,
+            bearer_tokens: None,
+            trace_store: None,
+        });
+        let app = build_api_router(state);
+
+        let file_content = b"<Invoice>test</Invoice>";
+        let flow_info = valid_flow_info_json();
+        let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
     }
 
 }

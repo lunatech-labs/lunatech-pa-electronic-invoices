@@ -590,6 +590,39 @@ impl TraceStore {
         Ok(Self::parse_summaries(&body))
     }
 
+    /// Recherche des échanges par clé de facture (SIREN/NUMERO/ANNEE) pour la détection de doublons.
+    /// Utilisé par le DuplicateCheckProcessor pour vérifier BR-FR-12 et BR-FR-13.
+    pub async fn search_by_invoice_key(&self, invoice_key: &str, siren: Option<&str>) -> PdpResult<Vec<ExchangeSummary>> {
+        let index = siren
+            .map(|s| Self::index_name(s))
+            .unwrap_or_else(|| format!("{}-*", INDEX_PREFIX));
+
+        let search_body = serde_json::json!({
+            "query": { "term": { "invoice_key": invoice_key } },
+            "sort": [{ "created_at": "desc" }],
+            "size": 5,
+            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number",
+                        "seller_name", "buyer_name", "status", "error_count", "created_at"]
+        });
+
+        let resp = self.client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&search_body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Recherche par invoice_key échouée: {}", e)))?;
+
+        if !resp.status().is_success() {
+            // Index n'existe pas encore ou erreur ES — pas de doublon
+            return Ok(Vec::new());
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+
+        Ok(Self::parse_summaries(&body))
+    }
+
     /// Récupère un document complet par exchange_id
     pub async fn get_exchange(&self, exchange_id: &str, siren: Option<&str>) -> PdpResult<Option<ExchangeDocument>> {
         let index = siren

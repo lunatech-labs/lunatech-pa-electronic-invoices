@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -53,6 +54,8 @@ pub struct PpfSftpProducer {
     sequence_counter: AtomicU64,
     /// Producer SFTP sous-jacent pour le transport
     sftp_producer: pdp_sftp::SftpProducer,
+    /// Chemin vers le fichier de persistance du numéro de séquence (optionnel)
+    sequence_file: Option<PathBuf>,
 }
 
 impl PpfSftpProducer {
@@ -62,6 +65,20 @@ impl PpfSftpProducer {
         sftp_config: pdp_sftp::SftpConfig,
         initial_sequence: u64,
     ) -> Result<Self, PdpError> {
+        Self::with_sequence_file(name, config, sftp_config, initial_sequence, None)
+    }
+
+    /// Construit un producer PPF SFTP avec persistance du numéro de séquence.
+    ///
+    /// Si `sequence_file` est fourni, le compteur est initialisé à partir du fichier
+    /// (avec fallback sur `initial_sequence`) et chaque nouvelle séquence est persistée.
+    pub fn with_sequence_file(
+        name: &str,
+        config: PpfSftpProducerConfig,
+        sftp_config: pdp_sftp::SftpConfig,
+        initial_sequence: u64,
+        sequence_file: Option<PathBuf>,
+    ) -> Result<Self, PdpError> {
         let flux_config = PpfFluxConfig::new(&config.code_application)
             .map_err(|e| PdpError::ConfigError(e.to_string()))?;
 
@@ -70,22 +87,61 @@ impl PpfSftpProducer {
             _ => ProfilF1::Base,
         };
 
+        // Charger la séquence depuis le fichier si disponible, sinon utiliser initial_sequence
+        let effective_sequence = match &sequence_file {
+            Some(path) if path.exists() => {
+                let loaded = Self::load_sequence(path);
+                tracing::info!(
+                    path = %path.display(),
+                    sequence = loaded,
+                    "Numéro de séquence chargé depuis le fichier"
+                );
+                loaded
+            }
+            _ => initial_sequence,
+        };
+
         Ok(Self {
             name: name.to_string(),
             flux_config,
             default_profil,
-            sequence_counter: AtomicU64::new(initial_sequence),
+            sequence_counter: AtomicU64::new(effective_sequence),
             sftp_producer: pdp_sftp::SftpProducer::new(
                 &format!("{}-sftp", name),
                 sftp_config,
             ),
+            sequence_file,
         })
     }
 
-    /// Génère le prochain numéro de séquence et l'incrémente atomiquement.
+    /// Génère le prochain numéro de séquence, l'incrémente atomiquement et le persiste.
     fn next_sequence(&self, code_interface: CodeInterface) -> String {
         let counter = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
+        let new_value = counter + 1;
+        self.persist_sequence(new_value);
         recommended_sequence(code_interface, counter)
+    }
+
+    /// Persiste la valeur courante du compteur de séquence dans le fichier.
+    fn persist_sequence(&self, value: u64) {
+        if let Some(ref path) = self.sequence_file {
+            if let Err(e) = std::fs::write(path, value.to_string()) {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "Impossible de persister le numéro de séquence"
+                );
+            }
+        }
+    }
+
+    /// Charge le numéro de séquence depuis un fichier texte.
+    /// Retourne 0 si le fichier n'existe pas ou ne peut pas être lu.
+    fn load_sequence(path: &Path) -> u64 {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
     }
 
     /// Détermine le code interface à partir de l'exchange.
