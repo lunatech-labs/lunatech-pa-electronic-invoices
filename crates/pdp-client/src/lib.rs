@@ -76,6 +76,7 @@ pub mod ppf;
 pub mod afnor;
 pub mod annuaire;
 pub mod producer;
+pub mod routing;
 pub mod attachment;
 
 pub use auth::PisteAuth;
@@ -84,3 +85,4 @@ pub use ppf::{CodeInterface, ProfilF1, PpfFluxConfig, FluxFile, build_tar_gz, fl
 pub use afnor::AfnorFlowClient;
 pub use annuaire::{AnnuaireClient, AfnorDirectoryClient};
 pub use producer::{PpfSftpProducer, PpfSftpProducerConfig, AfnorFlowProducer, Destination};
+pub use routing::{RoutingProcessor, RoutingResolverProcessor, DynamicRoutingProducer, PartnerDirectory};

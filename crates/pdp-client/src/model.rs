@@ -385,6 +385,18 @@ pub enum PpfEnvironment {
 }
 
 impl PpfEnvironment {
+    /// Parse un code d'environnement (insensible à la casse)
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code.to_lowercase().as_str() {
+            "dev" => Some(Self::Dev),
+            "int" => Some(Self::Int),
+            "rec" => Some(Self::Rec),
+            "preprod" | "pre-prod" | "pre_prod" => Some(Self::PreProd),
+            "prod" => Some(Self::Prod),
+            _ => None,
+        }
+    }
+
     pub fn subdomain(&self) -> &str {
         match self {
             Self::Dev => "env.dev.",

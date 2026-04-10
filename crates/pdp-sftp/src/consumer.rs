@@ -150,16 +150,85 @@ impl Consumer for SftpConsumer {
                 .await
                 .map_err(|e| PdpError::SftpError(format!("Lecture fichier {} échouée: {}", filename, e)))?;
 
-            let exchange = Exchange::new(data).with_filename(filename);
+            let lower = filename.to_lowercase();
 
-            tracing::info!(
-                consumer = %self.name,
-                filename = %filename,
-                exchange_id = %exchange.id,
-                "Fichier SFTP lu"
-            );
+            if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+                // Décompresser tar.gz → un exchange par fichier extrait
+                match pdp_core::archive::read_tar_gz(&data) {
+                    Ok(extracted) => {
+                        tracing::info!(
+                            consumer = %self.name,
+                            archive = %filename,
+                            files = extracted.len(),
+                            "Archive tar.gz décompressée"
+                        );
+                        for entry in extracted {
+                            let mut exchange = Exchange::new(entry.content).with_filename(&entry.filename);
+                            exchange.set_property("source_archive", filename);
+                            tracing::info!(
+                                consumer = %self.name,
+                                filename = %entry.filename,
+                                archive = %filename,
+                                exchange_id = %exchange.id,
+                                "Fichier extrait de l'archive tar.gz"
+                            );
+                            exchanges.push(exchange);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            consumer = %self.name,
+                            archive = %filename,
+                            error = %e,
+                            "Erreur décompression tar.gz"
+                        );
+                    }
+                }
+            } else if lower.ends_with(".zip") {
+                // Décompresser zip → un exchange par fichier extrait
+                match pdp_core::archive::read_zip(&data) {
+                    Ok(extracted) => {
+                        tracing::info!(
+                            consumer = %self.name,
+                            archive = %filename,
+                            files = extracted.len(),
+                            "Archive ZIP décompressée"
+                        );
+                        for entry in extracted {
+                            let mut exchange = Exchange::new(entry.content).with_filename(&entry.filename);
+                            exchange.set_property("source_archive", filename);
+                            tracing::info!(
+                                consumer = %self.name,
+                                filename = %entry.filename,
+                                archive = %filename,
+                                exchange_id = %exchange.id,
+                                "Fichier extrait de l'archive ZIP"
+                            );
+                            exchanges.push(exchange);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            consumer = %self.name,
+                            archive = %filename,
+                            error = %e,
+                            "Erreur décompression ZIP"
+                        );
+                    }
+                }
+            } else {
+                // Fichier normal
+                let exchange = Exchange::new(data).with_filename(filename);
 
-            exchanges.push(exchange);
+                tracing::info!(
+                    consumer = %self.name,
+                    filename = %filename,
+                    exchange_id = %exchange.id,
+                    "Fichier SFTP lu"
+                );
+
+                exchanges.push(exchange);
+            }
 
             // Archiver ou supprimer le fichier traité
             if let Some(ref archive_path) = self.config.archive_path {
@@ -264,5 +333,12 @@ mod tests {
     fn test_matches_pattern_exact() {
         assert!(matches_pattern("facture.xml", "facture.xml"));
         assert!(!matches_pattern("other.xml", "facture.xml"));
+    }
+
+    #[test]
+    fn test_matches_pattern_tar_gz() {
+        assert!(matches_pattern("lot.tar.gz", "*.tar.gz"));
+        assert!(matches_pattern("LOT.TAR.GZ", "*.tar.gz"));
+        assert!(!matches_pattern("lot.tar.gz", "*.xml"));
     }
 }

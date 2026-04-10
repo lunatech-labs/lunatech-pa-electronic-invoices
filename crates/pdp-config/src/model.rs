@@ -18,6 +18,31 @@ pub struct PdpConfig {
     /// Configuration AFNOR Flow Service PDP↔PDP (optionnelle)
     #[serde(default)]
     pub afnor: Option<AfnorConfig>,
+    /// Configuration du serveur HTTP API (optionnelle — si absent, pas de serveur HTTP)
+    #[serde(default)]
+    pub http_server: Option<HttpServerConfig>,
+}
+
+/// Configuration du serveur HTTP API AFNOR
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpServerConfig {
+    /// Adresse d'écoute (défaut: "0.0.0.0")
+    #[serde(default = "default_http_host")]
+    pub host: String,
+    /// Port d'écoute (défaut: 8080)
+    #[serde(default = "default_http_port")]
+    pub port: u16,
+    /// Secret HMAC pour la vérification des signatures webhook
+    #[serde(default)]
+    pub webhook_secret: Option<String>,
+}
+
+fn default_http_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_http_port() -> u16 {
+    8080
 }
 
 /// Identité de la PDP
@@ -210,6 +235,41 @@ pub struct PpfConfig {
     pub flux1_profile: String,
     /// Authentification PISTE (OAuth2 client_credentials)
     pub auth: PisteAuthConfigYaml,
+    /// Configuration SFTP pour le dépôt des flux vers le PPF
+    /// Si absent, les flux sont écrits localement dans flux1_output_dir
+    #[serde(default)]
+    pub sftp: Option<PpfSftpConfigYaml>,
+    /// Séquence initiale pour le nommage des flux (compteur atomique)
+    #[serde(default)]
+    pub initial_sequence: Option<u64>,
+}
+
+/// Configuration SFTP du PPF (Système d'Échange)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PpfSftpConfigYaml {
+    /// Nom d'hôte du serveur SFTP PPF
+    pub host: String,
+    /// Port SFTP (défaut: 22)
+    #[serde(default = "default_sftp_port")]
+    pub port: u16,
+    /// Nom d'utilisateur SFTP
+    pub username: String,
+    /// Chemin vers la clé privée RSA X509v3
+    pub private_key_path: String,
+    /// Répertoire distant de dépôt
+    #[serde(default = "default_sftp_remote_path")]
+    pub remote_path: String,
+    /// Chemin vers le fichier known_hosts (optionnel)
+    #[serde(default)]
+    pub known_hosts_path: Option<String>,
+}
+
+fn default_sftp_port() -> u16 {
+    22
+}
+
+fn default_sftp_remote_path() -> String {
+    "/upload".to_string()
 }
 
 /// Configuration d'authentification PISTE dans le YAML

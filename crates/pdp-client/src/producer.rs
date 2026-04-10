@@ -38,6 +38,13 @@ fn default_profil() -> String {
 /// et les dépose via SFTP sur le serveur du PPF.
 ///
 /// Specs externes v3.1, chapitres 3.3.2.1 (protocole SFTP) et 3.4.6 (nommage des flux).
+///
+/// TODO: Batching — Actuellement, chaque facture produit son propre tar.gz (une seule
+/// FluxFile par archive). Le PPF autorise le regroupement de plusieurs fichiers de même
+/// nature/format dans un seul tar.gz (taille max 1 Go, 120 Mo par fichier). Un futur
+/// `BatchProducer` wrapper pourrait accumuler les exchanges et les regrouper dans une
+/// unique archive avant envoi, réduisant le nombre de connexions SFTP et améliorant le
+/// débit en cas de volume important.
 pub struct PpfSftpProducer {
     name: String,
     flux_config: PpfFluxConfig,
@@ -82,7 +89,7 @@ impl PpfSftpProducer {
     }
 
     /// Détermine le code interface à partir de l'exchange.
-    fn resolve_code_interface(exchange: &Exchange) -> CodeInterface {
+    pub fn resolve_code_interface(exchange: &Exchange) -> CodeInterface {
         // Priorité 1 : propriété explicite
         if let Some(ci) = exchange.get_property("ppf.code_interface") {
             match ci.as_str() {
@@ -121,7 +128,7 @@ impl PpfSftpProducer {
     }
 
     /// Détermine le profil F1 à partir de l'exchange.
-    fn resolve_profil(&self, exchange: &Exchange) -> ProfilF1 {
+    pub fn resolve_profil(&self, exchange: &Exchange) -> ProfilF1 {
         if let Some(p) = exchange.get_property("ppf.profil") {
             match p.as_str() {
                 "Full" => return ProfilF1::Full,
@@ -133,7 +140,7 @@ impl PpfSftpProducer {
     }
 
     /// Détermine le nom de base du fichier XML dans l'archive.
-    fn inner_filename(exchange: &Exchange) -> String {
+    pub fn inner_filename(exchange: &Exchange) -> String {
         exchange
             .source_filename
             .clone()
@@ -235,7 +242,7 @@ impl AfnorFlowProducer {
     }
 
     /// Construit le FlowInfo à partir des propriétés de l'exchange
-    fn build_flow_info(exchange: &Exchange) -> (AfnorFlowInfo, String) {
+    pub fn build_flow_info(exchange: &Exchange) -> (AfnorFlowInfo, String) {
         let filename = exchange
             .source_filename
             .clone()

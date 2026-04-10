@@ -77,6 +77,15 @@ libxml = "0.3"
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], default-features = false }
 
+# HTTP server
+axum = { version = "0.8", features = ["multipart"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+# HMAC (webhook signature verification)
+hmac = "0.12"
+hex = "0.4"
+
 # Encoding
 base64 = "0.22"
 
