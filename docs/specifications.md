@@ -91,7 +91,7 @@ Le projet est découpé en 12 crates Rust indépendantes :
 | `pdp-transform` | Conversion UBL↔CII (XSLT), génération Factur-X PDF/A-3a, PDF visuel (Typst), Flux 1 PPF |
 | `pdp-cdar` | Génération, parsing et routage des CDAR D22B ; 21 statuts de cycle de vie |
 | `pdp-ereporting` | Génération des flux e-reporting 10.1/10.2/10.3/10.4 |
-| `pdp-peppol` | Protocole PEPPOL : SBDH, SMP/SML lookup, gateway AS4, échange inter-PDP |
+| `pdp-peppol` | Protocole PEPPOL : SBDH, SMP/SML lookup, modèle AS4 ; le transport AS4 réel est délégué à **Oxalis** (AP certifié) via volumes Docker partagés |
 | `pdp-client` | Communication PPF (SFTP tar.gz), AFNOR Flow Service (HTTP), Annuaire PISTE (OAuth2) |
 | `pdp-sftp` | Consumer et Producer SFTP générique (russh), authentification RSA |
 | `pdp-trace` | Archivage et traçabilité Elasticsearch (un index par SIREN) |
@@ -691,15 +691,68 @@ Permet la découverte des PDP partenaires et de leurs endpoints Flow Service.
 
 ### 13.1 Architecture 4 coins
 
+La PDP délègue le rôle d'Access Point (AP) PEPPOL à **Oxalis** (Norstella), un AP AS4 certifié open source. Notre PDP joue le rôle de **Corner 1/4** (émetteur/destinataire métier), tandis qu'Oxalis gère le transport AS4 en **Corner 2/3**.
+
 ```
-Corner 1         Corner 2           Corner 3         Corner 4
-(Émetteur) ──▶  (AP émetteur) ──▶  (AP récepteur) ──▶ (Destinataire)
-                 notre PDP          PDP partenaire
-                     ↕                    ↕
-                  SMP/SML             SMP/SML
+Corner 1           Corner 2              Corner 3              Corner 4
+(Émetteur)         (AP émetteur)         (AP récepteur)        (Destinataire)
+                                                              
+┌──────────┐      ┌───────────────┐      ┌───────────────┐      ┌──────────┐
+│  PDP App │─────▶│    Oxalis     │──AS4─▶│ Oxalis Remote │─────▶│ PDP Dest │
+│          │volume│  (notre AP)   │      │  (AP distant) │volume│          │
+│          │◀─────│ :8080 / :8443 │      │               │◀─────│          │
+└──────────┘      └───────┬───────┘      └───────────────┘      └──────────┘
+ peppol-outbound/          │                                     peppol-inbound/
+ peppol-inbound/      ┌────▼────┐
+                      │ phoss   │
+                      │  SMP    │  (annuaire des endpoints)
+                      └─────────┘
 ```
 
-### 13.2 Composants
+### 13.2 Intégration Oxalis
+
+#### Déploiement Docker
+
+Oxalis est déployé via Docker (`norstella/oxalis-as4:7.2.0`) avec deux instances :
+
+| Service | Rôle | Ports | Description |
+|---------|------|-------|-------------|
+| `oxalis` | AP émetteur (C2) | 8080/8443 | Notre Access Point, envoie les factures |
+| `oxalis-remote` | AP récepteur (C3) | 8081/8444 | Simule l'AP d'une PDP distante (test) |
+| `smp` | phoss SMP | 8080 | Annuaire local des participants PEPPOL |
+
+#### Communication PDP ↔ Oxalis
+
+L'échange entre la PDP et Oxalis se fait par **volumes Docker partagés** :
+
+| Volume | Direction | Usage |
+|--------|-----------|-------|
+| `peppol-outbound` | PDP → Oxalis | La PDP dépose les fichiers SBDH à envoyer |
+| `peppol-inbound` | Oxalis → PDP | Oxalis dépose les messages AS4 reçus |
+
+#### Workflow d'envoi
+
+```
+1. PDP construit l'enveloppe SBDH (pdp-peppol::sbdh)
+2. PDP écrit le fichier SBDH dans peppol-outbound/
+3. Oxalis détecte le fichier, résout l'endpoint via SMP
+4. Oxalis envoie le message AS4 signé à l'AP distant
+5. L'AP distant dépose le message reçu dans son inbound/
+```
+
+#### Workflow de réception
+
+```
+1. Un AP distant envoie un message AS4 à notre Oxalis
+2. Oxalis dépose le message dans peppol-inbound/
+3. PDP détecte le fichier (FileConsumer sur peppol-inbound/)
+4. PDP parse l'enveloppe SBDH, extrait la facture
+5. PDP injecte dans le pipeline de traitement
+```
+
+### 13.3 Composants Rust (pdp-peppol)
+
+Le crate `pdp-peppol` gère la couche métier PEPPOL (modèle, enveloppes, découverte) sans implémenter le transport AS4 lui-même (délégué à Oxalis).
 
 #### Participant ID
 
@@ -710,25 +763,55 @@ Exemple : 0002::12345678901234  (SIRET français, scheme 0002)
 
 #### SBDH (Standard Business Document Header)
 
-Enveloppe XML qui encapsule la facture pour le transport AS4 :
+Enveloppe XML construite par `pdp-peppol` qui encapsule la facture :
 - Sender / Receiver (Participant IDs)
 - Document Type (UBL Invoice, Credit Note, etc.)
 - Process ID
 - Message ID et horodatage
 
-#### SMP Lookup
+#### SMP Client
+
+Client HTTP pour la découverte des endpoints AS4 :
 
 1. Hash MD5 du Participant ID → requête SML
 2. Résolution DNS → URL du SMP
 3. Requête SMP → endpoint AS4 du récepteur (URL, certificat)
 
-#### AS4 (ebMS 3.0)
+> En local, le SMP est phoss-smp. En production, la résolution passe par le SML PEPPOL.
 
-- Protocole SOAP/MIME
-- Signature numérique (certificats PKI PEPPOL)
-- Chiffrement AES-128/256-CBC
-- Compression gzip
-- Accusés de réception (receipt)
+#### AS4 Client
+
+Le module `as4` contient la logique de construction/parsing des messages SOAP/MIME AS4 :
+- Construction des enveloppes SOAP ebMS 3.0
+- Compression gzip du payload SBDH
+- Parsing des messages AS4 entrants et des receipts
+- Extraction de certificats X.509
+
+> **Note** : en production, le transport AS4 réel (signature PKI, chiffrement, TLS) est géré par Oxalis. Le client AS4 Rust est utilisé pour les tests et la validation des enveloppes.
+
+### 13.4 Configuration Oxalis
+
+```
+docker/oxalis/
+├── oxalis.conf              # Configuration Oxalis (OXALIS_HOME)
+├── oxalis-keystore.jks      # Keystore Java (certificat AP + clé privée)
+└── logback.xml              # Configuration logging
+```
+
+Script de setup : `docker/peppol-setup.sh` enregistre les participants dans le SMP local :
+- PDP_A (vendeur) : `0002::123456789` → `oxalis:8080`
+- PDP_B (acheteur) : `0002::987654321` → `oxalis-remote:8080`
+
+### 13.5 Protocole AS4 (référence)
+
+Le transport AS4 géré par Oxalis implémente :
+
+- **ebMS 3.0** — enveloppe SOAP/MIME
+- **Signature numérique** — certificats PKI PEPPOL (X.509)
+- **Chiffrement** — AES-128/256-CBC
+- **Compression** — gzip du payload
+- **Accusés de réception** — AS4 receipts
+- **TLS 1.2+** — sécurité transport (port 8443)
 
 ---
 
@@ -940,7 +1023,7 @@ routes:
 | API PISTE (Annuaire, OAuth) | OAuth2 Client Credentials (JWT Bearer) |
 | AFNOR Flow Service | OAuth2 Bearer Token via PISTE |
 | Webhooks entrants | HMAC-SHA256 (header `X-Webhook-Signature`) |
-| PEPPOL AS4 | Certificats PKI PEPPOL, signature XML, chiffrement AES |
+| PEPPOL AS4 | Certificats PKI PEPPOL gérés par Oxalis (keystore JKS), signature XML, chiffrement AES |
 
 ### 18.2 Intégrité des données
 
@@ -948,7 +1031,7 @@ routes:
 |----------|-----------|
 | Fichiers dans tar.gz PPF | Vérification à l'extraction |
 | Flow Service réception | SHA-256 du fichier vérifié contre `file_hash` du flowInfo |
-| PEPPOL AS4 | Signature numérique SOAP |
+| PEPPOL AS4 | Signature numérique SOAP (géré par Oxalis) |
 
 ### 18.3 Variables d'environnement
 
