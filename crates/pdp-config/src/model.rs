@@ -39,6 +39,12 @@ pub struct HttpServerConfig {
     /// Si absent ou vide, l'authentification est désactivée (mode développement)
     #[serde(default)]
     pub bearer_tokens: Option<Vec<String>>,
+    /// Chemin vers le certificat TLS (PEM) — optionnel, active HTTPS si présent
+    #[serde(default)]
+    pub tls_cert_path: Option<String>,
+    /// Chemin vers la clé privée TLS (PEM) — optionnel, requis si tls_cert_path est présent
+    #[serde(default)]
+    pub tls_key_path: Option<String>,
 }
 
 fn default_http_host() -> String {

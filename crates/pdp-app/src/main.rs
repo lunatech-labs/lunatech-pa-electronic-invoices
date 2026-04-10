@@ -132,6 +132,7 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
             webhook_secret: http_config.webhook_secret.clone(),
             bearer_tokens: http_config.bearer_tokens.clone(),
             trace_store,
+            metrics: server::Metrics::default(),
         });
 
         let server_config = server::ServerConfig {

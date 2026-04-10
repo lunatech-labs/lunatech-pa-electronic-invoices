@@ -70,6 +70,7 @@
 //! | `FFE1025A` | F10 e-reporting | Spécifique |
 
 pub mod auth;
+pub mod batch;
 pub mod error;
 pub mod model;
 pub mod ppf;
@@ -84,5 +85,6 @@ pub use error::ClientError;
 pub use ppf::{CodeInterface, ProfilF1, PpfFluxConfig, FluxFile, build_tar_gz, flux_envelope_name, f1_inner_filename};
 pub use afnor::AfnorFlowClient;
 pub use annuaire::{AnnuaireClient, AfnorDirectoryClient};
+pub use batch::BatchProducer;
 pub use producer::{PpfSftpProducer, PpfSftpProducerConfig, AfnorFlowProducer, Destination};
 pub use routing::{RoutingProcessor, RoutingResolverProcessor, DynamicRoutingProducer, PartnerDirectory};
