@@ -1,7 +1,7 @@
 use pdp_core::error::{PdpError, PdpResult};
 use pdp_core::model::{
     DocumentAllowanceCharge, InvoiceAttachment, InvoiceData, InvoiceFormat, InvoiceLine,
-    InvoiceNote, InvoiceProfile, PostalAddress, TaxBreakdown,
+    InvoiceNote, InvoiceProfile, LineAllowanceCharge, PostalAddress, TaxBreakdown,
 };
 use roxmltree::Document;
 
@@ -384,12 +384,15 @@ impl UblParser {
             invoice.allowance_charges.push(DocumentAllowanceCharge {
                 charge_indicator: charge,
                 amount: self.find_cbc_text(&ac_node, "Amount").and_then(|v| v.parse().ok()),
+                base_amount: self.find_cbc_text(&ac_node, "BaseAmount").and_then(|v| v.parse().ok()),
+                percentage: self.find_cbc_text(&ac_node, "MultiplierFactorNumeric").and_then(|v| v.parse().ok()),
                 tax_category_code: self.find_element(&ac_node, "TaxCategory")
                     .and_then(|tc| self.find_cbc_text(&tc, "ID")),
                 tax_percent: self.find_element(&ac_node, "TaxCategory")
                     .and_then(|tc| self.find_cbc_text(&tc, "Percent"))
                     .and_then(|v| v.parse().ok()),
                 reason: self.find_cbc_text(&ac_node, "AllowanceChargeReason"),
+                reason_code: self.find_cbc_text(&ac_node, "AllowanceChargeReasonCode"),
             });
         }
     }
@@ -398,9 +401,15 @@ impl UblParser {
     fn parse_totals(&self, root: &roxmltree::Node, invoice: &mut InvoiceData) {
         // Totaux (BG-22)
         if let Some(totals) = self.find_element(root, "LegalMonetaryTotal") {
+            // BT-106 : Sum of Invoice line net amount
             invoice.total_ht = self
+                .find_cbc_text(&totals, "LineExtensionAmount")
+                .and_then(|v| v.parse::<f64>().ok());
+            // BT-109 : Invoice total amount without VAT = TaxExclusiveAmount
+            invoice.total_without_vat = self
                 .find_cbc_text(&totals, "TaxExclusiveAmount")
                 .and_then(|v| v.parse::<f64>().ok());
+            // BT-112 : Invoice total amount with VAT
             invoice.total_ttc = self
                 .find_cbc_text(&totals, "TaxInclusiveAmount")
                 .and_then(|v| v.parse::<f64>().ok());
@@ -472,7 +481,10 @@ impl UblParser {
                 order_line_reference: None,
                 accounting_cost: self.find_cbc_text(&line_node, "AccountingCost"),
                 price: None,
+                price_discount: None,
                 gross_price: None,
+                base_quantity: None,
+                base_quantity_unit_code: None,
                 item_name: None,
                 item_description: None,
                 seller_item_id: None,
@@ -483,11 +495,42 @@ impl UblParser {
                 tax_percent: None,
                 period_start: None,
                 period_end: None,
+                allowance_charges: Vec::new(),
+                line_type: None,
+                sub_lines: Vec::new(),
             };
 
             // Prix (BG-29)
             if let Some(price_node) = self.find_element(&line_node, "Price") {
                 line.price = self.find_cbc_text(&price_node, "PriceAmount").and_then(|v| v.parse().ok());
+                // BT-149 : BaseQuantity
+                if let Some(bq_node) = price_node.children().find(|n| n.tag_name().name() == "BaseQuantity") {
+                    line.base_quantity = bq_node.text().and_then(|t| t.trim().parse().ok());
+                    line.base_quantity_unit_code = bq_node.attribute("unitCode").map(|s| s.to_string());
+                }
+                // BT-147 : AllowanceCharge dans Price (rabais sur prix unitaire)
+                if let Some(pac) = self.find_element(&price_node, "AllowanceCharge") {
+                    line.price_discount = self.find_cbc_text(&pac, "Amount").and_then(|v| v.parse().ok());
+                    // BT-148 : BaseAmount dans Price/AllowanceCharge
+                    if line.gross_price.is_none() {
+                        line.gross_price = self.find_cbc_text(&pac, "BaseAmount").and_then(|v| v.parse().ok());
+                    }
+                }
+            }
+
+            // Remises/charges au niveau ligne (BG-27/BG-28)
+            for ac_node in line_node.children().filter(|n| n.tag_name().name() == "AllowanceCharge") {
+                let charge = self.find_cbc_text(&ac_node, "ChargeIndicator")
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                line.allowance_charges.push(LineAllowanceCharge {
+                    charge_indicator: charge,
+                    amount: self.find_cbc_text(&ac_node, "Amount").and_then(|v| v.parse().ok()),
+                    base_amount: self.find_cbc_text(&ac_node, "BaseAmount").and_then(|v| v.parse().ok()),
+                    percentage: self.find_cbc_text(&ac_node, "MultiplierFactorNumeric").and_then(|v| v.parse().ok()),
+                    reason: self.find_cbc_text(&ac_node, "AllowanceChargeReason"),
+                    reason_code: self.find_cbc_text(&ac_node, "AllowanceChargeReasonCode"),
+                });
             }
 
             // BT-132 : OrderLineReference

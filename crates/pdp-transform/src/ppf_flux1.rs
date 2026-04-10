@@ -450,11 +450,13 @@ mod tests {
             line_id: Some("1".to_string()),
             note: None, object_id: None, quantity: None, unit_code: None,
             line_net_amount: None, order_line_reference: None, accounting_cost: None,
-            price: None, gross_price: None, item_name: Some("Test".to_string()),
+            price: None, price_discount: None, gross_price: None, item_name: Some("Test".to_string()),
             item_description: None, seller_item_id: None, buyer_item_id: None,
             standard_item_id: None, standard_item_id_scheme: None,
             tax_category_code: None, tax_percent: None,
             period_start: None, period_end: None,
+            base_quantity: None, base_quantity_unit_code: None,
+            allowance_charges: Vec::new(), line_type: None, sub_lines: Vec::new(),
         });
         // AlwaysBase → Base même avec des lignes
         assert_eq!(
@@ -480,11 +482,13 @@ mod tests {
             line_id: Some("1".to_string()),
             note: None, object_id: None, quantity: None, unit_code: None,
             line_net_amount: None, order_line_reference: None, accounting_cost: None,
-            price: None, gross_price: None, item_name: Some("Test".to_string()),
+            price: None, price_discount: None, gross_price: None, item_name: Some("Test".to_string()),
             item_description: None, seller_item_id: None, buyer_item_id: None,
             standard_item_id: None, standard_item_id_scheme: None,
             tax_category_code: None, tax_percent: None,
             period_start: None, period_end: None,
+            base_quantity: None, base_quantity_unit_code: None,
+            allowance_charges: Vec::new(), line_type: None, sub_lines: Vec::new(),
         });
         // AlwaysFull avec lignes → Full
         assert_eq!(
@@ -506,11 +510,13 @@ mod tests {
             line_id: Some("1".to_string()),
             note: None, object_id: None, quantity: None, unit_code: None,
             line_net_amount: None, order_line_reference: None, accounting_cost: None,
-            price: None, gross_price: None, item_name: Some("Test".to_string()),
+            price: None, price_discount: None, gross_price: None, item_name: Some("Test".to_string()),
             item_description: None, seller_item_id: None, buyer_item_id: None,
             standard_item_id: None, standard_item_id_scheme: None,
             tax_category_code: None, tax_percent: None,
             period_start: None, period_end: None,
+            base_quantity: None, base_quantity_unit_code: None,
+            allowance_charges: Vec::new(), line_type: None, sub_lines: Vec::new(),
         });
         assert_eq!(PpfFlux1Processor::detect_profile(&inv), Flux1Profile::Full);
     }
@@ -524,11 +530,13 @@ mod tests {
             line_id: Some("1".to_string()),
             note: None, object_id: None, quantity: None, unit_code: None,
             line_net_amount: None, order_line_reference: None, accounting_cost: None,
-            price: None, gross_price: None, item_name: Some("Test".to_string()),
+            price: None, price_discount: None, gross_price: None, item_name: Some("Test".to_string()),
             item_description: None, seller_item_id: None, buyer_item_id: None,
             standard_item_id: None, standard_item_id_scheme: None,
             tax_category_code: None, tax_percent: None,
             period_start: None, period_end: None,
+            base_quantity: None, base_quantity_unit_code: None,
+            allowance_charges: Vec::new(), line_type: None, sub_lines: Vec::new(),
         });
         assert_eq!(PpfFlux1Processor::detect_profile(&inv), Flux1Profile::Full);
     }

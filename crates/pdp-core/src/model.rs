@@ -311,6 +311,8 @@ pub struct InvoiceData {
     pub allowance_total_amount: Option<f64>,
     /// BT-108 : Total des charges au niveau document
     pub charge_total_amount: Option<f64>,
+    /// BT-109 : Total HT après remises et charges (= BT-106 - BT-107 + BT-108)
+    pub total_without_vat: Option<f64>,
     /// BT-113 : Montant payé (acomptes)
     pub prepaid_amount: Option<f64>,
     /// BT-114 : Montant d'arrondi
@@ -443,6 +445,7 @@ impl InvoiceData {
             tax_amount_eur: None,
             allowance_total_amount: None,
             charge_total_amount: None,
+            total_without_vat: None,
             prepaid_amount: None,
             rounding_amount: None,
             payable_amount: None,
@@ -559,6 +562,55 @@ pub struct InvoiceNote {
     pub subject_code: Option<String>,
 }
 
+/// Type de sous-ligne (EXT-FR-FE-162) — XP Z12-012 §3.3.5
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SubLineType {
+    /// Ligne de détail (sous-ligne contribuant au montant)
+    Detail,
+    /// Ligne d'information (sous-ligne informative, sans impact montant)
+    Information,
+    /// Ligne de regroupement (multi-vendeurs B8/S8/M8)
+    Group,
+}
+
+impl std::fmt::Display for SubLineType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Detail => write!(f, "DETAIL"),
+            Self::Information => write!(f, "INFORMATION"),
+            Self::Group => write!(f, "GROUP"),
+        }
+    }
+}
+
+impl SubLineType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_uppercase().as_str() {
+            "DETAIL" => Some(Self::Detail),
+            "INFORMATION" => Some(Self::Information),
+            "GROUP" => Some(Self::Group),
+            _ => None,
+        }
+    }
+}
+
+/// Remise ou charge au niveau ligne (BG-27 / BG-28) — XP Z12-012 §3.3.4
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LineAllowanceCharge {
+    /// true = charge (BG-28), false = remise (BG-27)
+    pub charge_indicator: bool,
+    /// BT-136/BT-141 : Montant de la remise/charge
+    pub amount: Option<f64>,
+    /// BT-137/BT-142 : Montant de base pour le calcul
+    pub base_amount: Option<f64>,
+    /// BT-138/BT-143 : Pourcentage de la remise/charge
+    pub percentage: Option<f64>,
+    /// BT-139/BT-144 : Motif de la remise/charge
+    pub reason: Option<String>,
+    /// BT-140/BT-145 : Code motif de la remise/charge
+    pub reason_code: Option<String>,
+}
+
 /// Ligne de facture (BG-25)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvoiceLine {
@@ -580,8 +632,15 @@ pub struct InvoiceLine {
     pub accounting_cost: Option<String>,
     /// BT-146 : Prix unitaire net
     pub price: Option<f64>,
+    /// BT-147 : Rabais sur prix (remise unitaire, prix brut - prix net)
+    pub price_discount: Option<f64>,
     /// BT-148 : Prix brut
     pub gross_price: Option<f64>,
+    /// BT-149 : Quantité de base du prix unitaire (pour calcul BT-131)
+    /// Formule : BT-131 = (BT-146 / BT-149) × BT-129 - remises + charges
+    pub base_quantity: Option<f64>,
+    /// BT-150 : Unité de mesure de la quantité de base
+    pub base_quantity_unit_code: Option<String>,
     /// BT-153 : Nom de l'article
     pub item_name: Option<String>,
     /// BT-154 : Description de l'article
@@ -601,6 +660,16 @@ pub struct InvoiceLine {
     /// BG-26 : Période de facturation de la ligne
     pub period_start: Option<String>,
     pub period_end: Option<String>,
+
+    // --- Remises/charges au niveau ligne (BG-27/BG-28) ---
+    /// Remises et charges applicables à cette ligne
+    pub allowance_charges: Vec<LineAllowanceCharge>,
+
+    // --- Sous-lignes (EXT-FR-FE-162/163) — XP Z12-012 §3.3.5 ---
+    /// Type de sous-ligne (DETAIL, INFORMATION, GROUP)
+    pub line_type: Option<SubLineType>,
+    /// Sous-lignes rattachées à cette ligne (récursif)
+    pub sub_lines: Vec<InvoiceLine>,
 }
 
 /// Remise ou charge au niveau document (BG-20 / BG-21)
@@ -608,14 +677,20 @@ pub struct InvoiceLine {
 pub struct DocumentAllowanceCharge {
     /// true = charge (BG-21), false = remise (BG-20)
     pub charge_indicator: bool,
-    /// BT-92/BT-99 : Montant
+    /// BT-92/BT-99 : Montant de la remise/charge
     pub amount: Option<f64>,
+    /// BT-93/BT-100 : Montant de base pour le calcul
+    pub base_amount: Option<f64>,
+    /// BT-94/BT-101 : Pourcentage de la remise/charge
+    pub percentage: Option<f64>,
     /// BT-95/BT-102 : Code catégorie TVA
     pub tax_category_code: Option<String>,
     /// BT-96/BT-103 : Taux de TVA
     pub tax_percent: Option<f64>,
     /// BT-97/BT-104 : Motif
     pub reason: Option<String>,
+    /// BT-98/BT-105 : Code motif (UNTDID 5189 pour remises, UNTDID 7161 pour charges)
+    pub reason_code: Option<String>,
 }
 
 /// Pièce jointe (BG-24)

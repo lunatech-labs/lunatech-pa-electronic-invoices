@@ -60,6 +60,12 @@ fn make_standard_b2b_invoice() -> InvoiceData {
         accounting_cost: None,
         period_start: None,
         period_end: None,
+        price_discount: None,
+        base_quantity: None,
+        base_quantity_unit_code: None,
+        allowance_charges: Vec::new(),
+        line_type: None,
+        sub_lines: Vec::new(),
     }];
     inv
 }
@@ -99,6 +105,12 @@ fn make_invoice_line(
         accounting_cost: None,
         period_start: None,
         period_end: None,
+        price_discount: None,
+        base_quantity: None,
+        base_quantity_unit_code: None,
+        allowance_charges: Vec::new(),
+        line_type: None,
+        sub_lines: Vec::new(),
     }
 }
 
@@ -550,6 +562,9 @@ fn test_cas_22a_escompte_services() {
         reason: Some("Escompte".to_string()),
         tax_category_code: Some("S".to_string()),
         tax_percent: Some(20.0),
+        base_amount: None,
+        percentage: None,
+        reason_code: None,
     }];
 
     let txn = EReportingGenerator::invoice_to_transaction(&inv);
@@ -571,6 +586,9 @@ fn test_cas_22b_escompte_biens() {
         reason: Some("Escompte 1.5%".to_string()),
         tax_category_code: Some("S".to_string()),
         tax_percent: Some(20.0),
+        base_amount: None,
+        percentage: None,
+        reason_code: None,
     }];
 
     let txn = EReportingGenerator::invoice_to_transaction(&inv);
@@ -1543,6 +1561,9 @@ fn test_remises_charges_document() {
             reason: Some("Remise fidélité".to_string()),
             tax_category_code: Some("S".to_string()),
             tax_percent: Some(20.0),
+            base_amount: None,
+            percentage: None,
+            reason_code: None,
         },
         DocumentAllowanceCharge {
             charge_indicator: true,
@@ -1550,6 +1571,9 @@ fn test_remises_charges_document() {
             reason: Some("Frais de livraison".to_string()),
             tax_category_code: Some("S".to_string()),
             tax_percent: Some(20.0),
+            base_amount: None,
+            percentage: None,
+            reason_code: None,
         },
     ];
 

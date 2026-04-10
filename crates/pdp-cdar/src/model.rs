@@ -141,14 +141,22 @@ pub enum TransmissionStatusCode {
     Rejected = 8,
     Pending = 48,
     /// Phase Traitement (MDT-77=23)
-    Acknowledged = 45,
-    Accepted = 39,
-    ConditionallyAccepted = 37,
-    Disputed = 50,
-    PartiallyAccepted = 49,
-    Refused = 47,
-    Suspended = 46,
-    Paid = 1,
+    /// 45 (In Process) = Prise en charge
+    InProcess = 45,
+    /// 39 (on hold) = Suspendue
+    OnHold = 39,
+    /// 37 (Complete) = Complétée
+    Complete = 37,
+    /// 50 (Rejected / Refused) = Refusée (by C4) — BR-FR-CDV-CL-05
+    Refused = 50,
+    /// 49 (Conditionally accepted) = Approuvée Partiellement
+    ConditionallyAccepted = 49,
+    /// 47 (Paid) = Paiement Transmis ET Encaissée
+    Paid = 47,
+    /// 46 (Under Query) = En litige
+    UnderQuery = 46,
+    /// 1 (accepted) = Approuvée
+    Accepted = 1,
 }
 
 impl TransmissionStatusCode {
@@ -163,14 +171,14 @@ impl TransmissionStatusCode {
             43 => Some(Self::Delivered),
             8 => Some(Self::Rejected),
             48 => Some(Self::Pending),
-            45 => Some(Self::Acknowledged),
-            39 => Some(Self::Accepted),
-            37 => Some(Self::ConditionallyAccepted),
-            50 => Some(Self::Disputed),
-            49 => Some(Self::PartiallyAccepted),
-            47 => Some(Self::Refused),
-            46 => Some(Self::Suspended),
-            1 => Some(Self::Paid),
+            45 => Some(Self::InProcess),
+            39 => Some(Self::OnHold),
+            37 => Some(Self::Complete),
+            50 => Some(Self::Refused),
+            49 => Some(Self::ConditionallyAccepted),
+            47 => Some(Self::Paid),
+            46 => Some(Self::UnderQuery),
+            1 => Some(Self::Accepted),
             _ => None,
         }
     }

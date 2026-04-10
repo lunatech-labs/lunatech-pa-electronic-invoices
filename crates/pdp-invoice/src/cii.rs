@@ -1,7 +1,7 @@
 use pdp_core::error::{PdpError, PdpResult};
 use pdp_core::model::{
     DocumentAllowanceCharge, InvoiceAttachment, InvoiceData, InvoiceFormat, InvoiceLine,
-    InvoiceNote, InvoiceProfile, PostalAddress, TaxBreakdown,
+    InvoiceNote, InvoiceProfile, LineAllowanceCharge, PostalAddress, TaxBreakdown,
 };
 use roxmltree::Document;
 
@@ -416,9 +416,12 @@ impl CiiParser {
                 invoice.allowance_charges.push(DocumentAllowanceCharge {
                     charge_indicator: charge,
                     amount: self.find_text(&ac_node, "ActualAmount").and_then(|v| v.parse().ok()),
+                    base_amount: self.find_text(&ac_node, "BasisAmount").and_then(|v| v.parse().ok()),
+                    percentage: self.find_text(&ac_node, "CalculationPercent").and_then(|v| v.parse().ok()),
                     tax_category_code: self.find_text(&ac_node, "CategoryCode"),
                     tax_percent: self.find_text(&ac_node, "RateApplicablePercent").and_then(|v| v.parse().ok()),
                     reason: self.find_text(&ac_node, "Reason"),
+                    reason_code: self.find_text(&ac_node, "ReasonCode"),
                 });
             }
 
@@ -430,9 +433,19 @@ impl CiiParser {
 
             // Totaux (BG-22)
             if let Some(summary) = self.find_element(&settlement, "SpecifiedTradeSettlementHeaderMonetarySummation") {
+                // BT-106 : LineTotalAmount = Sum of Invoice line net amounts
                 invoice.total_ht = self
+                    .find_text(&summary, "LineTotalAmount")
+                    .and_then(|v| v.parse::<f64>().ok());
+                // BT-109 : TaxBasisTotalAmount = Total HT après remises/charges
+                invoice.total_without_vat = self
                     .find_text(&summary, "TaxBasisTotalAmount")
                     .and_then(|v| v.parse::<f64>().ok());
+                // Fallback : si LineTotalAmount absent, utiliser TaxBasisTotalAmount pour total_ht
+                if invoice.total_ht.is_none() {
+                    invoice.total_ht = invoice.total_without_vat;
+                }
+                // BT-112 : GrandTotalAmount = Total TTC
                 invoice.total_ttc = self
                     .find_text(&summary, "GrandTotalAmount")
                     .and_then(|v| v.parse::<f64>().ok());
@@ -462,12 +475,15 @@ impl CiiParser {
                 line_id: None, note: None, object_id: None,
                 quantity: None, unit_code: None,
                 line_net_amount: None, order_line_reference: None, accounting_cost: None,
-                price: None, gross_price: None,
+                price: None, price_discount: None, gross_price: None,
+                base_quantity: None, base_quantity_unit_code: None,
                 item_name: None, item_description: None,
                 seller_item_id: None, buyer_item_id: None,
                 standard_item_id: None, standard_item_id_scheme: None,
                 tax_category_code: None, tax_percent: None,
                 period_start: None, period_end: None,
+                allowance_charges: Vec::new(),
+                line_type: None, sub_lines: Vec::new(),
             };
 
             // Line document
@@ -495,9 +511,18 @@ impl CiiParser {
             if let Some(agreement) = self.find_element(&line_node, "SpecifiedLineTradeAgreement") {
                 if let Some(net_price) = self.find_element(&agreement, "NetPriceProductTradePrice") {
                     line.price = self.find_text(&net_price, "ChargeAmount").and_then(|v| v.parse().ok());
+                    // BT-149 : BaseQuantity dans NetPriceProductTradePrice
+                    if let Some(bq_node) = net_price.children().find(|n| n.tag_name().name() == "BasisQuantity") {
+                        line.base_quantity = bq_node.text().and_then(|t| t.trim().parse().ok());
+                        line.base_quantity_unit_code = bq_node.attribute("unitCode").map(|s| s.to_string());
+                    }
                 }
                 if let Some(gross_price) = self.find_element(&agreement, "GrossPriceProductTradePrice") {
                     line.gross_price = self.find_text(&gross_price, "ChargeAmount").and_then(|v| v.parse().ok());
+                    // BT-147 : AllowanceCharge dans GrossPriceProductTradePrice (rabais unitaire)
+                    if let Some(pac) = self.find_element(&gross_price, "AppliedTradeAllowanceCharge") {
+                        line.price_discount = self.find_text(&pac, "ActualAmount").and_then(|v| v.parse().ok());
+                    }
                 }
                 // BT-132 : Order line reference
                 if let Some(order_ref) = self.find_element(&agreement, "BuyerOrderReferencedDocument") {
@@ -513,7 +538,7 @@ impl CiiParser {
                 }
             }
 
-            // Settlement (line net amount, tax, period, accounting cost)
+            // Settlement (line net amount, tax, period, accounting cost, allowances/charges)
             if let Some(settle) = self.find_element(&line_node, "SpecifiedLineTradeSettlement") {
                 // Tax
                 if let Some(tax) = self.find_element(&settle, "ApplicableTradeTax") {
@@ -532,6 +557,25 @@ impl CiiParser {
                 if let Some(period) = self.find_element(&settle, "BillingSpecifiedPeriod") {
                     line.period_start = self.find_date(&period, "StartDateTime");
                     line.period_end = self.find_date(&period, "EndDateTime");
+                }
+                // BG-27/BG-28 : Remises/charges au niveau ligne
+                for ac_node in settle.children().filter(|n| n.tag_name().name() == "SpecifiedTradeAllowanceCharge") {
+                    let charge = self.find_text(&ac_node, "ChargeIndicator")
+                        .or_else(|| {
+                            // CII nested: <ChargeIndicator><Indicator>true</Indicator></ChargeIndicator>
+                            self.find_element(&ac_node, "ChargeIndicator")
+                                .and_then(|ci| self.find_text(&ci, "Indicator"))
+                        })
+                        .map(|v| v == "true")
+                        .unwrap_or(false);
+                    line.allowance_charges.push(LineAllowanceCharge {
+                        charge_indicator: charge,
+                        amount: self.find_text(&ac_node, "ActualAmount").and_then(|v| v.parse().ok()),
+                        base_amount: self.find_text(&ac_node, "BasisAmount").and_then(|v| v.parse().ok()),
+                        percentage: self.find_text(&ac_node, "CalculationPercent").and_then(|v| v.parse().ok()),
+                        reason: self.find_text(&ac_node, "Reason"),
+                        reason_code: self.find_text(&ac_node, "ReasonCode"),
+                    });
                 }
             }
 
