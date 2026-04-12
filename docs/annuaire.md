@@ -419,32 +419,18 @@ CREATE INDEX idx_lignes_dates ON lignes_annuaire(date_debut, date_fin_effective)
    - `SUPPRESSION` → `DELETE` ou marquage inactif
 4. Mettre à jour l'horodatage
 
-#### 5. Résolution de routage (consultation locale)
+#### 5. Résolution de routage (consultation locale) — IMPLÉMENTÉ
 
-Remplacer les appels API PISTE par des requêtes locales :
+Implémenté dans `pdp-annuaire::db::AnnuaireStore::resolve_routing()`. La résolution cherche la ligne d'annuaire la plus spécifique en vigueur, dans l'ordre de priorité :
 
-```rust
-/// Résout la plateforme de réception pour un destinataire.
-/// Cherche la ligne d'annuaire la plus spécifique en vigueur.
-fn resolve_routing(
-    db: &AnnuaireDb,
-    buyer_siren: &str,
-    buyer_siret: Option<&str>,
-    code_routage: Option<&str>,
-    suffixe: Option<&str>,
-    date: NaiveDate,  // date de la facture
-) -> Option<RoutingResult> {
-    // Ordre de priorité (plus spécifique en premier) :
-    // 1. Suffixe
-    // 2. Code routage (SIREN + SIRET + Id.routage)
-    // 3. SIRET (SIREN + SIRET)
-    // 4. SIREN seul
-    //
-    // Filtrer : nature=Definition, date_debut <= date, date_fin_effective is null ou >= date
-}
-```
+1. **Suffixe** (SIREN + suffixe)
+2. **Code routage** (SIREN + SIRET + id_routage)
+3. **SIRET** (SIREN + SIRET)
+4. **SIREN** seul
 
-#### 6. Émetteur F13 (actualisation)
+Filtrage : `nature = 'D'` (Définition), `date_debut <= date`, `date_fin_effective IS NULL OR >= date`.
+
+#### 6. Émetteur F13 (actualisation) — À IMPLÉMENTER
 
 Quand la PDP modifie les lignes d'annuaire de ses clients :
 1. Construire le XML F13 (`AnnuaireActualisation`)
@@ -454,13 +440,243 @@ Quand la PDP modifie les lignes d'annuaire de ses clients :
 5. Attendre le CDV F6 (statut 400 Acceptée ou 401 Rejetée)
 6. Si rejeté, alerter et stocker le motif de rejet
 
+## Implémentation — Crate `pdp-annuaire`
+
+### Architecture
+
+```
+crates/pdp-annuaire/
+  src/
+    model.rs     — Structures de données (UniteLegale, Etablissement, CodeRoutage, Plateforme, LigneAnnuaire)
+    parser.rs    — Parser XML streaming (quick-xml pull), fichiers 10+ Go sans chargement mémoire
+    db.rs        — Store PostgreSQL (schéma, insert batch, résolution de routage, lookups)
+    ingest.rs    — Orchestration parsing → batch insert PostgreSQL
+    lib.rs       — Exports publics
+  tests/
+    parser_test.rs       — 7 tests unitaires sur l'extrait F14 réel
+    integration_test.rs  — Test sur le vrai fichier PPF 10 Go (#[ignore])
+```
+
+### Codes abrégés du fichier PPF réel
+
+Le fichier F14 réel utilise des codes courts, différents de la documentation :
+
+| Champ | Codes réels | Signification |
+|-------|-------------|---------------|
+| `TypeFlux` | `C` / `D` | Complet / Différentiel |
+| `MotifPresence` | `C` / `M` / `S` | Création / Modification / Suppression |
+| `Statut` | `A` / `I` | Actif / Inactif |
+| `TypeEntite` | `A` / `P` | Assujetti (morale) / Personne physique |
+| `Diffusible` | `O` / `P` / `N` | Oui / Partiel / Non |
+| `Nature` | `D` / `M` | Définition / Masquage |
+| `TypeEtablissement` | `S` / `P` / `E` | Siège / Principal / Secondaire |
+| `TypePlateforme` | `PDP` / `PPF` / `AP` / `NA` | PDP / PPF / Access Point / Non Applicable |
+
+Le parser supporte les deux formes (codes courts et valeurs longues).
+
+### Performance
+
+Testé sur le vrai fichier PPF (10 Go, 30M+ éléments) :
+
+| Métrique | Valeur |
+|----------|--------|
+| Durée totale | 81 s (release) |
+| Throughput | 377 000 éléments/s |
+| Taux d'erreur | 0.0002% (63 entrées corrompues sur 30M+) |
+| Mémoire | Streaming, pas de chargement intégral |
+
+### Volumétrie réelle (export PPF juillet 2025)
+
+| Bloc | Volume |
+|------|--------|
+| Unités légales | 9 665 175 |
+| Établissements | 10 728 435 |
+| Codes routage | 216 525 |
+| Plateformes | 102 |
+| Lignes annuaire | 9 938 934 |
+
+## Utilisation — CLI
+
+### Prérequis
+
+PostgreSQL doit être accessible. Avec Docker :
+
+```bash
+docker compose up -d postgres
+```
+
+Configuration dans `config.yaml` :
+
+```yaml
+database:
+  url: "postgresql://pdp:pdp@localhost:5432/pdp"
+  max_connections: 10
+```
+
+Ou via variable d'environnement : `DATABASE_URL=postgresql://pdp:pdp@localhost:5432/pdp`
+
+### Import du fichier F14
+
+```bash
+# Import complet (crée les tables automatiquement, vide puis remplit)
+pdp annuaire import /chemin/vers/ppf-annuaire-export-full-20250713
+
+# Résultat attendu :
+# Import terminé en ~120s
+#   Unités légales  : 9665175
+#   Établissements  : 10728435
+#   Codes routage   : 216525
+#   Plateformes     : 102
+#   Lignes annuaire : 9938934
+```
+
+### Consultation
+
+```bash
+# Statistiques de l'annuaire local
+pdp annuaire stats
+
+# Recherche par SIREN
+pdp annuaire lookup 036213684
+
+# Résolution de routage
+pdp annuaire route 036213684
+pdp annuaire route 036213684 --siret 03621368400012
+```
+
+## Utilisation — API REST
+
+### Directory Service (AFNOR XP Z12-013 Annexe B)
+
+Les endpoints suivent la spécification AFNOR pour la consultation de l'annuaire entre PDP. Ils sont protégés par Bearer token.
+
+#### SIREN
+
+```bash
+# Consultation par SIREN
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/v1/siren/code-insee:036213684
+
+# Recherche
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"siren": "036213684"}' \
+  http://localhost:8080/v1/siren/search
+```
+
+Réponse :
+```json
+{
+  "siren": "036213684",
+  "raisonSociale": "MONSIEUR RENE VOIRON",
+  "typeEntite": "A",
+  "statutAdministratif": "A"
+}
+```
+
+#### SIRET
+
+```bash
+# Consultation par SIRET
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/v1/siret/code-insee:03621368400012
+
+# Recherche par SIREN (retourne tous les établissements)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"siren": "036213684"}' \
+  http://localhost:8080/v1/siret/search
+```
+
+Réponse :
+```json
+{
+  "items": [
+    {
+      "siret": "03621368400012",
+      "siren": "036213684",
+      "raisonSociale": "MONSIEUR RENE VOIRON",
+      "adresse": "12 RUE DU COMMERCE",
+      "codePostal": "75015",
+      "ville": "PARIS"
+    }
+  ],
+  "total": 1
+}
+```
+
+#### Routage
+
+```bash
+# Recherche de routage (quelle PDP gère le destinataire ?)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"siren": "036213684"}' \
+  http://localhost:8080/v1/routing-code/search
+```
+
+Réponse :
+```json
+{
+  "items": [
+    {
+      "siren": "036213684",
+      "idPdp": "9998",
+      "nomPdp": "PLATEFORME FICTIVE"
+    }
+  ],
+  "total": 1
+}
+```
+
+#### Lignes d'annuaire
+
+```bash
+# Consultation par identifiant d'adressage
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/v1/directory-line/code:036213684
+
+# Recherche
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"siren": "036213684"}' \
+  http://localhost:8080/v1/directory-line/search
+```
+
+### Endpoints internes
+
+```bash
+# Statistiques de l'annuaire (compteurs + date de dernière synchro)
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/v1/annuaire/stats
+
+# Liste des plateformes enregistrées
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/v1/annuaire/plateformes
+```
+
+## Schéma PostgreSQL
+
+Le schéma est créé automatiquement au démarrage (`AnnuaireStore::migrate()`). Tables :
+
+| Table | Clé primaire | Description |
+|-------|-------------|-------------|
+| `unites_legales` | `siren` | Entreprises (9.7M) |
+| `etablissements` | `siret` | Établissements (10.7M) |
+| `codes_routage` | `(siret, id_routage)` | Codes routage (216K) |
+| `plateformes` | `matricule` | PDP immatriculées (102) |
+| `lignes_annuaire` | `id_instance` | Liens destinataire → PDP (9.9M) |
+| `annuaire_sync_metadata` | `id` (serial) | Historique des synchros |
+
+Index pour le routage rapide : `idx_lignes_siren`, `idx_lignes_siret`, `idx_lignes_matricule`, `idx_lignes_nature_dates`, `idx_etab_siren`.
+
 ## XSD de référence
 
 | Fichier | Usage |
 |---------|-------|
-| `specs/xsd/specs-externes-v3.1/annuaire/common/Annuaire_Commun.xsd` | Types partagés (SIREN, SIRET, lignes, codes routage, plateformes) |
-| `specs/xsd/specs-externes-v3.1/annuaire/actualisation/Annuaire_Actualisation_F12-F13.xsd` | Flux d'actualisation F12/F13 (PDP → PPF) |
-| `specs/xsd/specs-externes-v3.1/annuaire/consultation/Annuaire_Consultation_F14.xsd` | Export/consultation F14 (PPF → PDP) |
+| `specs/xsd/annuaire-v3.1/common/Annuaire_Commun.xsd` | Types partagés (SIREN, SIRET, lignes, codes routage, plateformes) |
+| `specs/xsd/annuaire-v3.1/actualisation/Annuaire_Actualisation_F12-F13.xsd` | Flux d'actualisation F12/F13 (PDP → PPF) |
+| `specs/xsd/annuaire-v3.1/consultation/Annuaire_Consultation_F14.xsd` | Export/consultation F14 (PPF → PDP) |
 
 ## Accord formel de choix de plateforme
 

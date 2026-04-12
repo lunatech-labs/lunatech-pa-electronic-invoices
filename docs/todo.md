@@ -2,8 +2,8 @@
 
 Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 
-**Dernière mise à jour** : 2026-04-11
-**Tests** : 875 passent, 0 échec
+**Dernière mise à jour** : 2026-04-12
+**Tests** : 882+ passent, 0 échec
 
 ---
 
@@ -34,12 +34,16 @@ La PDP peut recevoir des factures d'une autre PDP (pas seulement de clients dire
 
 Maintenir une copie locale de l'annuaire PPF pour le routage offline et performant (voir `docs/annuaire.md`).
 
-- [ ] Consumer SFTP F14 (récupération tar.gz depuis le PPF)
-- [ ] Parser XML F14 (5 blocs : unités légales, établissements, codes routage, plateformes, lignes)
-- [ ] Stockage local (SQLite ou PostgreSQL)
-- [ ] Application du flux complet hebdomadaire (dimanche nuit)
+- [x] Parser XML F14 streaming (crate `pdp-annuaire`, quick-xml, 10 Go en 81s)
+- [x] Stockage PostgreSQL (5 tables, batch insert, index routage)
+- [x] Résolution de routage locale 4 mailles (suffixe > code routage > SIRET > SIREN)
+- [x] CLI import (`pdp annuaire import <fichier>`)
+- [x] CLI consultation (`pdp annuaire stats/lookup/route`)
+- [x] API Directory Service conforme AFNOR XP Z12-013 Annexe B
+- [x] PostgreSQL dans docker-compose, config `database` dans PdpConfig
+- [x] Tests unitaires (7) + test intégration fichier réel 10 Go
+- [ ] Consumer SFTP F14 (récupération automatique tar.gz depuis le PPF)
 - [ ] Application du flux différentiel quotidien (24h)
-- [ ] Résolution de routage locale (remplacer les appels API PISTE temps réel)
 - [ ] Émetteur F13 (actualisation des lignes d'annuaire de nos clients)
 - [ ] Traitement CDV F6 annuaire (statuts 400 Acceptée / 401 Rejetée)
 
