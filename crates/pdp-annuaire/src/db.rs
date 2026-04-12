@@ -64,6 +64,11 @@ impl AnnuaireStore {
         Self { pool }
     }
 
+    /// Démarre une transaction PostgreSQL
+    pub async fn begin(&self) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, sqlx::Error> {
+        self.pool.begin().await
+    }
+
     /// Crée les tables si elles n'existent pas
     pub async fn migrate(&self) -> Result<(), DbError> {
         for statement in SCHEMA_SQL.split(';') {
