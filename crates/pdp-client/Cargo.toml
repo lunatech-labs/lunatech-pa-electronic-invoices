@@ -29,3 +29,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 pdp-invoice = { path = "../pdp-invoice" }
 pdp-cdar = { path = "../pdp-cdar" }
 pdp-ereporting = { path = "../pdp-ereporting" }
+pdp-validate = { path = "../pdp-validate" }

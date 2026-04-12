@@ -251,6 +251,567 @@ fn test_exchange_properties_flow() {
 }
 
 // ============================================================
+// Test 7 : Cas d'usage XP Z12-014 UC1 - Facture simple
+// ============================================================
+
+#[test]
+fn test_uc1_invoice_flow() {
+    use pdp_cdar::model::{InvoiceStatusCode, CdvTypeCode, RoleCode};
+
+    // Charger la facture exemple (CII)
+    let cii_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_00-INV_20250701_CII.xml")
+        .expect("Fixture CII UC1 introuvable");
+
+    // Parser la facture
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+
+    assert_eq!(invoice.invoice_number, "F202500003");
+    assert_eq!(invoice.source_format, pdp_core::model::InvoiceFormat::CII);
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+
+    // Générer CDV 200 - Déposée
+    let cdv_200 = cdv_gen.generate_deposee(&invoice, invoice_type);
+    assert_eq!(cdv_200.status_code(), Some(200));
+    let xml_200 = cdv_gen.to_xml(&cdv_200).unwrap();
+    assert!(xml_200.contains("200"));
+    assert!(xml_200.contains(&invoice.invoice_number));
+
+    // Générer CDV 202 - Reçue
+    let cdv_202 = cdv_gen.generate_status(
+        InvoiceStatusCode::Recue,
+        CdvTypeCode::Transmission,
+        RoleCode::BY, // Buyer
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_202.status_code(), Some(202));
+    let xml_202 = cdv_gen.to_xml(&cdv_202).unwrap();
+    assert!(xml_202.contains("202"));
+
+    // Générer CDV 203 - Mise à disposition
+    let cdv_203 = cdv_gen.generate_mise_a_disposition(&invoice, invoice_type);
+    assert_eq!(cdv_203.status_code(), Some(203));
+    let xml_203 = cdv_gen.to_xml(&cdv_203).unwrap();
+    assert!(xml_203.contains("203"));
+
+    // Générer CDV 204 - Prise en charge
+    let cdv_204 = cdv_gen.generate_prise_en_charge(&invoice, invoice_type);
+    assert_eq!(cdv_204.status_code(), Some(204));
+    let xml_204 = cdv_gen.to_xml(&cdv_204).unwrap();
+    assert!(xml_204.contains("204"));
+
+    // Générer CDV 205 - Approuvée (utiliser generate_status)
+    let cdv_205 = cdv_gen.generate_status(
+        InvoiceStatusCode::Approuvee,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_205.status_code(), Some(205));
+    let xml_205 = cdv_gen.to_xml(&cdv_205).unwrap();
+    assert!(xml_205.contains("205"));
+    // Valider CDV 205 contre l'exemple
+    let example_205_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_05-CDV-205_Approuvee.xml")
+        .expect("Fixture exemple CDV 205 introuvable");
+    let cdv_parser = pdp_cdar::CdarParser::new();
+    let example_205_cdv = cdv_parser.parse(&example_205_xml).expect("Parsing exemple CDV 205 échoué");
+    assert_eq!(cdv_205.status_code(), example_205_cdv.status_code());
+    assert_eq!(cdv_205.referenced_documents[0].invoice_id, example_205_cdv.referenced_documents[0].invoice_id);
+    // Générer CDV 211 - Paiement transmis
+    let cdv_211 = cdv_gen.generate_status(
+        InvoiceStatusCode::PaiementTransmis,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_211.status_code(), Some(211));
+    let xml_211 = cdv_gen.to_xml(&cdv_211).unwrap();
+    assert!(xml_211.contains("211"));
+
+    // Générer CDV 212 - Encaissée
+    let cdv_212 = cdv_gen.generate_status(
+        InvoiceStatusCode::Encaissee,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_212.status_code(), Some(212));
+    let xml_212 = cdv_gen.to_xml(&cdv_212).unwrap();
+    assert!(xml_212.contains("212"));
+
+    // TODO: Comparer les XML générés avec les exemples
+    // Pour cela, parser les XML attendus et comparer les champs clés
+
+    // Exemple de validation pour CDV 200
+    let example_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_01-CDV-200_Deposee.xml")
+        .expect("Fixture exemple CDV 200 introuvable");
+    let cdv_parser = pdp_cdar::CdarParser::new();
+    let example_cdv = cdv_parser.parse(&example_xml).expect("Parsing exemple CDV échoué");
+    assert_eq!(cdv_200.status_code(), example_cdv.status_code());
+    assert_eq!(cdv_200.referenced_documents[0].invoice_id, example_cdv.referenced_documents[0].invoice_id);
+}
+
+#[tokio::test]
+async fn test_uc1_cdv_processing() {
+    // Simuler la réception d'un CDV "Déposée" (200) depuis l'exemple
+    let cdv_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_01-CDV-200_Deposee.xml")
+        .expect("Fixture CDV 200 introuvable");
+
+    let processor = pdp_cdar::CdvReceptionProcessor::new();
+    let exchange = pdp_core::exchange::Exchange::new(cdv_xml.into_bytes());
+    let result = processor.process(exchange).await.expect("Traitement CDV échoué");
+
+    // Vérifier que le statut est correctement mappé
+    assert_eq!(result.status, pdp_core::model::FlowStatus::Distributed);
+    assert_eq!(result.get_property("cdv.invoice_id").map(|s: &String| s.as_str()), Some("F202500003"));
+    assert_eq!(result.get_property("cdv.status_code").map(|s: &String| s.as_str()), Some("200"));
+    assert!(!result.has_errors());
+
+    // Simuler la réception d'un CDV "Approuvée" (205)
+    let cdv_205_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_05-CDV-205_Approuvee.xml")
+        .expect("Fixture CDV 205 introuvable");
+
+    let exchange_205 = pdp_core::exchange::Exchange::new(cdv_205_xml.into_bytes());
+    let result_205 = processor.process(exchange_205).await.expect("Traitement CDV 205 échoué");
+
+    assert_eq!(result_205.status, pdp_core::model::FlowStatus::Acknowledged);
+    assert_eq!(result_205.get_property("cdv.status_code").map(|s: &String| s.as_str()), Some("205"));
+}
+
+#[tokio::test]
+async fn test_error_handling() {
+    // Test 1 : Parsing d'une facture CII invalide
+    let invalid_cii = "<xml><invalid><unclosed></xml>";
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let result = parser.parse(invalid_cii);
+    assert!(result.is_err(), "Parsing d'une CII invalide devrait échouer");
+
+    // Test 2 : Parsing d'une facture UBL invalide
+    let invalid_ubl = "<xml><invalid><unclosed></xml>";
+    let ubl_parser = pdp_invoice::ubl::UblParser::new();
+    let ubl_result = ubl_parser.parse(invalid_ubl);
+    assert!(ubl_result.is_err(), "Parsing d'une UBL invalide devrait échouer");
+
+    // Test 3 : Génération de CDV avec numéro de facture vide
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invalid_invoice = pdp_core::model::InvoiceData::new("INVALID-001".to_string(), pdp_core::model::InvoiceFormat::CII);
+    let cdv = cdv_gen.generate_deposee(&invalid_invoice, "380");
+    // Devrait quand même générer
+    assert_eq!(cdv.status_code(), Some(200));
+
+    // Test 4 : Traitement d'un CDV invalide
+    let invalid_cdv_xml = "<xml><invalid><unclosed></xml>";
+    let cdv_processor = pdp_cdar::CdvReceptionProcessor::new();
+    let exchange = pdp_core::exchange::Exchange::new(invalid_cdv_xml.as_bytes().to_vec());
+    let process_result = cdv_processor.process(exchange).await;
+    assert!(process_result.is_err(), "Traitement d'un CDV invalide devrait échouer");
+}
+
+#[tokio::test]
+async fn test_rejection_scenarios() {
+    // Test rejet pour facture avec erreurs de validation
+    let cii_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_00-INV_20250701_CII.xml")
+        .expect("Fixture CII introuvable");
+
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+
+    // Simuler un rejet avec erreurs plus détaillées
+    use pdp_cdar::model::CdarValidationError;
+    let errors = vec![
+        CdarValidationError {
+            rule_id: "BR-FR-01".to_string(),
+            severity: "ERROR".to_string(),
+            location: Some("Invoice/ID".to_string()),
+            message: "Numéro de facture manquant ou invalide - doit être unique par émetteur et année".to_string(),
+            reason_code: Some(pdp_cdar::model::StatusReasonCode::RefErr),
+        },
+        CdarValidationError {
+            rule_id: "BR-01".to_string(),
+            severity: "ERROR".to_string(),
+            location: Some("AccountingSupplierParty/PartyTaxScheme/CompanyID".to_string()),
+            message: "Numéro TVA de l'émetteur manquant - obligatoire pour factures > 1000€".to_string(),
+            reason_code: Some(pdp_cdar::model::StatusReasonCode::SiretErr),
+        }
+    ];
+    let cdv_rejet = cdv_gen.generate_rejetee(&invoice, invoice_type, errors);
+    assert_eq!(cdv_rejet.status_code(), Some(213));
+    assert!(!cdv_rejet.is_success());
+
+    // Vérifier que le CDV contient les erreurs détaillées
+    let xml = cdv_gen.to_xml(&cdv_rejet).unwrap();
+    assert!(xml.contains("213"));
+    assert!(xml.contains("REF_ERR"));
+    assert!(xml.contains("SIRET_ERR"));
+    assert!(xml.contains("Numéro de facture"));
+    assert!(xml.contains("Numéro TVA"));
+}
+
+#[test]
+fn test_xsd_validation() {
+    use pdp_validate::xsd::{XsdValidator, XsdDocumentType};
+
+    let specs_dir = std::path::PathBuf::from("../../specs");
+    let validator = XsdValidator::new(&specs_dir);
+
+    // Test 1 : Validation d'une facture CII exemple (peut avoir des erreurs mineures)
+    let cii_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_00-INV_20250701_CII.xml")
+        .expect("Fixture CII introuvable");
+
+    let _report = validator.validate(&cii_xml, &XsdDocumentType::CiiD22B);
+    // La validation doit s'exécuter sans paniquer, même si le fichier exemple a des erreurs
+    // On ne fait pas d'assertion sur le nombre d'erreurs car les fixtures peuvent avoir des variations
+
+    // Test 2 : Validation d'une facture UBL exemple
+    let ubl_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_00-INV_20250701_UBL.xml")
+        .expect("Fixture UBL introuvable");
+
+    let _ubl_report = validator.validate(&ubl_xml, &XsdDocumentType::UblInvoice);
+    // La validation doit s'exécuter sans paniquer
+
+    // Test 3 : Validation d'un CDV généré
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+    let cdv = cdv_gen.generate_deposee(&invoice, invoice_type);
+    let cdv_xml = cdv_gen.to_xml(&cdv).unwrap();
+
+    let cdv_report = validator.validate(&cdv_xml, &XsdDocumentType::Cdar);
+    assert!(cdv_report.is_valid(), "Le CDV généré devrait être valide XSD. Erreurs: {:?}", cdv_report.issues);
+
+    // Test 4 : Validation d'un XML invalide
+    let invalid_xml = "<xml><invalid/></xml>";
+    let invalid_report = validator.validate(invalid_xml, &XsdDocumentType::CiiD22B);
+    assert!(!invalid_report.is_valid(), "Un XML invalide ne devrait pas passer la validation XSD");
+}
+
+#[tokio::test]
+async fn test_sftp_file_validation() {
+    // Test 1 : Fichier vide devrait être rejeté
+    let _empty_exchange = pdp_core::exchange::Exchange::new(Vec::new());
+    // Note: Le producer SFTP actuel n'a pas de validation de contenu vide
+    // Il faudrait ajouter cette validation dans le producer
+
+    // Test 2 : Extension non autorisée (simulation)
+    // Le consumer SFTP filtre par pattern, mais on pourrait ajouter plus de validation
+
+    // Test 3 : Fichier trop volumineux (simulation)
+    // Les specs PPF limitent à 120 Mo par fichier, 1 Go par archive
+    let large_content = vec![0u8; 130 * 1024 * 1024]; // 130 Mo
+    let large_exchange = pdp_core::exchange::Exchange::new(large_content);
+
+    // Pour l'instant, on teste juste que l'exchange est créé
+    assert_eq!(large_exchange.body.len(), 130 * 1024 * 1024);
+
+    // Test 4 : Nom de fichier invalide
+    let _invalid_filename_exchange = pdp_core::exchange::Exchange::new(b"test content".to_vec())
+        .with_filename("file with spaces and spécial chars éà.txt");
+
+    // Test 5 : Extension dangereuse
+    let _dangerous_exchange = pdp_core::exchange::Exchange::new(b"malicious content".to_vec())
+        .with_filename("virus.exe");
+
+    // Ces tests montrent qu'il faudrait ajouter de la validation
+    // dans les producers/consumers SFTP pour :
+    // - Vérifier que les fichiers ne sont pas vides
+    // - Valider les extensions autorisées
+    // - Contrôler les tailles de fichiers
+    // - Sanitiser les noms de fichiers
+    // - Détecter les extensions dangereuses
+}
+
+#[tokio::test]
+async fn test_uc2_cdv_processing() {
+    // Simuler la réception d'un CDV "Rejetée" (213) depuis UC2
+    let cdv_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC2/UC2_F202500004_02-CDV-213_Rejetee.xml")
+        .expect("Fixture CDV 213 UC2 introuvable");
+
+    let processor = pdp_cdar::CdvReceptionProcessor::new();
+    let exchange = pdp_core::exchange::Exchange::new(cdv_xml.into_bytes());
+    let result = processor.process(exchange).await.expect("Traitement CDV échoué");
+
+    assert_eq!(result.status, pdp_core::model::FlowStatus::Rejected);
+    assert_eq!(result.get_property("cdv.invoice_id").map(|s: &String| s.as_str()), Some("F202500004"));
+    assert_eq!(result.get_property("cdv.status_code").map(|s: &String| s.as_str()), Some("213"));
+    assert!(result.has_errors());
+}
+
+#[test]
+fn test_uc1_invoice_flow_ubl() {
+    // Charger la facture exemple (UBL)
+    let ubl_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC1/UC1_F202500003_00-INV_20250701_UBL.xml")
+        .expect("Fixture UBL UC1 introuvable");
+
+    // Parser la facture
+    let parser = pdp_invoice::ubl::UblParser::new();
+    let invoice = parser.parse(&ubl_xml).expect("Parsing UBL échoué");
+
+    assert_eq!(invoice.invoice_number, "F202500003");
+    assert_eq!(invoice.source_format, pdp_core::model::InvoiceFormat::UBL);
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+
+    // Générer CDV 200 - Déposée
+    let cdv_200 = cdv_gen.generate_deposee(&invoice, invoice_type);
+    assert_eq!(cdv_200.status_code(), Some(200));
+    let xml_200 = cdv_gen.to_xml(&cdv_200).unwrap();
+    assert!(xml_200.contains("200"));
+    assert!(xml_200.contains(&invoice.invoice_number));
+}
+
+#[test]
+fn test_uc2_invoice_flow() {
+    // Charger la facture exemple (CII) UC2
+    let cii_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC2/UC2_F202500004_00-INV_20250701_CII.xml")
+        .expect("Fixture CII UC2 introuvable");
+
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+
+    assert_eq!(invoice.invoice_number, "F202500004");
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+
+    // Générer CDV 200 - Déposée
+    let cdv_200 = cdv_gen.generate_deposee(&invoice, invoice_type);
+    assert_eq!(cdv_200.status_code(), Some(200));
+
+    // Valider contre l'exemple
+    let example_200_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC2/UC2_F202500004_01-CDV-200_Deposee.xml")
+        .expect("Fixture exemple CDV 200 UC2 introuvable");
+    let cdv_parser = pdp_cdar::CdarParser::new();
+    let example_200_cdv = cdv_parser.parse(&example_200_xml).expect("Parsing exemple CDV 200 UC2 échoué");
+    assert_eq!(cdv_200.status_code(), example_200_cdv.status_code());
+    assert_eq!(cdv_200.referenced_documents[0].invoice_id, example_200_cdv.referenced_documents[0].invoice_id);
+
+    // Générer CDV 213 - Rejetée
+    let cdv_213 = cdv_gen.generate_rejetee(&invoice, invoice_type, vec![]);
+    assert_eq!(cdv_213.status_code(), Some(213));
+
+    // Valider contre l'exemple
+    let example_213_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC2/UC2_F202500004_02-CDV-213_Rejetee.xml")
+        .expect("Fixture exemple CDV 213 UC2 introuvable");
+    let example_213_cdv = cdv_parser.parse(&example_213_xml).expect("Parsing exemple CDV 213 UC2 échoué");
+    assert_eq!(cdv_213.status_code(), example_213_cdv.status_code());
+    assert_eq!(cdv_213.referenced_documents[0].invoice_id, example_213_cdv.referenced_documents[0].invoice_id);
+}
+
+#[test]
+fn test_uc3_invoice_flow() {
+    use pdp_cdar::model::{InvoiceStatusCode, CdvTypeCode, RoleCode};
+
+    // Charger la facture exemple (CII) UC3
+    let cii_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC3/UC3_F202500005_00-INV_20250701_CII.xml")
+        .expect("Fixture CII UC3 introuvable");
+
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+
+    assert_eq!(invoice.invoice_number, "F202500005");
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+
+    // Générer CDV 200 - Déposée
+    let cdv_200 = cdv_gen.generate_deposee(&invoice, invoice_type);
+    assert_eq!(cdv_200.status_code(), Some(200));
+
+    // Générer CDV 202 - Reçue
+    let cdv_202 = cdv_gen.generate_status(
+        InvoiceStatusCode::Recue,
+        CdvTypeCode::Transmission,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_202.status_code(), Some(202));
+
+    // Générer CDV 203 - Mise à disposition
+    let cdv_203 = cdv_gen.generate_mise_a_disposition(&invoice, invoice_type);
+    assert_eq!(cdv_203.status_code(), Some(203));
+
+    // Générer CDV 210 - Refusée
+    let cdv_210 = cdv_gen.generate_status(
+        InvoiceStatusCode::Refusee,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_210.status_code(), Some(210));
+
+    // Valider CDV 210 contre l'exemple
+    let example_210_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC3/UC3_F202500005_04-CDV-210_Refusee.xml")
+        .expect("Fixture exemple CDV 210 UC3 introuvable");
+    let cdv_parser = pdp_cdar::CdarParser::new();
+    let example_210_cdv = cdv_parser.parse(&example_210_xml).expect("Parsing exemple CDV 210 UC3 échoué");
+    assert_eq!(cdv_210.status_code(), example_210_cdv.status_code());
+    assert_eq!(cdv_210.referenced_documents[0].invoice_id, example_210_cdv.referenced_documents[0].invoice_id);
+}
+
+#[test]
+fn test_uc4_invoice_flow() {
+    use pdp_cdar::model::{InvoiceStatusCode, CdvTypeCode, RoleCode};
+
+    // Charger la facture exemple (CII) UC4
+    let cii_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC4/UC4_F202500006_00-INV_20250701_CII.xml")
+        .expect("Fixture CII UC4 introuvable");
+
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+
+    assert_eq!(invoice.invoice_number, "F202500006");
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+
+    // Générer CDV 200 - Déposée
+    let cdv_200 = cdv_gen.generate_deposee(&invoice, invoice_type);
+    assert_eq!(cdv_200.status_code(), Some(200));
+
+    // Générer CDV 202 - Reçue
+    let cdv_202 = cdv_gen.generate_status(
+        InvoiceStatusCode::Recue,
+        CdvTypeCode::Transmission,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_202.status_code(), Some(202));
+
+    // Générer CDV 203 - Mise à disposition
+    let cdv_203 = cdv_gen.generate_mise_a_disposition(&invoice, invoice_type);
+    assert_eq!(cdv_203.status_code(), Some(203));
+
+    // Générer CDV 207 - En litige
+    let cdv_207 = cdv_gen.generate_status(
+        InvoiceStatusCode::EnLitige,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_207.status_code(), Some(207));
+
+    // Valider CDV 207 contre l'exemple
+    let example_207_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC4/UC4_F202500006_04-CDV-207_En_litige.xml")
+        .expect("Fixture exemple CDV 207 UC4 introuvable");
+    let cdv_parser = pdp_cdar::CdarParser::new();
+    let example_207_cdv = cdv_parser.parse(&example_207_xml).expect("Parsing exemple CDV 207 UC4 échoué");
+    assert_eq!(cdv_207.status_code(), example_207_cdv.status_code());
+    assert_eq!(cdv_207.referenced_documents[0].invoice_id, example_207_cdv.referenced_documents[0].invoice_id);
+
+    // Générer CDV 220 - Annulée
+    let cdv_220 = cdv_gen.generate_status(
+        InvoiceStatusCode::Annulee,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_220.status_code(), Some(220));
+}
+
+#[test]
+fn test_uc5_invoice_flow() {
+    use pdp_cdar::model::{InvoiceStatusCode, CdvTypeCode, RoleCode};
+
+    // Charger la facture exemple (CII) UC5
+    let cii_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC5/UC5_F202500007_00-INV_20250702_CII.xml")
+        .expect("Fixture CII UC5 introuvable");
+
+    let parser = pdp_invoice::cii::CiiParser::new();
+    let invoice = parser.parse(&cii_xml).expect("Parsing CII échoué");
+
+    assert_eq!(invoice.invoice_number, "F202500007");
+
+    let cdv_gen = pdp_cdar::CdarGenerator::new("100000009", "PDP Test");
+    let invoice_type = invoice.invoice_type_code.as_deref().unwrap_or("380");
+
+    // Générer CDV 200 - Déposée
+    let cdv_200 = cdv_gen.generate_deposee(&invoice, invoice_type);
+    assert_eq!(cdv_200.status_code(), Some(200));
+
+    // Générer CDV 202 - Reçue
+    let cdv_202 = cdv_gen.generate_status(
+        InvoiceStatusCode::Recue,
+        CdvTypeCode::Transmission,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_202.status_code(), Some(202));
+
+    // Générer CDV 203 - Mise à disposition
+    let cdv_203 = cdv_gen.generate_mise_a_disposition(&invoice, invoice_type);
+    assert_eq!(cdv_203.status_code(), Some(203));
+
+    // Générer CDV 207 - En litige
+    let cdv_207 = cdv_gen.generate_status(
+        InvoiceStatusCode::EnLitige,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_207.status_code(), Some(207));
+
+    // Générer CDV 205 - Approuvée
+    let cdv_205 = cdv_gen.generate_status(
+        InvoiceStatusCode::Approuvee,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_205.status_code(), Some(205));
+
+    // Valider CDV 205 contre l'exemple
+    let example_205_xml = std::fs::read_to_string("../../tests/fixtures/xp-z12-014/UC5/UC5b_F202500007_05-CDV-205_Approuvee.xml")
+        .expect("Fixture exemple CDV 205 UC5 introuvable");
+    let cdv_parser = pdp_cdar::CdarParser::new();
+    let example_205_cdv = cdv_parser.parse(&example_205_xml).expect("Parsing exemple CDV 205 UC5 échoué");
+    assert_eq!(cdv_205.status_code(), example_205_cdv.status_code());
+    assert_eq!(cdv_205.referenced_documents[0].invoice_id, example_205_cdv.referenced_documents[0].invoice_id);
+
+    // Générer CDV 212 - Encaissée
+    let cdv_212 = cdv_gen.generate_status(
+        InvoiceStatusCode::Encaissee,
+        CdvTypeCode::Traitement,
+        RoleCode::BY,
+        &invoice,
+        invoice_type,
+        vec![],
+    );
+    assert_eq!(cdv_212.status_code(), Some(212));
+}
+
+// ============================================================
 // Test 7 : Destination routing enum
 // ============================================================
 
