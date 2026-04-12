@@ -19,7 +19,7 @@ pub mod ingest;
 pub mod model;
 pub mod parser;
 
-pub use db::{AnnuaireStore, EtablissementRow, PlateformeRow};
+pub use db::{AnnuaireStore, EtablissementRow, PlateformeRow, SearchResult};
 pub use ingest::ingest_f14;
 pub use model::*;
 pub use parser::parse_f14;

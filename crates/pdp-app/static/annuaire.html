@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annuaire PPF</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #1a1a2e;
+            min-height: 100vh;
+        }
+        header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+        header h1 { font-size: 1.5rem; font-weight: 600; }
+        header p { opacity: 0.7; margin-top: 0.3rem; font-size: 0.9rem; }
+
+        .search-container {
+            max-width: 800px;
+            margin: -1.5rem auto 2rem;
+            padding: 0 1rem;
+            position: relative;
+        }
+        .search-box {
+            width: 100%;
+            padding: 1rem 1.2rem 1rem 3rem;
+            font-size: 1.1rem;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            outline: none;
+            transition: box-shadow 0.2s;
+        }
+        .search-box:focus {
+            box-shadow: 0 4px 25px rgba(22, 33, 62, 0.25);
+        }
+        .search-box::placeholder { color: #aaa; }
+        .search-icon {
+            position: absolute;
+            left: 1.8rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #999;
+            font-size: 1.2rem;
+            pointer-events: none;
+        }
+
+        .stats-bar {
+            max-width: 800px;
+            margin: 0 auto 1rem;
+            padding: 0 1rem;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .results {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 1rem 2rem;
+        }
+        .result-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.2rem 1.5rem;
+            margin-bottom: 0.8rem;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            cursor: pointer;
+            transition: box-shadow 0.15s, transform 0.15s;
+        }
+        .result-card:hover {
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transform: translateY(-1px);
+        }
+        .result-card.expanded {
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        .result-name {
+            font-weight: 600;
+            font-size: 1.05rem;
+            color: #1a1a2e;
+        }
+        .result-siren {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: #5a67d8;
+            background: #ebf4ff;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        .result-meta {
+            margin-top: 0.4rem;
+            font-size: 0.85rem;
+            color: #888;
+        }
+        .result-badge {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 0.1rem 0.45rem;
+            border-radius: 3px;
+            margin-right: 0.3rem;
+        }
+        .badge-pdp {
+            background: #e6fffa;
+            color: #234e52;
+        }
+        .badge-type {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .badge-status {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .badge-status.inactif {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .detail-section {
+            display: none;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
+        }
+        .result-card.expanded .detail-section {
+            display: block;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.6rem;
+        }
+        @media (max-width: 600px) {
+            .detail-grid { grid-template-columns: 1fr; }
+        }
+        .detail-item {
+            font-size: 0.85rem;
+        }
+        .detail-label {
+            color: #999;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .detail-value {
+            color: #333;
+            margin-top: 0.1rem;
+        }
+
+        .etab-list {
+            margin-top: 0.8rem;
+        }
+        .etab-list h4 {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: #999;
+            margin-bottom: 0.5rem;
+        }
+        .etab-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid #f5f5f5;
+            font-size: 0.85rem;
+        }
+        .etab-row:last-child { border-bottom: none; }
+        .etab-siret {
+            font-family: monospace;
+            color: #5a67d8;
+            font-size: 0.8rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 1rem;
+            color: #aaa;
+        }
+        .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+        .spinner {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+        }
+        .spinner.visible { display: block; }
+        .spinner::after {
+            content: '';
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #ddd;
+            border-top-color: #5a67d8;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Annuaire PPF</h1>
+        <p>Recherche dans l'annuaire des assujettis</p>
+    </header>
+
+    <div class="search-container">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" class="search-box" id="searchInput"
+               placeholder="Nom, SIREN, SIRET ou adresse..."
+               autocomplete="off" autofocus>
+    </div>
+
+    <div class="stats-bar">
+        <span id="resultCount"></span>
+        <span id="searchTime"></span>
+    </div>
+
+    <div class="spinner" id="spinner"></div>
+
+    <div class="results" id="results">
+        <div class="empty-state">
+            <div class="icon">&#128218;</div>
+            <p>Saisissez un nom, SIREN, SIRET ou adresse pour rechercher</p>
+        </div>
+    </div>
+
+    <script>
+    const searchInput = document.getElementById('searchInput');
+    const resultsDiv = document.getElementById('results');
+    const spinner = document.getElementById('spinner');
+    const resultCount = document.getElementById('resultCount');
+    const searchTime = document.getElementById('searchTime');
+
+    let debounceTimer = null;
+    let currentQuery = '';
+
+    searchInput.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        const q = searchInput.value.trim();
+        if (q.length < 2) {
+            resultsDiv.innerHTML = `<div class="empty-state">
+                <div class="icon">&#128218;</div>
+                <p>Saisissez au moins 2 caracteres</p>
+            </div>`;
+            resultCount.textContent = '';
+            searchTime.textContent = '';
+            return;
+        }
+        debounceTimer = setTimeout(() => doSearch(q), 250);
+    });
+
+    async function doSearch(query) {
+        if (query === currentQuery) return;
+        currentQuery = query;
+        spinner.classList.add('visible');
+        resultCount.textContent = 'Recherche...';
+        searchTime.textContent = '';
+
+        const start = performance.now();
+        try {
+            const res = await fetch(`/v1/annuaire/search?q=${encodeURIComponent(query)}`);
+            const data = await res.json();
+            const elapsed = ((performance.now() - start) / 1000).toFixed(2);
+
+            if (query !== currentQuery) return; // stale
+
+            spinner.classList.remove('visible');
+
+            if (!data.results || data.results.length === 0) {
+                resultsDiv.innerHTML = `<div class="empty-state">
+                    <div class="icon">&#128533;</div>
+                    <p>Aucun resultat pour "${escHtml(query)}"</p>
+                </div>`;
+                resultCount.textContent = '0 resultat';
+                searchTime.textContent = `${elapsed}s`;
+                return;
+            }
+
+            // Grouper par SIREN
+            const grouped = groupBySiren(data.results);
+            resultCount.textContent = `${Object.keys(grouped).length} entreprise(s)`;
+            searchTime.textContent = `${elapsed}s`;
+
+            resultsDiv.innerHTML = Object.values(grouped).map(renderCompany).join('');
+        } catch (e) {
+            spinner.classList.remove('visible');
+            resultsDiv.innerHTML = `<div class="empty-state">
+                <div class="icon">&#9888;&#65039;</div>
+                <p>Erreur : ${escHtml(e.message)}</p>
+            </div>`;
+        }
+    }
+
+    function groupBySiren(results) {
+        const groups = {};
+        for (const r of results) {
+            const siren = r.siren.trim();
+            if (!groups[siren]) {
+                groups[siren] = {
+                    siren,
+                    nom: r.nom.trim(),
+                    type_entite: r.type_entite.trim(),
+                    statut: r.statut.trim(),
+                    plateforme: r.plateforme ? r.plateforme.trim() : null,
+                    plateforme_nom: r.plateforme_nom ? r.plateforme_nom.trim() : null,
+                    etablissements: [],
+                };
+            }
+            if (r.siret) {
+                const siret = r.siret.trim();
+                if (!groups[siren].etablissements.find(e => e.siret === siret)) {
+                    groups[siren].etablissements.push({
+                        siret,
+                        nom: r.etab_nom ? r.etab_nom.trim() : '',
+                        adresse: r.adresse_1 ? r.adresse_1.trim() : '',
+                        localite: r.localite ? r.localite.trim() : '',
+                        cp: r.code_postal ? r.code_postal.trim() : '',
+                    });
+                }
+            }
+        }
+        return groups;
+    }
+
+    function renderCompany(c) {
+        const typeLabel = c.type_entite === 'A' ? 'Assujetti' : 'Personne physique';
+        const statusLabel = c.statut === 'A' ? 'Actif' : 'Inactif';
+        const statusClass = c.statut === 'A' ? '' : ' inactif';
+
+        let pdpBadge = '';
+        if (c.plateforme) {
+            const pdpLabel = c.plateforme === '9998' ? 'PPF (fictive)' :
+                             c.plateforme === '0000' ? 'PPF' :
+                             c.plateforme === '9999' ? 'Chorus Pro' :
+                             `PDP ${c.plateforme}${c.plateforme_nom ? ' - ' + escHtml(c.plateforme_nom) : ''}`;
+            pdpBadge = `<span class="result-badge badge-pdp">${pdpLabel}</span>`;
+        }
+
+        let etabHtml = '';
+        if (c.etablissements.length > 0) {
+            const rows = c.etablissements.map(e => `
+                <div class="etab-row">
+                    <div>
+                        <span class="etab-siret">${escHtml(e.siret)}</span>
+                        ${e.nom ? ' - ' + escHtml(e.nom) : ''}
+                    </div>
+                    <div style="color:#888;font-size:0.8rem;text-align:right">
+                        ${[e.adresse, e.cp, e.localite].filter(Boolean).join(', ')}
+                    </div>
+                </div>
+            `).join('');
+            etabHtml = `
+                <div class="etab-list">
+                    <h4>Etablissements (${c.etablissements.length})</h4>
+                    ${rows}
+                </div>
+            `;
+        }
+
+        return `
+        <div class="result-card" onclick="this.classList.toggle('expanded')">
+            <div class="result-header">
+                <div>
+                    <div class="result-name">${escHtml(c.nom)}</div>
+                    <div class="result-meta">
+                        <span class="result-badge badge-type">${typeLabel}</span>
+                        <span class="result-badge badge-status${statusClass}">${statusLabel}</span>
+                        ${pdpBadge}
+                    </div>
+                </div>
+                <span class="result-siren">${escHtml(c.siren)}</span>
+            </div>
+            <div class="detail-section">
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">SIREN</div>
+                        <div class="detail-value">${escHtml(c.siren)}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Plateforme</div>
+                        <div class="detail-value">${c.plateforme ? escHtml(c.plateforme) + (c.plateforme_nom ? ' - ' + escHtml(c.plateforme_nom) : '') : 'Non renseigne'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Type</div>
+                        <div class="detail-value">${typeLabel}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Statut</div>
+                        <div class="detail-value">${statusLabel}</div>
+                    </div>
+                </div>
+                ${etabHtml}
+            </div>
+        </div>
+        `;
+    }
+
+    function escHtml(s) {
+        if (!s) return '';
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    </script>
+</body>
+</html>

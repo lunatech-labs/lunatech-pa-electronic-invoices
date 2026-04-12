@@ -160,10 +160,12 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         ))
         .with_state(state.clone());
 
-    // Endpoints publics (healthcheck, métriques Prometheus)
+    // Endpoints publics (healthcheck, métriques Prometheus, interface annuaire)
     let public_routes = Router::new()
         .route("/v1/healthcheck", get(handle_healthcheck))
         .route("/metrics", get(handle_metrics))
+        .route("/annuaire", get(handle_annuaire_page))
+        .route("/v1/annuaire/search", get(handle_annuaire_search))
         .with_state(state);
 
     Router::new()
@@ -1061,6 +1063,51 @@ async fn handle_annuaire_plateformes(
     match store.list_plateformes().await {
         Ok(pfs) => (StatusCode::OK, Json(serde_json::json!({"plateformes": pfs, "total": pfs.len()}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+// ============================================================
+// Interface web annuaire
+// ============================================================
+
+/// GET /annuaire — page HTML de recherche
+async fn handle_annuaire_page() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        include_str!("../static/annuaire.html"),
+    )
+}
+
+#[derive(Deserialize)]
+struct SearchQueryParams {
+    q: String,
+}
+
+/// GET /v1/annuaire/search?q=... — recherche unifiée
+async fn handle_annuaire_search(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<SearchQueryParams>,
+) -> impl IntoResponse {
+    let store = match &state.annuaire_store {
+        Some(s) => s,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+            "error": "Annuaire non configuré"
+        }))).into_response(),
+    };
+
+    match store.search(&params.q, 50).await {
+        Ok(results) => {
+            let total = results.len();
+            (StatusCode::OK, Json(serde_json::json!({
+                "results": results,
+                "total": total,
+                "query": params.q,
+            }))).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "error": e.to_string()
+        }))).into_response(),
     }
 }
 

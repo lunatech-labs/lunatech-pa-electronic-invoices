@@ -31,6 +31,22 @@ pub struct PlateformeRow {
     pub date_debut_immat: String,
 }
 
+/// Résultat de recherche unifiée
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct SearchResult {
+    pub siren: String,
+    pub nom: String,
+    pub type_entite: String,
+    pub statut: String,
+    pub siret: Option<String>,
+    pub etab_nom: Option<String>,
+    pub adresse_1: Option<String>,
+    pub localite: Option<String>,
+    pub code_postal: Option<String>,
+    pub plateforme: Option<String>,
+    pub plateforme_nom: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error("Erreur SQL : {0}")]
@@ -442,6 +458,118 @@ impl AnnuaireStore {
         let rows = sqlx::query_as::<_, PlateformeRow>(
             "SELECT matricule, nom, nom_commercial, type_plateforme, date_debut_immat FROM plateformes ORDER BY matricule",
         )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    // --- Recherche full-text ---
+
+    /// Recherche unifiée : nom, SIREN, SIRET ou adresse.
+    /// Détecte automatiquement le type de recherche selon l'entrée.
+    pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<SearchResult>, DbError> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Si c'est un SIREN (9 chiffres) → recherche exacte
+        if q.len() == 9 && q.chars().all(|c| c.is_ascii_digit()) {
+            return self.search_by_siren(q).await;
+        }
+
+        // Si c'est un SIRET (14 chiffres) → recherche exacte
+        if q.len() == 14 && q.chars().all(|c| c.is_ascii_digit()) {
+            return self.search_by_siret(q).await;
+        }
+
+        // Si c'est un début de SIREN/SIRET (chiffres, < 14) → recherche par préfixe
+        if q.len() < 14 && q.chars().all(|c| c.is_ascii_digit()) {
+            return self.search_by_number_prefix(q, limit).await;
+        }
+
+        // Sinon → recherche par nom ou adresse (ILIKE)
+        self.search_by_text(q, limit).await
+    }
+
+    async fn search_by_siren(&self, siren: &str) -> Result<Vec<SearchResult>, DbError> {
+        let rows = sqlx::query_as::<_, SearchResult>(
+            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
+                    e.siret, e.nom AS etab_nom, e.adresse_1, e.localite, e.code_postal,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom
+             FROM unites_legales ul
+             LEFT JOIN etablissements e ON e.siren = ul.siren
+             LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
+             LEFT JOIN plateformes p ON p.matricule = la.matricule
+             WHERE ul.siren = $1
+             ORDER BY e.siret
+             LIMIT 50",
+        )
+        .bind(siren)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn search_by_siret(&self, siret: &str) -> Result<Vec<SearchResult>, DbError> {
+        let siren = &siret[..9];
+        let rows = sqlx::query_as::<_, SearchResult>(
+            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
+                    e.siret, e.nom AS etab_nom, e.adresse_1, e.localite, e.code_postal,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom
+             FROM etablissements e
+             JOIN unites_legales ul ON ul.siren = $2
+             LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
+             LEFT JOIN plateformes p ON p.matricule = la.matricule
+             WHERE e.siret = $1
+             LIMIT 10",
+        )
+        .bind(siret)
+        .bind(siren)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn search_by_number_prefix(&self, prefix: &str, limit: i64) -> Result<Vec<SearchResult>, DbError> {
+        let pattern = format!("{}%", prefix);
+        let rows = sqlx::query_as::<_, SearchResult>(
+            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
+                    NULL AS siret, NULL AS etab_nom, NULL AS adresse_1, NULL AS localite, NULL AS code_postal,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom
+             FROM unites_legales ul
+             LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
+             LEFT JOIN plateformes p ON p.matricule = la.matricule
+             WHERE ul.siren LIKE $1
+             ORDER BY ul.siren
+             LIMIT $2",
+        )
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn search_by_text(&self, query: &str, limit: i64) -> Result<Vec<SearchResult>, DbError> {
+        let pattern = format!("%{}%", query.to_uppercase());
+        let rows = sqlx::query_as::<_, SearchResult>(
+            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
+                    e.siret, e.nom AS etab_nom, e.adresse_1, e.localite, e.code_postal,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom
+             FROM unites_legales ul
+             LEFT JOIN etablissements e ON e.siren = ul.siren AND (e.type_etablissement = 'S' OR e.type_etablissement = 'P')
+             LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
+             LEFT JOIN plateformes p ON p.matricule = la.matricule
+             WHERE UPPER(ul.nom) LIKE $1
+                OR UPPER(e.adresse_1) LIKE $1
+                OR UPPER(e.localite) LIKE $1
+                OR e.code_postal LIKE $1
+             ORDER BY ul.nom
+             LIMIT $2",
+        )
+        .bind(&pattern)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
