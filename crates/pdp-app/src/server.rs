@@ -1723,4 +1723,261 @@ mod tests {
         assert_eq!(state_ref.metrics.flows_rejected.load(Ordering::Relaxed), 0);
     }
 
+    // ---------------------------------------------------------------
+    // Tests end-to-end : flux complet avec vraies factures
+    // ---------------------------------------------------------------
+
+    fn load_fixture(name: &str) -> Vec<u8> {
+        let path = format!(
+            "{}/../../tests/fixtures/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            name
+        );
+        std::fs::read(&path).unwrap_or_else(|_| panic!("Fixture {} introuvable", path))
+    }
+
+    #[tokio::test]
+    async fn test_e2e_submit_real_cii_invoice() {
+        let (state, mut rx) = test_app_state_with_rx();
+        let app = build_api_router(state);
+
+        let cii_xml = load_fixture("cii/facture_cii_001.xml");
+        let flow_info = serde_json::json!({
+            "trackingId": "E2E-CII-001",
+            "name": "facture_cii_001.xml"
+        }).to_string();
+        let (content_type, body) = build_multipart_body(&flow_info, &cii_xml, "facture_cii_001.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        let resp_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&resp_bytes).unwrap();
+        assert_eq!(json["status"], "RECEIVED");
+
+        // Vérifier le flux reçu via le channel
+        let inbound = rx.try_recv().unwrap();
+        assert_eq!(inbound.flow_info.tracking_id, "E2E-CII-001");
+        assert_eq!(inbound.filename, "facture_cii_001.xml");
+        assert_eq!(inbound.content.len(), cii_xml.len());
+        // Vérifier que c'est du XML CII valide
+        assert!(String::from_utf8_lossy(&inbound.content).contains("CrossIndustryInvoice"));
+    }
+
+    #[tokio::test]
+    async fn test_e2e_submit_real_ubl_invoice() {
+        let (state, mut rx) = test_app_state_with_rx();
+        let app = build_api_router(state);
+
+        let ubl_xml = load_fixture("ubl/facture_ubl_001.xml");
+        let flow_info = serde_json::json!({
+            "trackingId": "E2E-UBL-001",
+            "name": "facture_ubl_001.xml"
+        }).to_string();
+        let (content_type, body) = build_multipart_body(&flow_info, &ubl_xml, "facture_ubl_001.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        let inbound = rx.try_recv().unwrap();
+        assert_eq!(inbound.flow_info.tracking_id, "E2E-UBL-001");
+        assert!(String::from_utf8_lossy(&inbound.content).contains("Invoice"));
+    }
+
+    #[tokio::test]
+    async fn test_e2e_submit_real_cii_with_sha256() {
+        use sha2::{Digest, Sha256};
+
+        let (state, mut rx) = test_app_state_with_rx();
+        let app = build_api_router(state);
+
+        let cii_xml = load_fixture("cii/facture_cii_001.xml");
+        let sha = format!("{:x}", Sha256::digest(&cii_xml));
+        let flow_info = serde_json::json!({
+            "trackingId": "E2E-SHA-001",
+            "name": "facture_cii_001.xml",
+            "sha256": sha
+        }).to_string();
+        let (content_type, body) = build_multipart_body(&flow_info, &cii_xml, "facture_cii_001.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        let inbound = rx.try_recv().unwrap();
+        assert_eq!(inbound.flow_info.tracking_id, "E2E-SHA-001");
+    }
+
+    #[tokio::test]
+    async fn test_e2e_submit_with_auth_flow() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let state = Arc::new(AppState {
+            pdp_name: "PDP E2E".to_string(),
+            pdp_matricule: "0042".to_string(),
+            flow_sender: tx,
+            webhook_secret: Some("e2e-secret".to_string()),
+            trace_store: None,
+            bearer_tokens: Some(vec!["e2e-token-valid".to_string()]),
+            metrics: Metrics::default(),
+        });
+        let app = build_api_router(state);
+
+        let cii_xml = load_fixture("cii/facture_cii_001.xml");
+        let flow_info = serde_json::json!({
+            "trackingId": "E2E-AUTH-001",
+            "name": "facture_auth.xml"
+        }).to_string();
+        let (content_type, body) = build_multipart_body(&flow_info, &cii_xml, "facture_auth.xml");
+
+        // Sans token → 401
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body.clone()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Mauvais token → 401
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .header("Authorization", "Bearer wrong-token")
+            .body(Body::from(body.clone()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Bon token → 202
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .header("Authorization", "Bearer e2e-token-valid")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        let inbound = rx.try_recv().unwrap();
+        assert_eq!(inbound.flow_info.tracking_id, "E2E-AUTH-001");
+
+        // Healthcheck toujours accessible sans token
+        let req = Request::builder()
+            .uri("/v1/healthcheck")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Métriques toujours accessibles sans token
+        let req = Request::builder()
+            .uri("/metrics")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_e2e_batch_submit_multiple_invoices() {
+        let (state, mut rx) = test_app_state_with_rx();
+
+        let fixtures = vec![
+            ("cii/facture_cii_001.xml", "BATCH-CII-001"),
+            ("ubl/facture_ubl_001.xml", "BATCH-UBL-001"),
+        ];
+
+        for (fixture, tracking_id) in &fixtures {
+            let app = build_api_router(state.clone());
+            let content = load_fixture(fixture);
+            let filename = fixture.rsplit('/').next().unwrap();
+            let flow_info = serde_json::json!({
+                "trackingId": tracking_id,
+                "name": filename
+            }).to_string();
+            let (content_type, body) = build_multipart_body(&flow_info, &content, filename);
+
+            let req = Request::builder()
+                .uri("/v1/flows")
+                .method("POST")
+                .header("Content-Type", &content_type)
+                .body(Body::from(body))
+                .unwrap();
+
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::ACCEPTED,
+                "Flux {} rejeté", fixture);
+        }
+
+        // Vérifier que tous les flux sont passés par le channel
+        for (_, tracking_id) in &fixtures {
+            let inbound = rx.try_recv()
+                .unwrap_or_else(|_| panic!("Flux {} non reçu dans le channel", tracking_id));
+            assert_eq!(inbound.flow_info.tracking_id, *tracking_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_e2e_metrics_after_batch() {
+        let (state, _rx) = test_app_state_with_rx();
+        let state_ref = state.clone();
+
+        // Soumettre 3 flux
+        for i in 0..3 {
+            let app = build_api_router(state.clone());
+            let flow_info = serde_json::json!({
+                "trackingId": format!("METRIC-{}", i),
+                "name": format!("facture_{}.xml", i)
+            }).to_string();
+            let (ct, body) = build_multipart_body(&flow_info, b"<Invoice/>", &format!("f{}.xml", i));
+
+            let req = Request::builder()
+                .uri("/v1/flows").method("POST")
+                .header("Content-Type", &ct)
+                .body(Body::from(body)).unwrap();
+
+            let _ = app.oneshot(req).await.unwrap();
+        }
+
+        // Vérifier les métriques
+        assert_eq!(state_ref.metrics.flows_received.load(Ordering::Relaxed), 3);
+        assert_eq!(state_ref.metrics.flows_accepted.load(Ordering::Relaxed), 3);
+
+        // Endpoint /metrics reflète les compteurs
+        let app = build_api_router(state);
+        let req = Request::builder()
+            .uri("/metrics").method("GET")
+            .body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("pdp_flows_received_total 3"));
+        assert!(text.contains("pdp_flows_accepted_total 3"));
+    }
+
 }
