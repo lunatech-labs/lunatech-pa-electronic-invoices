@@ -11,6 +11,7 @@ members = [
     "crates/pdp-ereporting",
     "crates/pdp-client",
     "crates/pdp-peppol",
+    "crates/pdp-annuaire",
     "crates/pdp-app",
 ]
 resolver = "2"

@@ -6,3 +6,5 @@
 *.pem
 *.key
 .claude/worktrees/
+# Annuaire PPF complet (10+ Go)
+*.ppf-annuaire-*
