@@ -54,6 +54,7 @@ where
     let mut element_depth = 0u32;
     let mut header = HeaderBuilder::default();
     let mut header_field: Option<String> = None;
+    let mut header_emitted = false;
 
     loop {
         match xml_reader.read_event_into(&mut buf) {
@@ -65,11 +66,24 @@ where
                 let name = std::str::from_utf8(name_bytes).unwrap_or("");
 
                 match name {
-                    "BlocUnitesLegales" => current_bloc = BlocState::UnitesLegales,
-                    "BlocEtablissements" => current_bloc = BlocState::Etablissements,
-                    "BlocCodesRoutage" => current_bloc = BlocState::CodesRoutage,
-                    "BlocIdPlateformesReception" => current_bloc = BlocState::Plateformes,
-                    "BlocLignesAnnuaire" => current_bloc = BlocState::LignesAnnuaire,
+                    "BlocUnitesLegales" | "BlocEtablissements" | "BlocCodesRoutage"
+                    | "BlocIdPlateformesReception" | "BlocLignesAnnuaire" => {
+                        // Émettre le Header avant le premier bloc de données
+                        if !header_emitted {
+                            if let Some(h) = header.build() {
+                                callback(F14Event::Header(h))?;
+                            }
+                            header_emitted = true;
+                        }
+                        current_bloc = match name {
+                            "BlocUnitesLegales" => BlocState::UnitesLegales,
+                            "BlocEtablissements" => BlocState::Etablissements,
+                            "BlocCodesRoutage" => BlocState::CodesRoutage,
+                            "BlocIdPlateformesReception" => BlocState::Plateformes,
+                            "BlocLignesAnnuaire" => BlocState::LignesAnnuaire,
+                            _ => unreachable!(),
+                        };
+                    }
 
                     "HorodateProduction" | "DernierHorodateProduction" | "TypeFlux"
                         if current_bloc == BlocState::None =>
@@ -133,9 +147,7 @@ where
                             header_field = None;
                         }
                         "AnnuaireConsultationF14" => {
-                            if let Some(h) = header.build() {
-                                callback(F14Event::Header(h))?;
-                            }
+                            // Header déjà émis à l'ouverture du premier bloc
                         }
                         _ => {}
                     }

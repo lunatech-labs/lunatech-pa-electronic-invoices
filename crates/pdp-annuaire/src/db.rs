@@ -34,17 +34,37 @@ pub struct PlateformeRow {
 /// Résultat de recherche unifiée
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct SearchResult {
+    // Unité légale
     pub siren: String,
     pub nom: String,
     pub type_entite: String,
     pub statut: String,
+    pub diffusible: Option<bool>,
+    // Établissement
     pub siret: Option<String>,
     pub etab_nom: Option<String>,
+    pub type_etablissement: Option<String>,
     pub adresse_1: Option<String>,
+    pub adresse_2: Option<String>,
+    pub adresse_3: Option<String>,
     pub localite: Option<String>,
     pub code_postal: Option<String>,
+    pub code_pays: Option<String>,
+    pub etab_statut: Option<String>,
+    // B2G
+    pub engagement_juridique: Option<bool>,
+    pub service: Option<bool>,
+    pub moa: Option<bool>,
+    // Plateforme
     pub plateforme: Option<String>,
     pub plateforme_nom: Option<String>,
+    pub plateforme_type: Option<String>,
+    pub plateforme_nom_commercial: Option<String>,
+    // Ligne annuaire
+    pub la_date_debut: Option<String>,
+    pub la_date_fin: Option<String>,
+    // Code routage
+    pub id_routage: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -499,13 +519,20 @@ impl AnnuaireStore {
 
     async fn search_by_siren(&self, siren: &str) -> Result<Vec<SearchResult>, DbError> {
         let rows = sqlx::query_as::<_, SearchResult>(
-            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
-                    e.siret, e.nom AS etab_nom, e.adresse_1, e.localite, e.code_postal,
-                    la.matricule AS plateforme, p.nom AS plateforme_nom
+            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut, ul.diffusible,
+                    e.siret, e.nom AS etab_nom, e.type_etablissement,
+                    e.adresse_1, e.adresse_2, e.adresse_3, e.localite, e.code_postal, e.code_pays,
+                    e.statut AS etab_statut,
+                    e.engagement_juridique, e.service, e.moa,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom,
+                    p.type_plateforme AS plateforme_type, p.nom_commercial AS plateforme_nom_commercial,
+                    la.date_debut AS la_date_debut, la.date_fin AS la_date_fin,
+                    cr.id_routage
              FROM unites_legales ul
              LEFT JOIN etablissements e ON e.siren = ul.siren
              LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
              LEFT JOIN plateformes p ON p.matricule = la.matricule
+             LEFT JOIN codes_routage cr ON cr.siret = e.siret
              WHERE ul.siren = $1
              ORDER BY e.siret
              LIMIT 50",
@@ -519,13 +546,20 @@ impl AnnuaireStore {
     async fn search_by_siret(&self, siret: &str) -> Result<Vec<SearchResult>, DbError> {
         let siren = &siret[..9];
         let rows = sqlx::query_as::<_, SearchResult>(
-            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
-                    e.siret, e.nom AS etab_nom, e.adresse_1, e.localite, e.code_postal,
-                    la.matricule AS plateforme, p.nom AS plateforme_nom
+            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut, ul.diffusible,
+                    e.siret, e.nom AS etab_nom, e.type_etablissement,
+                    e.adresse_1, e.adresse_2, e.adresse_3, e.localite, e.code_postal, e.code_pays,
+                    e.statut AS etab_statut,
+                    e.engagement_juridique, e.service, e.moa,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom,
+                    p.type_plateforme AS plateforme_type, p.nom_commercial AS plateforme_nom_commercial,
+                    la.date_debut AS la_date_debut, la.date_fin AS la_date_fin,
+                    cr.id_routage
              FROM etablissements e
              JOIN unites_legales ul ON ul.siren = $2
              LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
              LEFT JOIN plateformes p ON p.matricule = la.matricule
+             LEFT JOIN codes_routage cr ON cr.siret = e.siret
              WHERE e.siret = $1
              LIMIT 10",
         )
@@ -539,9 +573,16 @@ impl AnnuaireStore {
     async fn search_by_number_prefix(&self, prefix: &str, limit: i64) -> Result<Vec<SearchResult>, DbError> {
         let pattern = format!("{}%", prefix);
         let rows = sqlx::query_as::<_, SearchResult>(
-            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
-                    NULL AS siret, NULL AS etab_nom, NULL AS adresse_1, NULL AS localite, NULL AS code_postal,
-                    la.matricule AS plateforme, p.nom AS plateforme_nom
+            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut, ul.diffusible,
+                    NULL::text AS siret, NULL::text AS etab_nom, NULL::text AS type_etablissement,
+                    NULL::text AS adresse_1, NULL::text AS adresse_2, NULL::text AS adresse_3,
+                    NULL::text AS localite, NULL::text AS code_postal, NULL::text AS code_pays,
+                    NULL::text AS etab_statut,
+                    NULL::bool AS engagement_juridique, NULL::bool AS service, NULL::bool AS moa,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom,
+                    p.type_plateforme AS plateforme_type, p.nom_commercial AS plateforme_nom_commercial,
+                    la.date_debut AS la_date_debut, la.date_fin AS la_date_fin,
+                    NULL::text AS id_routage
              FROM unites_legales ul
              LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
              LEFT JOIN plateformes p ON p.matricule = la.matricule
@@ -558,18 +599,34 @@ impl AnnuaireStore {
 
     async fn search_by_text(&self, query: &str, limit: i64) -> Result<Vec<SearchResult>, DbError> {
         let pattern = format!("%{}%", query.to_uppercase());
+        // Utilise UNION pour que chaque branche puisse utiliser son index trigram.
+        // Un OR dans le WHERE empêche PostgreSQL d'exploiter les index GIN.
         let rows = sqlx::query_as::<_, SearchResult>(
-            "SELECT ul.siren, ul.nom, ul.type_entite, ul.statut,
-                    e.siret, e.nom AS etab_nom, e.adresse_1, e.localite, e.code_postal,
-                    la.matricule AS plateforme, p.nom AS plateforme_nom
-             FROM unites_legales ul
+            "WITH matched_sirens AS (
+                SELECT siren FROM unites_legales WHERE UPPER(nom) LIKE $1
+                UNION
+                SELECT siren FROM etablissements WHERE UPPER(adresse_1) LIKE $1
+                UNION
+                SELECT siren FROM etablissements WHERE UPPER(localite) LIKE $1
+                UNION
+                SELECT siren FROM etablissements WHERE UPPER(nom) LIKE $1
+                LIMIT $2
+             )
+             SELECT ul.siren, ul.nom, ul.type_entite, ul.statut, ul.diffusible,
+                    e.siret, e.nom AS etab_nom, e.type_etablissement,
+                    e.adresse_1, e.adresse_2, e.adresse_3, e.localite, e.code_postal, e.code_pays,
+                    e.statut AS etab_statut,
+                    e.engagement_juridique, e.service, e.moa,
+                    la.matricule AS plateforme, p.nom AS plateforme_nom,
+                    p.type_plateforme AS plateforme_type, p.nom_commercial AS plateforme_nom_commercial,
+                    la.date_debut AS la_date_debut, la.date_fin AS la_date_fin,
+                    cr.id_routage
+             FROM matched_sirens ms
+             JOIN unites_legales ul ON ul.siren = ms.siren
              LEFT JOIN etablissements e ON e.siren = ul.siren AND (e.type_etablissement = 'S' OR e.type_etablissement = 'P')
              LEFT JOIN lignes_annuaire la ON la.siren = ul.siren AND la.siret IS NULL AND la.nature = 'D'
              LEFT JOIN plateformes p ON p.matricule = la.matricule
-             WHERE UPPER(ul.nom) LIKE $1
-                OR UPPER(e.adresse_1) LIKE $1
-                OR UPPER(e.localite) LIKE $1
-                OR e.code_postal LIKE $1
+             LEFT JOIN codes_routage cr ON cr.siret = e.siret
              ORDER BY ul.nom
              LIMIT $2",
         )
@@ -724,6 +781,7 @@ CREATE INDEX IF NOT EXISTS idx_lignes_siret ON lignes_annuaire(siret);
 CREATE INDEX IF NOT EXISTS idx_lignes_matricule ON lignes_annuaire(matricule);
 CREATE INDEX IF NOT EXISTS idx_lignes_nature_dates ON lignes_annuaire(nature, date_debut);
 CREATE INDEX IF NOT EXISTS idx_etab_siren ON etablissements(siren);
+CREATE INDEX IF NOT EXISTS idx_cr_siret ON codes_routage(siret);
 
 -- Index trigram pour la recherche textuelle (ILIKE)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

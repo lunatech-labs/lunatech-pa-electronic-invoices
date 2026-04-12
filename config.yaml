@@ -104,6 +104,14 @@ routes:
       pdp_id: PPF
       pdp_name: "Portail Public de Facturation"
 
+database:
+  url: "postgresql://pdp:pdp@localhost:5432/pdp"
+  max_connections: 10
+
+http_server:
+  host: "0.0.0.0"
+  port: 8080
+
 polling:
   interval_secs: 60
 

@@ -130,6 +130,15 @@
             background: #fee2e2;
             color: #991b1b;
         }
+        .badge-b2g {
+            background: #ede9fe;
+            color: #5b21b6;
+        }
+        .badge-routage {
+            background: #dbeafe;
+            color: #1e40af;
+            font-family: monospace;
+        }
 
         .detail-section {
             display: none;
@@ -252,10 +261,10 @@
     searchInput.addEventListener('input', () => {
         clearTimeout(debounceTimer);
         const q = searchInput.value.trim();
-        if (q.length < 2) {
+        if (q.length < 3) {
             resultsDiv.innerHTML = `<div class="empty-state">
                 <div class="icon">&#128218;</div>
-                <p>Saisissez au moins 2 caracteres</p>
+                <p>Saisissez au moins 3 caracteres</p>
             </div>`;
             resultCount.textContent = '';
             searchTime.textContent = '';
@@ -316,8 +325,13 @@
                     nom: r.nom.trim(),
                     type_entite: r.type_entite.trim(),
                     statut: r.statut.trim(),
+                    diffusible: r.diffusible,
                     plateforme: r.plateforme ? r.plateforme.trim() : null,
                     plateforme_nom: r.plateforme_nom ? r.plateforme_nom.trim() : null,
+                    plateforme_type: r.plateforme_type ? r.plateforme_type.trim() : null,
+                    plateforme_nom_commercial: r.plateforme_nom_commercial ? r.plateforme_nom_commercial.trim() : null,
+                    la_date_debut: r.la_date_debut || null,
+                    la_date_fin: r.la_date_fin || null,
                     etablissements: [],
                 };
             }
@@ -327,9 +341,18 @@
                     groups[siren].etablissements.push({
                         siret,
                         nom: r.etab_nom ? r.etab_nom.trim() : '',
-                        adresse: r.adresse_1 ? r.adresse_1.trim() : '',
+                        type_etablissement: r.type_etablissement ? r.type_etablissement.trim() : '',
+                        adresse_1: r.adresse_1 ? r.adresse_1.trim() : '',
+                        adresse_2: r.adresse_2 ? r.adresse_2.trim() : '',
+                        adresse_3: r.adresse_3 ? r.adresse_3.trim() : '',
                         localite: r.localite ? r.localite.trim() : '',
                         cp: r.code_postal ? r.code_postal.trim() : '',
+                        code_pays: r.code_pays ? r.code_pays.trim() : 'FR',
+                        statut: r.etab_statut ? r.etab_statut.trim() : '',
+                        engagement_juridique: r.engagement_juridique,
+                        service: r.service,
+                        moa: r.moa,
+                        id_routage: r.id_routage ? r.id_routage.trim() : null,
                     });
                 }
             }
@@ -341,6 +364,7 @@
         const typeLabel = c.type_entite === 'A' ? 'Assujetti' : 'Personne physique';
         const statusLabel = c.statut === 'A' ? 'Actif' : 'Inactif';
         const statusClass = c.statut === 'A' ? '' : ' inactif';
+        const diffLabel = c.diffusible === true ? 'Oui' : c.diffusible === false ? 'Non' : '—';
 
         let pdpBadge = '';
         if (c.plateforme) {
@@ -351,19 +375,44 @@
             pdpBadge = `<span class="result-badge badge-pdp">${pdpLabel}</span>`;
         }
 
+        const typeEtabLabel = (code) => {
+            if (code === 'S') return 'Siege';
+            if (code === 'P') return 'Principal';
+            if (code === 'E') return 'Secondaire';
+            return code || '—';
+        };
+
         let etabHtml = '';
         if (c.etablissements.length > 0) {
-            const rows = c.etablissements.map(e => `
-                <div class="etab-row">
-                    <div>
-                        <span class="etab-siret">${escHtml(e.siret)}</span>
-                        ${e.nom ? ' - ' + escHtml(e.nom) : ''}
+            const rows = c.etablissements.map(e => {
+                const adresseLines = [e.adresse_1, e.adresse_2, e.adresse_3].filter(Boolean);
+                const adresseStr = adresseLines.join(', ');
+                const lieuStr = [e.cp, e.localite].filter(Boolean).join(' ');
+                const paysStr = e.code_pays && e.code_pays !== 'FR' ? ` (${escHtml(e.code_pays)})` : '';
+                const etabStatus = e.statut === 'I' ? '<span class="result-badge badge-status inactif" style="margin-left:0.3rem">Inactif</span>' : '';
+                const b2gBadges = [
+                    e.engagement_juridique ? '<span class="result-badge badge-b2g">EJ</span>' : '',
+                    e.service ? '<span class="result-badge badge-b2g">Service</span>' : '',
+                    e.moa ? '<span class="result-badge badge-b2g">MOA</span>' : '',
+                ].filter(Boolean).join('');
+                const routageBadge = e.id_routage ? `<span class="result-badge badge-routage">${escHtml(e.id_routage)}</span>` : '';
+
+                return `
+                <div class="etab-row" style="flex-direction:column;gap:0.2rem">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div>
+                            <span class="etab-siret">${escHtml(e.siret)}</span>
+                            <span class="result-badge badge-type" style="margin-left:0.3rem">${typeEtabLabel(e.type_etablissement)}</span>
+                            ${etabStatus}
+                            ${e.nom ? ' — ' + escHtml(e.nom) : ''}
+                        </div>
+                        <div>${b2gBadges}${routageBadge}</div>
                     </div>
-                    <div style="color:#888;font-size:0.8rem;text-align:right">
-                        ${[e.adresse, e.cp, e.localite].filter(Boolean).join(', ')}
+                    <div style="color:#888;font-size:0.8rem">
+                        ${adresseStr ? escHtml(adresseStr) + '<br>' : ''}${escHtml(lieuStr)}${paysStr}
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
             etabHtml = `
                 <div class="etab-list">
                     <h4>Etablissements (${c.etablissements.length})</h4>
@@ -393,7 +442,7 @@
                     </div>
                     <div class="detail-item">
                         <div class="detail-label">Plateforme</div>
-                        <div class="detail-value">${c.plateforme ? escHtml(c.plateforme) + (c.plateforme_nom ? ' - ' + escHtml(c.plateforme_nom) : '') : 'Non renseigne'}</div>
+                        <div class="detail-value">${c.plateforme ? escHtml(c.plateforme) + (c.plateforme_nom_commercial || c.plateforme_nom ? ' — ' + escHtml(c.plateforme_nom_commercial || c.plateforme_nom) : '') + (c.plateforme_type ? ' (' + escHtml(c.plateforme_type) + ')' : '') : 'Non renseigne'}</div>
                     </div>
                     <div class="detail-item">
                         <div class="detail-label">Type</div>
@@ -402,6 +451,14 @@
                     <div class="detail-item">
                         <div class="detail-label">Statut</div>
                         <div class="detail-value">${statusLabel}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Diffusible</div>
+                        <div class="detail-value">${diffLabel}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Inscription annuaire</div>
+                        <div class="detail-value">${c.la_date_debut ? escHtml(c.la_date_debut) + (c.la_date_fin ? ' → ' + escHtml(c.la_date_fin) : ' → en cours') : '—'}</div>
                     </div>
                 </div>
                 ${etabHtml}
