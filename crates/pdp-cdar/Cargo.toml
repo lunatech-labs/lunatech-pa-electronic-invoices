@@ -19,6 +19,8 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+async-trait = { workspace = true }
 
 [[bench]]
 name = "cdar_bench"

@@ -46,6 +46,7 @@
 //!     .unwrap();
 //! ```
 
+pub mod alert;
 pub mod archive;
 pub mod channel;
 pub mod exchange;
@@ -59,10 +60,11 @@ pub mod error;
 pub mod model;
 
 pub use exchange::Exchange;
-pub use processor::Processor;
+pub use processor::{Processor, TenantTagProcessor};
 pub use endpoint::{Endpoint, EndpointType};
 pub use channel::ChannelConsumer;
 pub use route::{Route, RouteBuilder};
 pub use router::Router;
 pub use error::PdpError;
 pub use retry::{RetryProducer, DeadLetterProducer};
+pub use alert::{AlertErrorHandler, AlertLevel, AlertClassifier, Alert};

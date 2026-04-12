@@ -86,16 +86,16 @@ impl XsdValidator {
     fn xsd_path(&self, doc_type: &XsdDocumentType) -> PathBuf {
         match doc_type {
             XsdDocumentType::UblInvoice => {
-                self.specs_dir.join("xsd/ubl/base/F1BASE_UBL-invoice-2.1.xsd")
+                self.specs_dir.join("xsd/ppf-flux1-ubl-2.1/base/F1BASE_UBL-invoice-2.1.xsd")
             }
             XsdDocumentType::UblCreditNote => {
-                self.specs_dir.join("xsd/ubl/base/F1BASE_UBL-CreditNote-2.1.xsd")
+                self.specs_dir.join("xsd/ppf-flux1-ubl-2.1/base/F1BASE_UBL-CreditNote-2.1.xsd")
             }
             XsdDocumentType::CiiInvoice => {
-                self.specs_dir.join("xsd/cii/base/uncefact/data/standard/F1BASE_CrossIndustryInvoice_100pD22B.xsd")
+                self.specs_dir.join("xsd/ppf-flux1-cii-d22b/base/uncefact/data/standard/F1BASE_CrossIndustryInvoice_100pD22B.xsd")
             }
             XsdDocumentType::CiiD22B => {
-                self.specs_dir.join("xsd/cii-d22b/CrossIndustryInvoice_100pD22B.xsd")
+                self.specs_dir.join("xsd/uncefact-cii-d22b/CrossIndustryInvoice_100pD22B.xsd")
             }
             XsdDocumentType::FacturXEN16931 => {
                 self.specs_dir.join("xsd/facturx-1.08/EN16931/Factur-X_1.08_EN16931.xsd")
@@ -104,16 +104,16 @@ impl XsdValidator {
                 self.specs_dir.join("xsd/facturx-1.08/EXTENDED/Factur-X_1.08_EXTENDED.xsd")
             }
             XsdDocumentType::Cdar => {
-                self.specs_dir.join("xsd/cdar/CrossDomainAcknowledgementAndResponse_100pD22B.xsd")
+                self.specs_dir.join("xsd/uncefact-cdar-d22b/CrossDomainAcknowledgementAndResponse_100pD22B.xsd")
             }
             XsdDocumentType::F1FullCii => {
-                self.specs_dir.join("xsd/cii/full/uncefact/data/standard/F1FULL_CrossIndustryInvoice_100pD22B.xsd")
+                self.specs_dir.join("xsd/ppf-flux1-cii-d22b/full/uncefact/data/standard/F1FULL_CrossIndustryInvoice_100pD22B.xsd")
             }
             XsdDocumentType::F1FullUblInvoice => {
-                self.specs_dir.join("xsd/ubl/full/F1FULL_UBL_invoice-2.1.xsd")
+                self.specs_dir.join("xsd/ppf-flux1-ubl-2.1/full/F1FULL_UBL_invoice-2.1.xsd")
             }
             XsdDocumentType::F1FullUblCreditNote => {
-                self.specs_dir.join("xsd/ubl/full/F1FULL_UBL_CreditNote-2.1.xsd")
+                self.specs_dir.join("xsd/ppf-flux1-ubl-2.1/full/F1FULL_UBL_CreditNote-2.1.xsd")
             }
         }
     }
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn test_validate_ubl_fixture() {
         let specs = specs_dir();
-        if !specs.join("xsd/ubl/base/F1BASE_UBL-invoice-2.1.xsd").exists() {
+        if !specs.join("xsd/ppf-flux1-ubl-2.1/base/F1BASE_UBL-invoice-2.1.xsd").exists() {
             eprintln!("XSD UBL non disponible, test ignoré");
             return;
         }
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn test_validate_cii_fixture() {
         let specs = specs_dir();
-        if !specs.join("xsd/cii/base/uncefact/data/standard/F1BASE_CrossIndustryInvoice_100pD22B.xsd").exists() {
+        if !specs.join("xsd/ppf-flux1-cii-d22b/base/uncefact/data/standard/F1BASE_CrossIndustryInvoice_100pD22B.xsd").exists() {
             eprintln!("XSD CII non disponible, test ignoré");
             return;
         }
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn test_validate_cdar_fixture() {
         let specs = specs_dir();
-        if !specs.join("xsd/cdar/CrossDomainAcknowledgementAndResponse_100pD22B.xsd").exists() {
+        if !specs.join("xsd/uncefact-cdar-d22b/CrossDomainAcknowledgementAndResponse_100pD22B.xsd").exists() {
             eprintln!("XSD CDAR non disponible, test ignoré");
             return;
         }

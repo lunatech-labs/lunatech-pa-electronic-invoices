@@ -123,4 +123,40 @@ impl Exchange {
         self.body = body;
         self.updated_at = Utc::now();
     }
+
+    /// Retourne le SIREN du tenant associe a cet exchange
+    pub fn tenant_siren(&self) -> Option<&str> {
+        self.get_property("tenant.siren").map(|s| s.as_str())
+    }
+
+    /// Definit le SIREN du tenant pour cet exchange
+    pub fn set_tenant_siren(&mut self, siren: &str) {
+        self.set_property("tenant.siren", siren);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tenant_siren_none_by_default() {
+        let exchange = Exchange::new(b"test".to_vec());
+        assert!(exchange.tenant_siren().is_none());
+    }
+
+    #[test]
+    fn test_set_and_get_tenant_siren() {
+        let mut exchange = Exchange::new(b"test".to_vec());
+        exchange.set_tenant_siren("123456789");
+        assert_eq!(exchange.tenant_siren(), Some("123456789"));
+    }
+
+    #[test]
+    fn test_tenant_siren_overwrites() {
+        let mut exchange = Exchange::new(b"test".to_vec());
+        exchange.set_tenant_siren("111111111");
+        exchange.set_tenant_siren("222222222");
+        assert_eq!(exchange.tenant_siren(), Some("222222222"));
+    }
 }

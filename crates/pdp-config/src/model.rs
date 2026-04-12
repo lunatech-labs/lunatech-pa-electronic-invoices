@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// Configuration globale de la PDP
@@ -21,6 +22,15 @@ pub struct PdpConfig {
     /// Configuration du serveur HTTP API (optionnelle — si absent, pas de serveur HTTP)
     #[serde(default)]
     pub http_server: Option<HttpServerConfig>,
+    /// Répertoire contenant les tenants (ex: "tenants")
+    #[serde(default)]
+    pub tenants_dir: Option<String>,
+    /// Mapping token Bearer → SIREN du tenant
+    #[serde(default)]
+    pub token_tenant_map: HashMap<String, String>,
+    /// Configuration des alertes (optionnelle)
+    #[serde(default)]
+    pub alerts: Option<AlertConfig>,
 }
 
 /// Configuration du serveur HTTP API AFNOR
@@ -36,13 +46,13 @@ pub struct HttpServerConfig {
     #[serde(default)]
     pub webhook_secret: Option<String>,
     /// Tokens Bearer autorisés pour l'authentification API
-    /// Si absent ou vide, l'authentification est désactivée (mode développement)
+    /// Si absent ou vide, l'authentification est désactivée (mode dev)
     #[serde(default)]
     pub bearer_tokens: Option<Vec<String>>,
-    /// Chemin vers le certificat TLS (PEM) — optionnel, active HTTPS si présent
+    /// Chemin vers le certificat TLS (optionnel)
     #[serde(default)]
     pub tls_cert_path: Option<String>,
-    /// Chemin vers la clé privée TLS (PEM) — optionnel, requis si tls_cert_path est présent
+    /// Chemin vers la clé privée TLS (optionnel)
     #[serde(default)]
     pub tls_key_path: Option<String>,
 }
@@ -272,8 +282,7 @@ pub struct PpfSftpConfigYaml {
     /// Chemin vers le fichier known_hosts (optionnel)
     #[serde(default)]
     pub known_hosts_path: Option<String>,
-    /// Chemin vers le fichier de persistance du numéro de séquence (optionnel)
-    /// Si absent, le compteur repart de initial_sequence à chaque redémarrage
+    /// Fichier de persistance du numéro de séquence PPF (optionnel)
     #[serde(default)]
     pub sequence_file: Option<String>,
 }
@@ -341,4 +350,42 @@ pub struct PdpPartnerConfig {
     pub name: String,
     /// URL du Flow Service de la PDP partenaire
     pub flow_service_url: String,
+}
+
+/// Configuration des alertes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertConfig {
+    /// Répertoire pour les fichiers en erreur avec rapports d'alerte
+    /// Défaut: "errors"
+    #[serde(default = "default_alert_error_dir")]
+    pub error_dir: String,
+    /// URL de webhook pour les alertes critiques (optionnel)
+    /// Reçoit un POST JSON avec les détails de l'alerte
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+    /// Niveau minimum pour déclencher le webhook : "critical" (défaut), "warning", "info"
+    #[serde(default = "default_webhook_level")]
+    pub min_webhook_level: String,
+}
+
+fn default_alert_error_dir() -> String {
+    "errors".to_string()
+}
+
+fn default_webhook_level() -> String {
+    "critical".to_string()
+}
+
+/// Configuration d'un tenant (une entreprise)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TenantConfig {
+    /// Identité PDP du tenant
+    pub pdp: PdpIdentity,
+    /// Routes spécifiques au tenant
+    #[serde(default)]
+    pub routes: Vec<RouteConfig>,
+    /// Configuration PPF spécifique
+    pub ppf: Option<PpfConfig>,
+    /// Configuration AFNOR spécifique
+    pub afnor: Option<AfnorConfig>,
 }

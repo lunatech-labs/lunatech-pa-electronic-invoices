@@ -19,6 +19,8 @@ use pdp_core::exchange::Exchange;
 use pdp_core::model::InvoiceFormat;
 use pdp_core::processor::Processor;
 
+use pdp_validate::xsd::{XsdDocumentType, XsdValidator};
+
 use crate::xslt_engine::{XsltEngine, XsltTransform};
 
 /// Profil Flux 1 PPF
@@ -131,6 +133,20 @@ impl PpfFlux1Processor {
         format!("{}_{}.xml", profile, invoice_number)
     }
 
+    /// Détermine le type XSD à utiliser pour valider le Flux 1 généré
+    fn flux1_xsd_doc_type(source_format: InvoiceFormat, profile: Flux1Profile) -> XsdDocumentType {
+        match (source_format, profile) {
+            // Base : XSD restreints (F1BASE)
+            (InvoiceFormat::CII, Flux1Profile::Base) => XsdDocumentType::CiiInvoice,
+            (InvoiceFormat::FacturX, Flux1Profile::Base) => XsdDocumentType::CiiInvoice,
+            (InvoiceFormat::UBL, Flux1Profile::Base) => XsdDocumentType::UblInvoice,
+            // Full : XSD complets (F1FULL)
+            (InvoiceFormat::CII, Flux1Profile::Full) => XsdDocumentType::F1FullCii,
+            (InvoiceFormat::FacturX, Flux1Profile::Full) => XsdDocumentType::F1FullCii,
+            (InvoiceFormat::UBL, Flux1Profile::Full) => XsdDocumentType::F1FullUblInvoice,
+        }
+    }
+
     /// Détermine la direction XSLT à utiliser selon le format source et le profil
     pub fn xslt_direction(format: InvoiceFormat, profile: Flux1Profile) -> PdpResult<XsltTransform> {
         match (format, profile) {
@@ -187,6 +203,49 @@ impl Processor for PpfFlux1Processor {
         );
 
         let f1_xml = engine.transform(raw_xml, direction)?;
+
+        // Validation XSD du Flux 1 généré avant envoi au PPF
+        let xsd_doc_type = Self::flux1_xsd_doc_type(invoice.source_format, profile);
+        let xsd_validator = XsdValidator::new(&self.specs_dir);
+        let xsd_report = xsd_validator.validate(&f1_xml, &xsd_doc_type);
+
+        if !xsd_report.is_valid() {
+            let error_count = xsd_report.error_count();
+            let errors_summary: Vec<String> = xsd_report.issues.iter()
+                .filter(|i| matches!(i.level, pdp_validate::error::ValidationLevel::Error | pdp_validate::error::ValidationLevel::Fatal))
+                .take(5)
+                .map(|i| format!("[{}] {}", i.rule_id, i.message))
+                .collect();
+
+            tracing::error!(
+                exchange_id = %exchange.id,
+                invoice = %invoice.invoice_number,
+                profile = %profile,
+                xsd_type = %xsd_doc_type,
+                error_count = error_count,
+                errors = ?errors_summary,
+                "Flux 1 PPF INVALIDE selon XSD — le fichier ne sera pas envoyé au PPF"
+            );
+
+            return Err(PdpError::TransformError {
+                source_format: invoice.source_format.to_string(),
+                target_format: format!("F1{}", profile),
+                message: format!(
+                    "Le Flux 1 PPF généré ({}) est invalide selon XSD {} ({} erreur(s)): {}",
+                    profile, xsd_doc_type, error_count,
+                    errors_summary.join("; ")
+                ),
+            });
+        }
+
+        tracing::debug!(
+            exchange_id = %exchange.id,
+            xsd_type = %xsd_doc_type,
+            "Flux 1 PPF validé XSD ✓"
+        );
+
+        exchange.set_property("ppf.flux1.xsd.valid", "true");
+        exchange.set_property("ppf.flux1.xsd.type", &xsd_doc_type.to_string());
 
         // Nommer le fichier selon la convention PPF
         let filename = Self::flux1_filename(&invoice.invoice_number, profile);

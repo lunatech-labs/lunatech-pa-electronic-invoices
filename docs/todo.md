@@ -2,76 +2,127 @@
 
 Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 
+**Dernière mise à jour** : 2026-04-11
+**Tests** : 875 passent, 0 échec
+
+---
+
+## Fait (cette session)
+
+- [x] Multi-tenancy par SIREN (`TenantRegistry`, `TenantEntry`, auto-config)
+- [x] Routes auto-générées par tenant (`{siren}/in → pipeline → {siren}/out`)
+- [x] Validation XSD du Flux 1 PPF avant envoi (bloque si invalide)
+- [x] Système d'alertes (`AlertErrorHandler`, classification Critical/Warning/Info)
+- [x] Rapports d'alerte JSON avec actions recommandées
+- [x] Webhook de notification pour alertes critiques
+- [x] Documentation Peppol étendue (protocole AS4, WS-Security, PKI, migration Oxalis)
+- [x] Documentation annuaire PPF (F14 complet/différentiel, F13 actualisation, copie locale)
+
 ## Haute priorité
 
-### 1. Génération Typst des factures PDF
+### 1. Réception inter-PDP
 
-Remplacer la génération PDF actuelle par [Typst](https://typst.app/), un système de composition moderne et rapide.
+La PDP peut recevoir des factures d'une autre PDP (pas seulement de clients directs). Adapter l'architecture pour gérer ce flux entrant PDP→PDP.
 
-- [ ] Créer un template Typst pour les factures (Invoice + CreditNote)
-- [ ] Intégrer la bibliothèque `typst` en Rust pour la génération PDF
-- [ ] Supporter les données multi-lignes, remises, TVA multiple
-- [ ] Générer le PDF/A-3 pour Factur-X avec Typst
-- [ ] Tests de rendu sur tous les cas d'usage (UC1-UC5)
+- [ ] Définir le flux de réception (AFNOR Flow Service entrant + SFTP entrant)
+- [ ] Consumer pour les factures reçues d'autres PDP
+- [ ] Routing vers le bon tenant (`{siren}/out/`)
+- [ ] CDV de réception (200 Déposée → 201 Recevable)
+- [ ] Détails à préciser avec Nicolas
 
-### 2. Adresses électroniques (BT-34 / BT-49) — schemeID
+### 2. Annuaire PPF — Copie locale (Flux 14/13)
 
-Les champs `seller_endpoint_scheme` (BT-34-1) et `buyer_endpoint_scheme` (BT-49-1) sont obligatoires pour l'e-invoicing (BR-FR-12/13, `schemeID="0225"`).
+Maintenir une copie locale de l'annuaire PPF pour le routage offline et performant (voir `docs/annuaire.md`).
 
-- [ ] Compléter les parsers CII/UBL pour extraire le `schemeID`
-- [ ] Mettre à jour les serializers CII/UBL pour écrire le `schemeID`
-- [ ] Ajouter `URIUniversalCommunication` / `EndpointID` dans toutes les fixtures de test
-- [ ] Ajouter une validation BR-FR-12/13 en erreur (pas seulement warning)
+- [ ] Consumer SFTP F14 (récupération tar.gz depuis le PPF)
+- [ ] Parser XML F14 (5 blocs : unités légales, établissements, codes routage, plateformes, lignes)
+- [ ] Stockage local (SQLite ou PostgreSQL)
+- [ ] Application du flux complet hebdomadaire (dimanche nuit)
+- [ ] Application du flux différentiel quotidien (24h)
+- [ ] Résolution de routage locale (remplacer les appels API PISTE temps réel)
+- [ ] Émetteur F13 (actualisation des lignes d'annuaire de nos clients)
+- [ ] Traitement CDV F6 annuaire (statuts 400 Acceptée / 401 Rejetée)
 
-### 3. Communication SFTP avec le PPF
+### 3. Nettoyage du répertoire specs/
 
-Implémenter le protocole SFTP pour l'échange de fichiers avec le PPF (pas d'API REST).
+Le répertoire `specs/` contient ~13 MB de duplication et des versions multiples inutilisées.
 
-- [ ] Client SFTP avec authentification par clé RSA
-- [ ] Nommage des enveloppes tar.gz selon la convention AIFE
-- [ ] Nommage des fichiers F1 (`Base_` / `Full_` prefix)
-- [ ] Gestion des SAS de dépôt et récupération
-- [ ] Traitement des CDV de flux (500 Recevable / 501 Irrecevable)
+- [x] Supprimer `specs/xsd/specs-externes-v3.1/` (doublon, -6.8 MB)
+- [x] Supprimer `specs/xsd/e-invoicing/` (doublon de cii+ubl, -6.7 MB)
+- [x] Supprimer les anciennes versions Schematron/XSLT EN16931 (1.3.14.2, 1.3.15)
+- [x] Supprimer les variantes CDAR inutilisées (d22b-uncoupled, d23b, d23b-uncoupled)
+- [x] Renommer tous les répertoires avec numéros de version
+- [x] Mettre à jour tous les chemins dans le code (xsd.rs, schematron.rs)
+- [ ] Vérifier que tous les tests passent après nettoyage
+
+### 4. Document d'architecture globale
+
+Créer un vrai document d'architecture système (pas juste la liste des crates).
+
+- [ ] Nicolas décrit sa vision de l'architecture cible
+- [ ] Composants et leur déploiement (mono-binaire vs micro-services)
+- [ ] Infrastructure (stockage, messaging, monitoring)
+- [ ] Diagrammes de flux de données
+- [ ] Séparation des responsabilités
 
 ## Moyenne priorité
 
-### 4. Validation BR-FR complète
+### 5. Autorisation et déclaration des tenants
 
-- [ ] BR-FR-01 à BR-FR-03 : format ID facture (≤35 chars, caractères autorisés, années 2000-2099)
-- [ ] BR-FR-05/06/07 : notes obligatoires (PMT, PMD, AAB) et codes sujets
-- [ ] BR-FR-08 : cadres de facturation autorisés
-- [ ] BR-FR-09 : cohérence SIRET/SIREN
-- [ ] BR-FR-10/11 : SIREN vendeur/acheteur obligatoire
-- [ ] BR-FR-20 : note BAR (B2B, B2BINT, B2C, OUTOFSCOPE, ARCHIVEONLY)
-- [ ] BR-FR-21/22 : adresse acheteur commence par SIREN + schemeID 0225
+Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffit). Il faudra vérifier qu'un tenant est autorisé à utiliser la PDP.
 
-### 5. E-reporting (Flux 10)
+- [ ] Accord formel de choix de plateforme (mandat signé)
+- [ ] Vérification de l'habilitation avant traitement
+- [ ] Enregistrement dans l'annuaire PPF (F13) lors de l'onboarding
+- [ ] Workflow de changement de PDP (clôture des lignes de l'ancienne PA)
+
+### 6. Rate limiting HTTP
+
+- [ ] Limiter le nombre de requêtes par tenant/token
+- [ ] Réponse 429 Too Many Requests avec Retry-After
+- [ ] Configuration par tenant ou globale
+
+### 7. E-reporting (Flux 10)
 
 - [ ] Modèle de données pour transactions et paiements
 - [ ] Sérialisation au format spécifique PPF
 - [ ] Règles BR-FR-MAP-23 (conversion dates UBL → CII)
 - [ ] Tests avec exemples officiels
 
-### 6. Annuaire PPF (Flux 13/14)
+### 8. Abstraction object store
 
-- [ ] Consultation de l'annuaire pour résolution des adresses électroniques
-- [ ] Actualisation de l'annuaire (Flux 13)
-- [ ] Export annuaire (Flux 14)
+SFTP comme couche mince vers un object store (S3/MinIO).
+
+- [ ] Interface `ObjectStore` (put, get, list, delete)
+- [ ] Implémentation filesystem (actuelle)
+- [ ] Implémentation S3/MinIO
+- [ ] Le protocole SFTP sauvegarde dans l'object store au lieu du filesystem
+- [ ] Les répertoires tenant `{siren}/in/` et `{siren}/out/` deviennent des préfixes S3
 
 ## Basse priorité
 
-### 7. Factur-X BASIC WL → structuré
+### 9. Réécriture Oxalis (Access Point Peppol en Rust)
+
+Remplacer le gateway Java Oxalis par une implémentation Rust intégrée (voir `docs/peppol.md`).
+
+- [ ] Implémentation AS4 (SOAP 1.2, ebMS 3.0, MIME multipart)
+- [ ] WS-Security (XML-DSIG RSA-SHA256, BinarySecurityToken)
+- [ ] PKI Peppol (validation chaîne de certificats, CRL)
+- [ ] Enregistrement SMP (publication des capacités de réception)
+- [ ] Receipts et signaux d'erreur AS4
+- [ ] Retry avec backoff exponentiel
+- [ ] Déduplication des messages (MessageId, 7 jours)
+- [ ] Migration progressive (shadow → canary → principal → décommissionnement Oxalis)
+- [ ] Tests d'interopérabilité avec Oxalis et phase4
+
+### 10. Factur-X BASIC WL → structuré
 
 - [ ] Génération de lignes à partir de la ventilation TVA (toléré jusqu'au 01/09/2027)
 - [ ] Marquage du document comme converti
 
-### 8. Support PEPPOL AS4
-
-- [ ] Intégration du protocole AS4 pour échange inter-PDP
-- [ ] Gestion des certificats et SMP/SML
-
-### 9. Interface d'administration
+### 11. Interface d'administration
 
 - [ ] Dashboard de suivi des factures et statuts CDV
 - [ ] Consultation des logs et erreurs de validation
-- [ ] Configuration des clients (émetteurs/récepteurs)
+- [ ] Gestion des tenants (ajout, suppression, configuration)
+- [ ] Suivi des alertes critiques

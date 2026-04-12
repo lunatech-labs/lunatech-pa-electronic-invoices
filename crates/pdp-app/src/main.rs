@@ -112,8 +112,11 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
     let (http_exchange_tx, http_exchange_rx) =
         tokio::sync::mpsc::channel::<pdp_core::Exchange>(100);
 
+    // Répertoire de base pour la découverte des tenants
+    let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
+
     // Construire le router avec la route HTTP inbound
-    let router = build_router(&config, Some(http_exchange_rx)).await?;
+    let router = build_router(&config, base_dir, Some(http_exchange_rx)).await?;
 
     // Démarrer le serveur HTTP si configuré
     if let Some(ref http_config) = config.http_server {
@@ -207,7 +210,8 @@ async fn cmd_run(config_path: &std::path::Path) -> Result<()> {
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
 
     tracing::info!("Exécution unique de toutes les routes");
-    let router = build_router(&config, None).await?;
+    let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
+    let router = build_router(&config, base_dir, None).await?;
     let results = router.execute_all().await;
 
     let mut total_success = 0;
@@ -235,7 +239,8 @@ async fn cmd_run(config_path: &std::path::Path) -> Result<()> {
 
 async fn cmd_run_route(config_path: &std::path::Path, route_id: &str) -> Result<()> {
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
-    let router = build_router(&config, None).await?;
+    let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
+    let router = build_router(&config, base_dir, None).await?;
 
     tracing::info!(route_id = %route_id, "Exécution de la route");
     let exchanges = router.execute_route(route_id).await?;
@@ -498,8 +503,12 @@ async fn cmd_flow_events(config_path: &std::path::Path, flow_id: &str) -> Result
 /// Construit le Router à partir de la configuration.
 /// Si `http_rx` est fourni, une route "http-inbound" est ajoutée pour traiter
 /// les flux reçus via l'API HTTP (ChannelConsumer).
+///
+/// Si `tenants_dir` est configuré, des routes auto-générées sont créées pour
+/// chaque tenant découvert : `{siren}/in` → pipeline → `{siren}/out`.
 async fn build_router(
     config: &pdp_config::PdpConfig,
+    base_dir: &std::path::Path,
     http_rx: Option<tokio::sync::mpsc::Receiver<pdp_core::Exchange>>,
 ) -> Result<pdp_core::Router> {
     let store = std::sync::Arc::new(
@@ -509,6 +518,9 @@ async fn build_router(
     // Construire les producers PPF et AFNOR si configurés
     let ppf_producer = build_ppf_producer(config)?;
     let (annuaire_client, partner_directory, afnor_producers) = build_afnor_clients(config)?;
+
+    // Construire le AlertErrorHandler depuis la config
+    let alert_config = config.alerts.as_ref();
 
     let mut router = pdp_core::Router::new();
 
@@ -606,14 +618,33 @@ async fn build_router(
             }
         };
 
-        // Construire le error handler
-        let error_handler: Option<Box<dyn pdp_core::endpoint::Producer>> =
-            route_config.error_destination.as_ref().map(|err_dest| {
-                Box::new(pdp_core::endpoint::FileEndpoint::output(
-                    &format!("{}-errors", route_config.id),
-                    &err_dest.path,
-                )) as Box<dyn pdp_core::endpoint::Producer>
-            });
+        // Construire le error handler avec alertes
+        let error_handler: Option<Box<dyn pdp_core::endpoint::Producer>> = {
+            let error_dir = route_config
+                .error_destination
+                .as_ref()
+                .map(|d| d.path.clone())
+                .or_else(|| alert_config.map(|a| a.error_dir.clone()))
+                .unwrap_or_else(|| format!("errors/{}", route_config.id));
+
+            let mut handler = pdp_core::AlertErrorHandler::new(
+                std::path::PathBuf::from(&error_dir),
+            );
+
+            if let Some(ref ac) = alert_config {
+                if let Some(ref url) = ac.webhook_url {
+                    handler = handler.with_webhook(url);
+                }
+                let level = match ac.min_webhook_level.to_lowercase().as_str() {
+                    "warning" => pdp_core::AlertLevel::Warning,
+                    "info" => pdp_core::AlertLevel::Info,
+                    _ => pdp_core::AlertLevel::Critical,
+                };
+                handler = handler.with_min_webhook_level(level);
+            }
+
+            Some(Box::new(handler) as Box<dyn pdp_core::endpoint::Producer>)
+        };
 
         // Construire la chaîne de processors
         let mut builder = pdp_core::RouteBuilder::new(&route_config.id)
@@ -709,6 +740,157 @@ async fn build_router(
         router.add_route(route)?;
     }
 
+    // --- Routes auto-générées par tenant (multi-tenant) ---
+    let registry = pdp_config::TenantRegistry::load(config, base_dir)
+        .map_err(|e| anyhow::anyhow!("Chargement TenantRegistry: {}", e))?;
+
+    if registry.len() > 0 && config.tenants_dir.is_some() {
+        tracing::info!(
+            tenant_count = registry.len(),
+            "Génération automatique des routes pour {} tenant(s)",
+            registry.len()
+        );
+
+        let mut tenant_sirens: Vec<&str> = registry.list_sirens();
+        tenant_sirens.sort();
+
+        for siren in tenant_sirens {
+            let tenant = registry.get(siren).unwrap();
+
+            // S'assurer que les répertoires in/ et out/ existent
+            if let Err(e) = std::fs::create_dir_all(tenant.in_dir()) {
+                tracing::error!(siren = %siren, error = %e, "Impossible de créer le répertoire in/");
+                continue;
+            }
+            if let Err(e) = std::fs::create_dir_all(tenant.out_dir()) {
+                tracing::error!(siren = %siren, error = %e, "Impossible de créer le répertoire out/");
+                continue;
+            }
+
+            let route_id = format!("tenant-{}", siren);
+            let in_path = tenant.in_dir();
+            let out_path = tenant.out_dir();
+
+            // Consumer : FileEndpoint sur {siren}/in/
+            let consumer: Box<dyn pdp_core::endpoint::Consumer> =
+                Box::new(pdp_core::endpoint::FileEndpoint::input(
+                    &format!("{}-source", route_id),
+                    in_path.to_str().unwrap_or("."),
+                ));
+
+            // Producer : FileEndpoint sur {siren}/out/
+            // Si PPF configuré, utilise DynamicRoutingProducer avec fallback sur out/
+            let producer: Box<dyn pdp_core::endpoint::Producer> = if let Some(ref ppf_prod) = ppf_producer {
+                let mut dynamic = pdp_client::DynamicRoutingProducer::new(
+                    &format!("{}-dynamic-dest", route_id),
+                    ppf_prod.clone(),
+                );
+                for (matricule, producer) in &afnor_producers {
+                    dynamic.add_afnor_producer(matricule, producer.clone());
+                }
+                dynamic = dynamic.with_fallback_path(out_path.to_str().unwrap_or("."));
+                Box::new(dynamic)
+            } else {
+                Box::new(pdp_core::endpoint::FileEndpoint::output(
+                    &format!("{}-dest", route_id),
+                    out_path.to_str().unwrap_or("."),
+                ))
+            };
+
+            // Error handler avec alertes : {siren}/out/errors/{critical,warning,info}/
+            let error_path = tenant.out_dir().join("errors");
+            let mut tenant_alert_handler = pdp_core::AlertErrorHandler::new(error_path);
+            if let Some(ref ac) = alert_config {
+                if let Some(ref url) = ac.webhook_url {
+                    tenant_alert_handler = tenant_alert_handler.with_webhook(url);
+                }
+                let level = match ac.min_webhook_level.to_lowercase().as_str() {
+                    "warning" => pdp_core::AlertLevel::Warning,
+                    "info" => pdp_core::AlertLevel::Info,
+                    _ => pdp_core::AlertLevel::Critical,
+                };
+                tenant_alert_handler = tenant_alert_handler.with_min_webhook_level(level);
+            }
+            let error_handler: Box<dyn pdp_core::endpoint::Producer> =
+                Box::new(tenant_alert_handler);
+
+            // Utiliser l'identité PDP du tenant (ou celle de la config racine)
+            let pdp_id = &tenant.config.pdp.id;
+            let pdp_name = &tenant.config.pdp.name;
+
+            // Chaîne de processors identique aux routes manuelles
+            let mut builder = pdp_core::RouteBuilder::new(&route_id)
+                .description(&format!("Route auto-générée pour tenant {}", siren))
+                .from_source(consumer)
+                // 0. Tag tenant SIREN sur chaque exchange
+                .process(Box::new(pdp_core::TenantTagProcessor::new(siren)))
+                // 1. Trace : réception
+                .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
+                .process(Box::new(pdp_core::processor::LogProcessor::info(&format!("reception-{}", siren))))
+                // 1b. Contrôles de réception
+                .process(Box::new(pdp_core::reception::ReceptionProcessor::strict()))
+                // 1c. CDAR 501 d'irrecevabilité
+                .process(Box::new(pdp_cdar::IrrecevabiliteProcessor::new(pdp_id, pdp_name)))
+                // 1d. Détection type de document
+                .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
+                // 2. Parsing
+                .process(Box::new(pdp_invoice::ParseProcessor::new()))
+                .process(Box::new(pdp_trace::TraceProcessor::parsed(store.clone())))
+                // 2b. Détection de doublons
+                .process(Box::new(pdp_trace::DuplicateCheckProcessor::new(store.clone())));
+
+            // 3. Validation
+            builder = builder
+                .process(Box::new(pdp_invoice::ValidateProcessor::new()))
+                .process(Box::new(pdp_validate::XmlValidateProcessor::with_options(
+                    &config.validation.specs_dir,
+                    config.validation.xsd_enabled,
+                    config.validation.en16931_enabled,
+                    config.validation.br_fr_enabled,
+                    true,
+                )))
+                .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+
+            // 4a. Génération Flux 1 PPF
+            let tenant_ppf = tenant.config.ppf.as_ref().or(config.ppf.as_ref());
+            if let Some(ppf) = tenant_ppf {
+                let strategy = pdp_transform::Flux1ProfileStrategy::from_config(&ppf.flux1_profile);
+                builder = builder.process(Box::new(pdp_transform::PpfFlux1Processor::new(
+                    std::path::Path::new(&ppf.flux1_output_dir),
+                    std::path::Path::new(&config.validation.specs_dir),
+                ).with_strategy(strategy)));
+            }
+
+            // 5. Génération CDAR
+            builder = builder.process(Box::new(pdp_cdar::CdarProcessor::new(pdp_id, pdp_name)));
+
+            // 5b. Résolution de routage
+            if let (Some(ref annuaire), Some(ref partner_dir)) = (&annuaire_client, &partner_directory) {
+                builder = builder.process(Box::new(pdp_client::RoutingResolverProcessor::new(
+                    annuaire.clone(),
+                    partner_dir.clone(),
+                )));
+            }
+
+            // 6. Destination + trace finale
+            builder = builder
+                .to_destination(producer)
+                .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
+                .on_error(error_handler);
+
+            let route = builder.build()?;
+            router.add_route(route)?;
+
+            tracing::info!(
+                siren = %siren,
+                in_dir = %in_path.display(),
+                out_dir = %out_path.display(),
+                pdp_name = %pdp_name,
+                "Route tenant auto-générée"
+            );
+        }
+    }
+
     // Route HTTP inbound : traite les flux reçus via l'API HTTP AFNOR
     if let Some(rx) = http_rx {
         let consumer: Box<dyn pdp_core::endpoint::Consumer> =
@@ -792,10 +974,30 @@ async fn build_router(
             )));
         }
 
-        // 6. Destination + trace finale
+        // Error handler avec alertes
+        let http_error_dir = alert_config
+            .map(|a| a.error_dir.clone())
+            .unwrap_or_else(|| "errors/http-inbound".to_string());
+        let mut http_alert_handler = pdp_core::AlertErrorHandler::new(
+            std::path::PathBuf::from(&http_error_dir),
+        );
+        if let Some(ref ac) = alert_config {
+            if let Some(ref url) = ac.webhook_url {
+                http_alert_handler = http_alert_handler.with_webhook(url);
+            }
+            let level = match ac.min_webhook_level.to_lowercase().as_str() {
+                "warning" => pdp_core::AlertLevel::Warning,
+                "info" => pdp_core::AlertLevel::Info,
+                _ => pdp_core::AlertLevel::Critical,
+            };
+            http_alert_handler = http_alert_handler.with_min_webhook_level(level);
+        }
+
+        // 6. Destination + trace finale + error handler
         builder = builder
             .to_destination(producer)
-            .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())));
+            .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
+            .on_error(Box::new(http_alert_handler));
 
         let route = builder.build()?;
         router.add_route(route)?;

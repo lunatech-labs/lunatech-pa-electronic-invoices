@@ -65,10 +65,10 @@ impl SchematronValidator {
     fn xslt_path(&self, schematron_type: &SchematronType) -> PathBuf {
         match schematron_type {
             SchematronType::En16931Ubl => {
-                self.specs_dir.join("xslt/en16931/EN16931-UBL-validation.xslt")
+                self.specs_dir.join("xslt/en16931-1.3.15/EN16931-UBL-validation.xslt")
             }
             SchematronType::En16931Cii => {
-                self.specs_dir.join("xslt/en16931/EN16931-CII-validation.xslt")
+                self.specs_dir.join("xslt/en16931-1.3.15/EN16931-CII-validation.xslt")
             }
             SchematronType::FacturXEN16931 => {
                 self.specs_dir.join("xslt/facturx-1.08/EN16931/FACTUR-X_EN16931.xslt")
@@ -77,13 +77,13 @@ impl SchematronValidator {
                 self.specs_dir.join("xslt/facturx-1.08/EXTENDED/FACTUR-X_EXTENDED.xslt")
             }
             SchematronType::BrFrUbl => {
-                self.specs_dir.join("xslt/fr/20251114_BR-FR-Flux2-Schematron-UBL_V1.2.0-compiled.xsl")
+                self.specs_dir.join("xslt/br-fr-1.2.0/20251114_BR-FR-Flux2-Schematron-UBL_V1.2.0-compiled.xsl")
             }
             SchematronType::BrFrCii => {
-                self.specs_dir.join("xslt/fr/20251114_BR-FR-Flux2-Schematron-CII_V1.2.0-compiled.xsl")
+                self.specs_dir.join("xslt/br-fr-1.2.0/20251114_BR-FR-Flux2-Schematron-CII_V1.2.0-compiled.xsl")
             }
             SchematronType::BrFrCdar => {
-                self.specs_dir.join("xslt/fr/20251114_BR-FR-CDV-Schematron-CDAR_V1.2.0-compiled.xsl")
+                self.specs_dir.join("xslt/br-fr-1.2.0/20251114_BR-FR-CDV-Schematron-CDAR_V1.2.0-compiled.xsl")
             }
         }
     }
@@ -437,7 +437,7 @@ mod tests {
     #[test]
     fn test_validate_en16931_ubl_example() {
         let specs = specs_dir();
-        let xslt = specs.join("xslt/en16931/EN16931-UBL-validation.xslt");
+        let xslt = specs.join("xslt/en16931-1.3.15/EN16931-UBL-validation.xslt");
         if !xslt.exists() {
             eprintln!("XSLT EN16931 UBL non disponible, test ignoré");
             return;
@@ -464,7 +464,7 @@ mod tests {
     #[test]
     fn test_validate_en16931_cii_example() {
         let specs = specs_dir();
-        let xslt = specs.join("xslt/en16931/EN16931-CII-validation.xslt");
+        let xslt = specs.join("xslt/en16931-1.3.15/EN16931-CII-validation.xslt");
         if !xslt.exists() {
             eprintln!("XSLT EN16931 CII non disponible, test ignoré");
             return;
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn test_validate_br_fr_ubl() {
         let specs = specs_dir();
-        let xslt = specs.join("xslt/fr/20251114_BR-FR-Flux2-Schematron-UBL_V1.2.0-compiled.xsl");
+        let xslt = specs.join("xslt/br-fr-1.2.0/20251114_BR-FR-Flux2-Schematron-UBL_V1.2.0-compiled.xsl");
         if !xslt.exists() {
             eprintln!("XSLT BR-FR UBL non disponible, test ignoré");
             return;
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn test_validate_cdar_example() {
         let specs = specs_dir();
-        let xslt = specs.join("xslt/fr/20251114_BR-FR-CDV-Schematron-CDAR_V1.2.0-compiled.xsl");
+        let xslt = specs.join("xslt/br-fr-1.2.0/20251114_BR-FR-CDV-Schematron-CDAR_V1.2.0-compiled.xsl");
         if !xslt.exists() {
             eprintln!("XSLT BR-FR CDAR non disponible, test ignoré");
             return;

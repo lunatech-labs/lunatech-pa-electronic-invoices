@@ -10,7 +10,7 @@ use pdp_core::error::{PdpError, PdpResult};
 
 /// Moteur XSLT utilisant Saxon pour les transformations XML↔XML
 pub struct XsltEngine {
-    /// Répertoire racine des specs (contient xslt/convert/)
+    /// Répertoire racine des specs (contient xslt/ubl-cii-convert-1.0/, xslt/ppf-flux1-v3.1/, etc.)
     specs_dir: PathBuf,
 }
 
@@ -60,12 +60,12 @@ impl XsltEngine {
     /// Chemin du XSLT de conversion
     fn xslt_path(&self, transform: XsltTransform) -> PathBuf {
         match transform {
-            XsltTransform::UblToCii => self.specs_dir.join("xslt/convert/UBL-to-CII.xslt"),
-            XsltTransform::CiiToUbl => self.specs_dir.join("xslt/convert/CII-to-UBL.xslt"),
-            XsltTransform::CiiToF1BaseCii => self.specs_dir.join("xslt/convert/CII-to-F1Base-CII.xslt"),
-            XsltTransform::UblToF1BaseUbl => self.specs_dir.join("xslt/convert/UBL-to-F1Base-UBL.xslt"),
-            XsltTransform::CiiToF1FullCii => self.specs_dir.join("xslt/convert/CII-to-F1Full-CII.xslt"),
-            XsltTransform::UblToF1FullUbl => self.specs_dir.join("xslt/convert/UBL-to-F1Full-UBL.xslt"),
+            XsltTransform::UblToCii => self.specs_dir.join("xslt/ubl-cii-convert-1.0/UBL-to-CII.xslt"),
+            XsltTransform::CiiToUbl => self.specs_dir.join("xslt/ubl-cii-convert-1.0/CII-to-UBL.xslt"),
+            XsltTransform::CiiToF1BaseCii => self.specs_dir.join("xslt/ppf-flux1-v3.1/CII-to-F1Base-CII.xslt"),
+            XsltTransform::UblToF1BaseUbl => self.specs_dir.join("xslt/ppf-flux1-v3.1/UBL-to-F1Base-UBL.xslt"),
+            XsltTransform::CiiToF1FullCii => self.specs_dir.join("xslt/ppf-flux1-v3.1/CII-to-F1Full-CII.xslt"),
+            XsltTransform::UblToF1FullUbl => self.specs_dir.join("xslt/ppf-flux1-v3.1/UBL-to-F1Full-UBL.xslt"),
         }
     }
 

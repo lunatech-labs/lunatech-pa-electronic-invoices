@@ -50,6 +50,10 @@
 
 pub mod model;
 pub mod loader;
+pub mod tenant;
+pub mod registry;
 
-pub use model::PdpConfig;
+pub use model::{PdpConfig, TenantConfig};
 pub use loader::load_config;
+pub use tenant::{TenantEntry, discover_tenants, synthetic_tenant, is_valid_siren};
+pub use registry::{TenantRegistry, TenantRegistryEntry};

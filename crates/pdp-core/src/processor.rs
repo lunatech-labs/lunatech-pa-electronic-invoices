@@ -116,6 +116,20 @@ impl LogProcessor {
     }
 }
 
+/// Processor qui tag chaque exchange avec le SIREN du tenant.
+/// Insere en tete de chaque pipeline tenant pour la tracabilite.
+pub struct TenantTagProcessor {
+    siren: String,
+}
+
+impl TenantTagProcessor {
+    pub fn new(siren: &str) -> Self {
+        Self {
+            siren: siren.to_string(),
+        }
+    }
+}
+
 #[async_trait]
 impl Processor for LogProcessor {
     fn name(&self) -> &str {
@@ -141,5 +155,45 @@ impl Processor for LogProcessor {
         }
 
         Ok(exchange)
+    }
+}
+
+#[async_trait]
+impl Processor for TenantTagProcessor {
+    fn name(&self) -> &str {
+        "tenant-tag"
+    }
+
+    async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        exchange.set_tenant_siren(&self.siren);
+        Ok(exchange)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_tenant_tag_processor() {
+        let processor = TenantTagProcessor::new("123456789");
+        assert_eq!(processor.name(), "tenant-tag");
+
+        let exchange = Exchange::new(b"test".to_vec());
+        assert!(exchange.tenant_siren().is_none());
+
+        let exchange = processor.process(exchange).await.unwrap();
+        assert_eq!(exchange.tenant_siren(), Some("123456789"));
+    }
+
+    #[tokio::test]
+    async fn test_tenant_tag_processor_in_chain() {
+        let chain = ProcessorChain::new("test-chain")
+            .add(Box::new(TenantTagProcessor::new("999888777")))
+            .add(Box::new(LogProcessor::info("after-tag")));
+
+        let exchange = Exchange::new(b"data".to_vec());
+        let exchange = chain.process(exchange).await.unwrap();
+        assert_eq!(exchange.tenant_siren(), Some("999888777"));
     }
 }
