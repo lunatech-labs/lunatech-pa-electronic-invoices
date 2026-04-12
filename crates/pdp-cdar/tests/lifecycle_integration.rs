@@ -130,12 +130,14 @@ async fn test_facture_valide_genere_cdv_200_deposee() {
     // Émetteur = PDP (rôle WK)
     assert_eq!(cdv.sender.role_code, RoleCode::WK);
 
-    // Destinataire = Vendeur (rôle SE) avec son SIREN
-    assert_eq!(cdv.recipients.len(), 1);
-    let recipient = &cdv.recipients[0];
-    assert_eq!(recipient.role_code, RoleCode::SE);
-    assert_eq!(recipient.global_id.as_deref(), Some("456789012"));
-    assert_eq!(recipient.global_id_scheme.as_deref(), Some("0002"));
+    // Destinataires = Vendeur (SE) + PPF (DFH)
+    assert_eq!(cdv.recipients.len(), 2);
+    let seller = cdv.recipients.iter().find(|r| r.role_code == RoleCode::SE).unwrap();
+    assert_eq!(seller.global_id.as_deref(), Some("456789012"));
+    assert_eq!(seller.global_id_scheme.as_deref(), Some("0002"));
+    let ppf = cdv.recipients.iter().find(|r| r.role_code == RoleCode::DFH).unwrap();
+    assert_eq!(ppf.global_id.as_deref(), Some("9998"));
+    assert_eq!(ppf.global_id_scheme.as_deref(), Some("0238"));
 
     // Référence à la facture
     assert_eq!(cdv.referenced_documents.len(), 1);
@@ -174,10 +176,12 @@ async fn test_facture_invalide_genere_cdv_213_rejetee() {
     let parser = CdarParser::new();
     let cdv = parser.parse(cdv_xml).unwrap();
 
-    // Phase Transmission → destinataire = vendeur uniquement
+    // Phase Transmission → destinataires = vendeur + acheteur + PPF
     assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
-    assert_eq!(cdv.recipients.len(), 1);
-    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+    assert_eq!(cdv.recipients.len(), 3);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
 
     // Référence avec statut de rejet
     let ref_doc = &cdv.referenced_documents[0];
@@ -211,10 +215,11 @@ async fn test_fichier_vide_genere_cdv_501_irrecevable() {
     assert_eq!(cdv.status_code(), Some(501));
     assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
 
-    // Destinataire = vendeur uniquement
-    assert_eq!(cdv.recipients.len(), 1);
-    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
-    assert_eq!(cdv.recipients[0].global_id.as_deref(), Some("456789012"));
+    // Destinataires = vendeur (SE) + PPF (DFH)
+    assert_eq!(cdv.recipients.len(), 2);
+    let seller = cdv.recipients.iter().find(|r| r.role_code == RoleCode::SE).unwrap();
+    assert_eq!(seller.global_id.as_deref(), Some("456789012"));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
 
     // Motif d'irrecevabilité
     let ref_doc = &cdv.referenced_documents[0];
@@ -228,36 +233,24 @@ async fn test_fichier_vide_genere_cdv_501_irrecevable() {
 }
 
 // ============================================================
-// Test 4 : CDV phase Traitement → vendeur ET acheteur
+// Test 4 : CDV phase Traitement → vendeur seul
 // ============================================================
 
 #[tokio::test]
-async fn test_cdv_traitement_envoye_vendeur_et_acheteur() {
+async fn test_cdv_traitement_envoye_vendeur_seul() {
     let generator = CdarGenerator::new("999888777", "Ma PDP Test");
     let invoice = make_invoice();
 
-    // 204 Prise en charge — phase Traitement
+    // 204 Prise en charge — phase Traitement : SE seul
+    // L'acheteur (BY) est l'Issuer, pas destinataire
     let cdv_204 = generator.generate_prise_en_charge(&invoice, "380");
     assert_eq!(cdv_204.type_code, CdvTypeCode::Traitement);
-    assert_eq!(cdv_204.recipients.len(), 2);
+    assert_eq!(cdv_204.recipients.len(), 1);
+    assert_eq!(cdv_204.recipients[0].role_code, RoleCode::SE);
 
-    let roles: Vec<&RoleCode> = cdv_204.recipients.iter().map(|r| &r.role_code).collect();
-    assert!(roles.contains(&&RoleCode::SE), "Vendeur absent du CDV 204");
-    assert!(roles.contains(&&RoleCode::BY), "Acheteur absent du CDV 204");
-
-    // Vérifier SIREN vendeur et acheteur
-    let seller = cdv_204
-        .recipients
-        .iter()
-        .find(|r| r.role_code == RoleCode::SE)
-        .unwrap();
-    let buyer = cdv_204
-        .recipients
-        .iter()
-        .find(|r| r.role_code == RoleCode::BY)
-        .unwrap();
+    // Vérifier SIREN vendeur
+    let seller = &cdv_204.recipients[0];
     assert_eq!(seller.global_id.as_deref(), Some("456789012"));
-    assert_eq!(buyer.global_id.as_deref(), Some("321654987"));
 }
 
 // ============================================================
@@ -289,11 +282,9 @@ async fn test_cdv_210_refusee_envoye_aux_deux_parties() {
     assert_eq!(cdv_210.type_code, CdvTypeCode::Traitement);
     assert_eq!(cdv_210.status_code(), Some(210));
 
-    // Vendeur + Acheteur
-    assert_eq!(cdv_210.recipients.len(), 2);
-    let roles: Vec<&RoleCode> = cdv_210.recipients.iter().map(|r| &r.role_code).collect();
-    assert!(roles.contains(&&RoleCode::SE));
-    assert!(roles.contains(&&RoleCode::BY));
+    // Traitement → SE seul (l'acheteur est Issuer, pas destinataire)
+    assert_eq!(cdv_210.recipients.len(), 1);
+    assert_eq!(cdv_210.recipients[0].role_code, RoleCode::SE);
 
     // Émetteur = Acheteur (BY) car c'est l'acheteur qui refuse
     assert_eq!(cdv_210.sender.role_code, RoleCode::BY);
@@ -330,17 +321,16 @@ async fn test_cdv_212_encaissee_envoye_aux_deux_parties() {
     assert_eq!(cdv_212.status_code(), Some(212));
     assert_eq!(cdv_212.type_code, CdvTypeCode::Traitement);
 
-    // Les 2 parties
+    // Acheteur + PPF (vendeur est Issuer, pas destinataire)
     assert_eq!(cdv_212.recipients.len(), 2);
-    let roles: Vec<&RoleCode> = cdv_212.recipients.iter().map(|r| &r.role_code).collect();
-    assert!(roles.contains(&&RoleCode::SE));
-    assert!(roles.contains(&&RoleCode::BY));
+    assert!(cdv_212.recipients.iter().any(|r| r.role_code == RoleCode::BY));
+    assert!(cdv_212.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
 
     // Référence facture
     let ref_doc = &cdv_212.referenced_documents[0];
     assert_eq!(ref_doc.invoice_id, "FA-2025-00256");
     assert_eq!(ref_doc.process_condition.as_deref(), Some("Encaissée"));
-    assert_eq!(ref_doc.status_code, Some(4)); // In process
+    assert_eq!(ref_doc.status_code, Some(47)); // Pending
 }
 
 // ============================================================
@@ -425,7 +415,8 @@ async fn test_pipeline_complet_facture_valide() {
 
     assert_eq!(cdv.status_code(), Some(200));
     assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
-    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
     assert_eq!(cdv.referenced_documents[0].invoice_id, "FA-2025-00256");
 }
 
@@ -517,10 +508,10 @@ async fn test_cdv_xml_roundtrip_tous_statuts() {
         );
 
         // Vérifier le nombre de destinataires
-        let expected_recipients = if type_code == CdvTypeCode::Transmission {
-            1
-        } else {
-            2
+        let expected_recipients = match (type_code, expected_code) {
+            (CdvTypeCode::Transmission, _) => 2,  // SE + DFH
+            (CdvTypeCode::Traitement, 212) => 2,   // BY + DFH
+            (CdvTypeCode::Traitement, _) => 1,     // SE seul
         };
         assert_eq!(
             parsed.recipients.len(),
@@ -537,41 +528,44 @@ async fn test_cdv_xml_roundtrip_tous_statuts() {
 }
 
 // ============================================================
-// Test 11 : CDV 200 Transmission → seulement vendeur (pas acheteur, pas PPF)
+// Test 11 : CDV Transmission → vendeur (SE) + PPF (DFH), pas d'acheteur
 // ============================================================
 
 #[tokio::test]
-async fn test_cdv_transmission_exclut_acheteur() {
+async fn test_cdv_transmission_vendeur_et_ppf_sans_acheteur() {
     let generator = CdarGenerator::new("999888777", "Ma PDP Test");
     let invoice = make_invoice();
 
-    // CDV Déposée (200) — phase Transmission
+    // CDV Déposée (200) — phase Transmission : SE + DFH
     let cdv = generator.generate_deposee(&invoice, "380");
+    assert_eq!(cdv.recipients.len(), 2);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
+    assert!(!cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
 
-    // Seulement le vendeur
-    assert_eq!(cdv.recipients.len(), 1);
-    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
-
-    // CDV Émise (201) — phase Transmission
+    // CDV Émise (201) — phase Transmission : SE + DFH
     let cdv = generator.generate_emise(&invoice, "380");
-    assert_eq!(cdv.recipients.len(), 1);
-    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+    assert_eq!(cdv.recipients.len(), 2);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
 
-    // CDV Erreur routage (221) — phase Transmission
+    // CDV Erreur routage (221) — phase Transmission : SE + DFH
     let cdv = generator.generate_erreur_routage(&invoice, "SIREN inconnu");
-    assert_eq!(cdv.recipients.len(), 1);
-    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+    assert_eq!(cdv.recipients.len(), 2);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
 }
 
 // ============================================================
-// Test 12 : Tous les CDV de Traitement ont vendeur + acheteur
+// Test 12 : Tous les CDV de Traitement (sauf 212) → vendeur seul
 // ============================================================
 
 #[tokio::test]
-async fn test_tous_cdv_traitement_ont_deux_parties() {
+async fn test_tous_cdv_traitement_vendeur_seul() {
     let generator = CdarGenerator::new("999888777", "Ma PDP Test");
     let invoice = make_invoice();
 
+    // Encaissee (212) est exclue : elle a BY+DFH, pas SE seul
     let statuts_traitement = vec![
         InvoiceStatusCode::PriseEnCharge,
         InvoiceStatusCode::Approuvee,
@@ -580,7 +574,6 @@ async fn test_tous_cdv_traitement_ont_deux_parties() {
         InvoiceStatusCode::Suspendue,
         InvoiceStatusCode::Refusee,
         InvoiceStatusCode::PaiementTransmis,
-        InvoiceStatusCode::Encaissee,
     ];
 
     for status in statuts_traitement {
@@ -593,25 +586,20 @@ async fn test_tous_cdv_traitement_ont_deux_parties() {
             Vec::new(),
         );
 
+        // Phase Traitement : vendeur (SE) seul comme destinataire
+        // L'acheteur (BY) est l'Issuer de ces statuts, pas un destinataire
         assert_eq!(
             cdv.recipients.len(),
-            2,
-            "CDV {:?} (code {}) devrait avoir 2 destinataires",
+            1,
+            "CDV {:?} (code {}) devrait avoir 1 seul destinataire (SE)",
             status,
             status.code()
         );
 
-        let has_seller = cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE);
-        let has_buyer = cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY);
-
-        assert!(
-            has_seller,
-            "CDV {:?} : vendeur (SE) manquant",
-            status
-        );
-        assert!(
-            has_buyer,
-            "CDV {:?} : acheteur (BY) manquant",
+        assert_eq!(
+            cdv.recipients[0].role_code,
+            RoleCode::SE,
+            "CDV {:?} : destinataire doit être le vendeur (SE)",
             status
         );
     }
@@ -626,8 +614,8 @@ async fn test_cdv_contient_siren_correct() {
     let generator = CdarGenerator::new("999888777", "Ma PDP Test");
     let invoice = make_invoice();
 
-    // CDV 204 (Traitement) pour vérifier les deux parties
-    let cdv = generator.generate_prise_en_charge(&invoice, "380");
+    // CDV 213 (Rejetée) pour vérifier les deux parties (SE + BY + DFH)
+    let cdv = generator.generate_rejetee(&invoice, "380", Vec::new());
     let xml = generator.to_xml(&cdv).unwrap();
 
     // Le XML doit contenir le SIREN vendeur (9 premiers chars du SIRET)
@@ -677,4 +665,351 @@ async fn test_cdv_200_endpoint_vendeur_format_statuts() {
     let seller = &cdv.recipients[0];
     assert_eq!(seller.endpoint_id.as_deref(), Some("456789012_STATUTS"));
     assert_eq!(seller.endpoint_scheme.as_deref(), Some("0225"));
+}
+
+// ============================================================
+// Helpers pour les fixtures XP Z12-014
+// ============================================================
+
+fn load_xp_fixture(name: &str) -> String {
+    let path = format!(
+        "{}/../../tests/fixtures/xp-z12-014/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        name
+    );
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Fixture {} introuvable: {}", path, e))
+}
+
+// ============================================================
+// Test 15 : Parsing fixture CDV 202 Reçue (Transmission, SE+BY)
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_202_recue() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_02-CDV-202_Recue.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 202 échoué");
+
+    // Contexte
+    assert_eq!(cdv.business_process, "REGULATED");
+    assert_eq!(cdv.guideline_id, "urn.cpro.gouv.fr:1p0:CDV:invoice");
+
+    // Phase Transmission (305)
+    assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
+
+    // Destinataires : SE + BY (pas de DFH — le PPF reçoit via le CDV POUR_PPF)
+    assert_eq!(cdv.recipients.len(), 2);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
+
+    // Référence facture
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.invoice_id, "F202500003");
+    assert_eq!(ref_doc.process_condition_code, 202);
+    assert_eq!(ref_doc.process_condition.as_deref(), Some("Reçue"));
+    assert_eq!(ref_doc.type_code.as_deref(), Some("380"));
+
+    // MDT-88 : StatusCode 43 ("Transferred to the next party")
+    assert_eq!(ref_doc.status_code, Some(43));
+
+    // Pas de motifs
+    assert!(ref_doc.statuses.is_empty());
+}
+
+// ============================================================
+// Test 16 : Parsing fixture CDV 203 Mise à disposition (Transmission, SE+BY)
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_203_mise_a_disposition() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_03-CDV-203_Mise_a_disposition.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 203 échoué");
+
+    assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
+
+    // Destinataires : SE + BY
+    assert_eq!(cdv.recipients.len(), 2);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 203);
+    assert_eq!(ref_doc.process_condition.as_deref(), Some("Mise_à_disposition"));
+
+    // MDT-88 : StatusCode 48 ("Available")
+    assert_eq!(ref_doc.status_code, Some(48));
+}
+
+// ============================================================
+// Test 17 : Parsing fixture CDV 204 Prise en charge (Traitement, SE seul)
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_204_prise_en_charge() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_04-CDV-204_Prise_en_charge.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 204 échoué");
+
+    // Phase Traitement (23)
+    assert_eq!(cdv.type_code, CdvTypeCode::Traitement);
+
+    // Issuer = Acheteur (BY) — c'est lui qui initie la prise en charge
+    assert_eq!(cdv.issuer.as_ref().unwrap().role_code, RoleCode::BY);
+    assert_eq!(
+        cdv.issuer.as_ref().unwrap().global_id.as_deref(),
+        Some("200000008")
+    );
+
+    // Destinataire : SE seul (l'acheteur sait déjà, il a initié l'action)
+    assert_eq!(cdv.recipients.len(), 1);
+    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 204);
+
+    // MDT-88 : StatusCode 45 ("Under investigation")
+    assert_eq!(ref_doc.status_code, Some(45));
+}
+
+// ============================================================
+// Test 18 : Parsing fixture CDV 205 Approuvée (Traitement, SE seul)
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_205_approuvee() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_05-CDV-205_Approuvee.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 205 échoué");
+
+    assert_eq!(cdv.type_code, CdvTypeCode::Traitement);
+
+    // Issuer = Acheteur (BY)
+    assert_eq!(cdv.issuer.as_ref().unwrap().role_code, RoleCode::BY);
+
+    // Destinataire : SE seul
+    assert_eq!(cdv.recipients.len(), 1);
+    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 205);
+    assert_eq!(ref_doc.process_condition.as_deref(), Some("Approuvée"));
+
+    // MDT-88 : StatusCode 1 ("Accepted")
+    assert_eq!(ref_doc.status_code, Some(1));
+}
+
+// ============================================================
+// Test 19 : Parsing fixture CDV 207 En litige — MOTIF + caractéristiques
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_207_en_litige_avec_motif() {
+    let xml = load_xp_fixture("UC4/UC4_F202500006_04-CDV-207_En_litige.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 207 échoué");
+
+    assert_eq!(cdv.type_code, CdvTypeCode::Traitement);
+
+    // Issuer = Acheteur (BY)
+    assert_eq!(cdv.issuer.as_ref().unwrap().role_code, RoleCode::BY);
+
+    // Destinataire : SE seul
+    assert_eq!(cdv.recipients.len(), 1);
+    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 207);
+
+    // MDT-88 : StatusCode 46 ("Under query")
+    assert_eq!(ref_doc.status_code, Some(46));
+
+    // Motif de litige (MDT-113 / MDT-114)
+    assert_eq!(ref_doc.statuses.len(), 1);
+    let status = &ref_doc.statuses[0];
+    assert_eq!(status.reason_code.as_deref(), Some("TX_TVA_ERR"));
+    assert!(status.reason.as_ref().unwrap().contains("Taux de TVA"));
+
+    // Action attendue (MDT-121 / MDT-122) : NIN = Corriger
+    assert_eq!(status.action_code.as_deref(), Some("NIN"));
+    assert!(status.action.as_ref().unwrap().contains("Facture Rectificative"));
+
+    // Caractéristiques : DIV (valeur invalide) + DVA (valeur attendue)
+    assert_eq!(status.characteristics.len(), 2);
+
+    let div = status.characteristics.iter().find(|c| c.type_code == "DIV")
+        .expect("Caractéristique DIV manquante");
+    assert_eq!(div.id.as_deref(), Some("BT-152"));
+    assert_eq!(div.value_percent.as_deref(), Some("10.00"));
+
+    let dva = status.characteristics.iter().find(|c| c.type_code == "DVA")
+        .expect("Caractéristique DVA manquante");
+    assert_eq!(dva.id.as_deref(), Some("BT-152"));
+    assert_eq!(dva.value_percent.as_deref(), Some("20.00"));
+}
+
+// ============================================================
+// Test 20 : Parsing fixture CDV 211 Paiement transmis — caractéristique MPA
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_211_paiement_transmis() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_06-CDV-211_Paiement_transmis.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 211 échoué");
+
+    assert_eq!(cdv.type_code, CdvTypeCode::Traitement);
+
+    // Issuer = Acheteur (BY)
+    assert_eq!(cdv.issuer.as_ref().unwrap().role_code, RoleCode::BY);
+
+    // Destinataire : SE seul
+    assert_eq!(cdv.recipients.len(), 1);
+    assert_eq!(cdv.recipients[0].role_code, RoleCode::SE);
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 211);
+
+    // MDT-88 : StatusCode 47 ("Pending")
+    assert_eq!(ref_doc.status_code, Some(47));
+
+    // Caractéristique MPA (montant payé)
+    assert_eq!(ref_doc.statuses.len(), 1);
+    let status = &ref_doc.statuses[0];
+    assert_eq!(status.characteristics.len(), 1);
+    let mpa = &status.characteristics[0];
+    assert_eq!(mpa.type_code, "MPA");
+    assert_eq!(mpa.value_amount.as_deref(), Some("12000"));
+}
+
+// ============================================================
+// Test 21 : Parsing fixture CDV 212 Encaissée — MEN + SE+BY+DFH
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_212_encaissee() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_07-CDV-212_Encaissee.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 212 échoué");
+
+    assert_eq!(cdv.type_code, CdvTypeCode::Traitement);
+
+    // Issuer = Vendeur (SE) — le vendeur constate l'encaissement
+    assert_eq!(cdv.issuer.as_ref().unwrap().role_code, RoleCode::SE);
+
+    // Destinataires : BY (acheteur) + DFH (PPF) — statut obligatoire
+    // Le vendeur (SE) est Issuer, pas destinataire de son propre CDV
+    assert_eq!(cdv.recipients.len(), 2);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 212);
+
+    // MDT-88 : StatusCode 47 ("Pending")
+    assert_eq!(ref_doc.status_code, Some(47));
+
+    // Caractéristique MEN (montant encaissé)
+    assert_eq!(ref_doc.statuses.len(), 1);
+    let status = &ref_doc.statuses[0];
+    assert_eq!(status.characteristics.len(), 1);
+    let men = &status.characteristics[0];
+    assert_eq!(men.type_code, "MEN");
+    assert_eq!(men.value_amount.as_deref(), Some("12000"));
+    assert_eq!(men.value_percent.as_deref(), Some("20.00"));
+}
+
+// ============================================================
+// Test 22 : Parsing fixture CDV 200 POUR_PPF — guideline einvoicingF2
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_200_pour_ppf() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_01-CDV-200_Deposee_POUR_PPF.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 200 POUR_PPF échoué");
+
+    // Guideline spécifique PPF
+    assert_eq!(cdv.guideline_id, "urn.cpro.gouv.fr:1p0:CDV:einvoicingF2");
+
+    // Pas de BusinessProcess (MDT-2 absent dans le CDV POUR_PPF)
+    // Le parser peut mettre une valeur vide ou la valeur par défaut
+
+    // Sender = PA-E avec identifiant schemeID 0238
+    assert_eq!(cdv.sender.role_code, RoleCode::WK);
+    assert_eq!(cdv.sender.global_id.as_deref(), Some("0003"));
+    assert_eq!(cdv.sender.global_id_scheme.as_deref(), Some("0238"));
+
+    // Issuer = PA-E (même identité que sender)
+    assert_eq!(cdv.issuer.as_ref().unwrap().role_code, RoleCode::WK);
+    assert_eq!(cdv.issuer.as_ref().unwrap().global_id.as_deref(), Some("0003"));
+
+    // Destinataire unique : PPF (DFH) — le seul destinataire du CDV POUR_PPF
+    assert_eq!(cdv.recipients.len(), 1);
+    assert_eq!(cdv.recipients[0].role_code, RoleCode::DFH);
+    assert_eq!(cdv.recipients[0].global_id.as_deref(), Some("9998"));
+    assert_eq!(cdv.recipients[0].global_id_scheme.as_deref(), Some("0238"));
+
+    // Statut 200 Déposée
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 200);
+    assert_eq!(ref_doc.status_code, Some(10));
+}
+
+// ============================================================
+// Test 23 : Parsing fixture CDV 213 Rejetée — SE+BY+DFH
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_213_rejetee() {
+    let xml = load_xp_fixture("UC2/UC2_F202500004_02-CDV-213_Rejetee.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 213 échoué");
+
+    assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
+
+    // Destinataires : SE + BY + DFH
+    assert_eq!(cdv.recipients.len(), 3);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 213);
+    assert_eq!(ref_doc.status_code, Some(8)); // Rejected
+
+    // Motif de rejet
+    assert_eq!(ref_doc.statuses.len(), 1);
+    let status = &ref_doc.statuses[0];
+    assert_eq!(status.reason_code.as_deref(), Some("DOUBLON"));
+    assert_eq!(status.sequence, Some(1));
+}
+
+// ============================================================
+// Test 24 : CDV 200 fixture — SE + DFH (pas d'acheteur en phase dépôt)
+// ============================================================
+
+#[tokio::test]
+async fn test_fixture_cdv_200_deposee() {
+    let xml = load_xp_fixture("UC1/UC1_F202500003_01-CDV-200_Deposee.xml");
+    let parser = CdarParser::new();
+    let cdv = parser.parse(&xml).expect("Parsing CDV 200 échoué");
+
+    assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
+    assert_eq!(cdv.business_process, "REGULATED");
+
+    // Issuer = WK (PDP)
+    assert_eq!(cdv.issuer.as_ref().unwrap().role_code, RoleCode::WK);
+
+    // Destinataires : SE + DFH (pas de BY — l'acheteur sera notifié via CDV 202 Reçue)
+    assert_eq!(cdv.recipients.len(), 2);
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
+    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
+    assert!(!cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
+
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.process_condition_code, 200);
+    assert_eq!(ref_doc.status_code, Some(10)); // Received
+    assert_eq!(ref_doc.invoice_id, "F202500003");
 }

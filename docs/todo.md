@@ -99,6 +99,15 @@ SFTP comme couche mince vers un object store (S3/MinIO).
 - [ ] Le protocole SFTP sauvegarde dans l'object store au lieu du filesystem
 - [ ] Les répertoires tenant `{siren}/in/` et `{siren}/out/` deviennent des préfixes S3
 
+### 12. Convention de nommage fichiers CDAR et factures
+
+Revoir et formaliser la convention de nommage pour les fichiers CDAR et les factures (identifiants de documents, noms de fichiers retour, nommage SFTP). À discuter avec Nicolas.
+
+- [ ] Définir la convention pour les noms de fichiers CDAR retournés (`CDV_{id}.xml`)
+- [ ] Définir la convention pour les noms de fichiers factures (entrée/sortie)
+- [ ] Aligner le `document_id` (MDT-4) et le `document_name` (MDT-5) avec les specs AFNOR
+- [ ] Documenter les conventions dans `docs/cdar.md`
+
 ## Basse priorité
 
 ### 9. Réécriture Oxalis (Access Point Peppol en Rust)

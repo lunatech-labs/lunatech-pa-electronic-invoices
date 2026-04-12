@@ -4,6 +4,11 @@ use pdp_core::model::InvoiceData;
 
 use crate::model::*;
 
+/// Identifiant standard du PPF (Portail Public de Facturation)
+const PPF_GLOBAL_ID: &str = "9998";
+/// Scheme ID de l'identifiant PPF (CEF eDelivery)
+const PPF_SCHEME_ID: &str = "0238";
+
 /// Générateur de CDV (Compte-rendu De Vie) conformes au format
 /// CrossDomainAcknowledgementAndResponse D22B
 pub struct CdarGenerator {
@@ -18,6 +23,18 @@ impl CdarGenerator {
         Self {
             pdp_siren: pdp_siren.to_string(),
             pdp_name: pdp_name.to_string(),
+        }
+    }
+
+    /// Construit le TradeParty destinataire PPF (rôle DFH)
+    fn ppf_recipient() -> TradeParty {
+        TradeParty {
+            global_id: Some(PPF_GLOBAL_ID.to_string()),
+            global_id_scheme: Some(PPF_SCHEME_ID.to_string()),
+            name: Some("PPF".to_string()),
+            role_code: RoleCode::DFH,
+            endpoint_id: None,
+            endpoint_scheme: None,
         }
     }
 
@@ -79,6 +96,7 @@ impl CdarGenerator {
                     endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
                     endpoint_scheme: Some("0225".to_string()),
                 },
+                Self::ppf_recipient(),
             ],
             multiple_references: false,
             type_code: CdvTypeCode::Transmission,
@@ -123,6 +141,8 @@ impl CdarGenerator {
         let seller_siren = invoice.seller_siret.as_deref()
             .map(|s| if s.len() >= 9 { &s[..9] } else { s })
             .unwrap_or("000000000");
+        let buyer_siren = invoice.buyer_siret.as_deref()
+            .map(|s| if s.len() >= 9 { &s[..9] } else { s });
 
         let statuses: Vec<DocumentStatus> = errors.iter().enumerate().map(|(i, err)| {
             let reason_code = err.reason_code.as_ref()
@@ -163,16 +183,30 @@ impl CdarGenerator {
                 endpoint_id: None,
                 endpoint_scheme: None,
             }),
-            recipients: vec![
-                TradeParty {
-                    global_id: Some(seller_siren.to_string()),
-                    global_id_scheme: Some("0002".to_string()),
-                    name: invoice.seller_name.clone(),
-                    role_code: RoleCode::SE,
-                    endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
-                    endpoint_scheme: Some("0225".to_string()),
-                },
-            ],
+            recipients: {
+                let mut r = vec![
+                    TradeParty {
+                        global_id: Some(seller_siren.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: invoice.seller_name.clone(),
+                        role_code: RoleCode::SE,
+                        endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
+                        endpoint_scheme: Some("0225".to_string()),
+                    },
+                ];
+                if let Some(bs) = buyer_siren {
+                    r.push(TradeParty {
+                        global_id: Some(bs.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: invoice.buyer_name.clone(),
+                        role_code: RoleCode::BY,
+                        endpoint_id: Some(bs.to_string()),
+                        endpoint_scheme: None,
+                    });
+                }
+                r.push(Self::ppf_recipient());
+                r
+            },
             multiple_references: false,
             type_code: CdvTypeCode::Transmission,
             status_datetime: dt.clone(),
@@ -237,6 +271,7 @@ impl CdarGenerator {
                     endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
                     endpoint_scheme: Some("0225".to_string()),
                 },
+                Self::ppf_recipient(),
             ],
             multiple_references: false,
             type_code: CdvTypeCode::Transmission,
@@ -300,64 +335,104 @@ impl CdarGenerator {
         let label = status.label();
 
         // Déterminer le StatusCode (MDT-88) selon BR-FR-CDV-CL-05
+        // Valeurs conformes aux exemples XP Z12-012 Annexe B V1.3
         let mdt88 = match status {
-            InvoiceStatusCode::Deposee => Some(10),
-            InvoiceStatusCode::Emise => Some(10),
-            InvoiceStatusCode::Recue => Some(10),
-            InvoiceStatusCode::MiseADisposition => Some(10),
-            InvoiceStatusCode::PriseEnCharge => Some(4),
-            InvoiceStatusCode::Approuvee => Some(4),
-            InvoiceStatusCode::ApprouveePartiellement => Some(4),
-            InvoiceStatusCode::EnLitige => Some(4),
-            InvoiceStatusCode::Suspendue => Some(4),
-            InvoiceStatusCode::Completee => Some(4),
-            InvoiceStatusCode::Refusee => Some(8),
-            InvoiceStatusCode::PaiementTransmis => Some(4),
-            InvoiceStatusCode::Encaissee => Some(4),
-            InvoiceStatusCode::Rejetee => Some(8),
-            InvoiceStatusCode::Visee => Some(4),
-            InvoiceStatusCode::Annulee => Some(4),
-            InvoiceStatusCode::ErreurRoutage => Some(8),
-            InvoiceStatusCode::DemandePaiementDirect => Some(4),
-            InvoiceStatusCode::Affacturee => Some(4),
-            InvoiceStatusCode::AffactureeConfidentiel => Some(4),
-            InvoiceStatusCode::ChangementCompteAPayer => Some(4),
-            InvoiceStatusCode::NonAffacturee => Some(4),
-            InvoiceStatusCode::Irrecevable => Some(8),
+            InvoiceStatusCode::Deposee => Some(10),             // Received
+            InvoiceStatusCode::Emise => Some(10),               // Received
+            InvoiceStatusCode::Recue => Some(43),               // Transferred to the next party
+            InvoiceStatusCode::MiseADisposition => Some(48),    // Available
+            InvoiceStatusCode::PriseEnCharge => Some(45),       // Under investigation
+            InvoiceStatusCode::Approuvee => Some(1),            // Accepted
+            InvoiceStatusCode::ApprouveePartiellement => Some(1), // Accepted
+            InvoiceStatusCode::EnLitige => Some(46),            // Under query
+            InvoiceStatusCode::Suspendue => Some(46),           // Under query
+            InvoiceStatusCode::Completee => Some(45),           // Under investigation
+            InvoiceStatusCode::Refusee => Some(8),              // Rejected
+            InvoiceStatusCode::PaiementTransmis => Some(47),    // Pending
+            InvoiceStatusCode::Encaissee => Some(47),           // Pending
+            InvoiceStatusCode::Rejetee => Some(8),              // Rejected
+            InvoiceStatusCode::Visee => Some(1),                // Accepted
+            InvoiceStatusCode::Annulee => Some(8),              // Rejected
+            InvoiceStatusCode::ErreurRoutage => Some(8),        // Rejected
+            InvoiceStatusCode::DemandePaiementDirect => Some(47), // Pending
+            InvoiceStatusCode::Affacturee => Some(47),          // Pending
+            InvoiceStatusCode::AffactureeConfidentiel => Some(47), // Pending
+            InvoiceStatusCode::ChangementCompteAPayer => Some(47), // Pending
+            InvoiceStatusCode::NonAffacturee => Some(47),       // Pending
+            InvoiceStatusCode::Irrecevable => Some(8),          // Rejected
         };
 
-        // Destinataires selon le type
-        let recipients = if type_code == CdvTypeCode::Transmission {
-            vec![
-                TradeParty {
-                    global_id: Some(seller_siren.to_string()),
-                    global_id_scheme: Some("0002".to_string()),
-                    name: invoice.seller_name.clone(),
-                    role_code: RoleCode::SE,
-                    endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
-                    endpoint_scheme: Some("0225".to_string()),
-                },
-            ]
-        } else {
-            // Phase traitement : destinataires = vendeur + acheteur
-            vec![
-                TradeParty {
-                    global_id: Some(seller_siren.to_string()),
-                    global_id_scheme: Some("0002".to_string()),
-                    name: invoice.seller_name.clone(),
-                    role_code: RoleCode::SE,
-                    endpoint_id: None,
-                    endpoint_scheme: None,
-                },
-                TradeParty {
-                    global_id: Some(buyer_siren.to_string()),
-                    global_id_scheme: Some("0002".to_string()),
-                    name: invoice.buyer_name.clone(),
-                    role_code: RoleCode::BY,
-                    endpoint_id: None,
-                    endpoint_scheme: None,
-                },
-            ]
+        // Destinataires selon le statut et la phase
+        // Conforme aux exemples XP Z12-012 Annexe B V1.3 :
+        // - Transmission 200/201 : SE + DFH
+        // - Transmission 202/203 : SE + BY (PA-R notifie les deux parties)
+        // - Traitement 204-211 : SE seul (l'initiateur sait déjà)
+        // - Traitement 212 (Encaissée) : BY + DFH (vendeur est Issuer, pas destinataire)
+        // - Transmission 213/221/501 : utiliser generate_rejetee/irrecevable
+        let recipients = match (type_code, status) {
+            // Transmission : Reçue / MAD → vendeur + acheteur
+            (CdvTypeCode::Transmission, InvoiceStatusCode::Recue)
+            | (CdvTypeCode::Transmission, InvoiceStatusCode::MiseADisposition) => {
+                vec![
+                    TradeParty {
+                        global_id: Some(seller_siren.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: invoice.seller_name.clone(),
+                        role_code: RoleCode::SE,
+                        endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
+                        endpoint_scheme: Some("0225".to_string()),
+                    },
+                    TradeParty {
+                        global_id: Some(buyer_siren.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: invoice.buyer_name.clone(),
+                        role_code: RoleCode::BY,
+                        endpoint_id: Some(buyer_siren.to_string()),
+                        endpoint_scheme: None,
+                    },
+                ]
+            }
+            // Traitement : Encaissée → acheteur + PPF (vendeur est Issuer)
+            (CdvTypeCode::Traitement, InvoiceStatusCode::Encaissee) => {
+                vec![
+                    TradeParty {
+                        global_id: Some(buyer_siren.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: invoice.buyer_name.clone(),
+                        role_code: RoleCode::BY,
+                        endpoint_id: Some(buyer_siren.to_string()),
+                        endpoint_scheme: Some("0225".to_string()),
+                    },
+                    Self::ppf_recipient(),
+                ]
+            }
+            // Transmission par défaut (200, 201, etc.) : vendeur + PPF
+            (CdvTypeCode::Transmission, _) => {
+                vec![
+                    TradeParty {
+                        global_id: Some(seller_siren.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: invoice.seller_name.clone(),
+                        role_code: RoleCode::SE,
+                        endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
+                        endpoint_scheme: Some("0225".to_string()),
+                    },
+                    Self::ppf_recipient(),
+                ]
+            }
+            // Traitement par défaut (204-211 sauf 212) : vendeur seul
+            (CdvTypeCode::Traitement, _) => {
+                vec![
+                    TradeParty {
+                        global_id: Some(seller_siren.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: invoice.seller_name.clone(),
+                        role_code: RoleCode::SE,
+                        endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
+                        endpoint_scheme: Some("0225".to_string()),
+                    },
+                ]
+            }
         };
 
         CdvResponse {
