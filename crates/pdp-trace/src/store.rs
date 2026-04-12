@@ -121,6 +121,20 @@ impl TraceStore {
         Ok(Self { client, base_url })
     }
 
+    /// Crée un store no-op (Elasticsearch indisponible).
+    /// Les appels d'écriture sont silencieusement ignorés.
+    pub fn noop() -> Self {
+        Self {
+            client: Client::new(),
+            base_url: String::new(),
+        }
+    }
+
+    /// Retourne true si le store est connecté (pas no-op)
+    pub fn is_connected(&self) -> bool {
+        !self.base_url.is_empty()
+    }
+
     /// Crée un store pour les tests
     pub async fn for_test() -> PdpResult<Self> {
         let url = std::env::var("ELASTICSEARCH_URL")

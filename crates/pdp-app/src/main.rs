@@ -481,7 +481,8 @@ async fn cmd_transform(
 
 async fn cmd_stats(config_path: &std::path::Path) -> Result<()> {
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
-    let store = pdp_trace::TraceStore::new(&config.elasticsearch.url).await?;
+    let store = pdp_trace::TraceStore::new(&config.elasticsearch.url).await
+        .map_err(|e| anyhow::anyhow!("Elasticsearch indisponible : {}", e))?;
     let stats = store.get_stats().await?;
 
     println!("📊 Statistiques PDP ({}):", config.pdp.name);
@@ -495,7 +496,8 @@ async fn cmd_stats(config_path: &std::path::Path) -> Result<()> {
 
 async fn cmd_errors(config_path: &std::path::Path) -> Result<()> {
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
-    let store = pdp_trace::TraceStore::new(&config.elasticsearch.url).await?;
+    let store = pdp_trace::TraceStore::new(&config.elasticsearch.url).await
+        .map_err(|e| anyhow::anyhow!("Elasticsearch indisponible : {}", e))?;
     let errors = store.get_error_flows().await?;
 
     if errors.is_empty() {
@@ -523,7 +525,8 @@ async fn cmd_errors(config_path: &std::path::Path) -> Result<()> {
 
 async fn cmd_flow_events(config_path: &std::path::Path, flow_id: &str) -> Result<()> {
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
-    let store = pdp_trace::TraceStore::new(&config.elasticsearch.url).await?;
+    let store = pdp_trace::TraceStore::new(&config.elasticsearch.url).await
+        .map_err(|e| anyhow::anyhow!("Elasticsearch indisponible : {}", e))?;
 
     let uuid = uuid::Uuid::parse_str(flow_id)
         .map_err(|e| anyhow::anyhow!("ID de flux invalide: {}", e))?;
@@ -567,9 +570,13 @@ async fn build_router(
     base_dir: &std::path::Path,
     http_rx: Option<tokio::sync::mpsc::Receiver<pdp_core::Exchange>>,
 ) -> Result<pdp_core::Router> {
-    let store = std::sync::Arc::new(
-        pdp_trace::TraceStore::new(&config.elasticsearch.url).await?
-    );
+    let store = match pdp_trace::TraceStore::new(&config.elasticsearch.url).await {
+        Ok(s) => std::sync::Arc::new(s),
+        Err(e) => {
+            tracing::warn!(error = %e, "Elasticsearch indisponible — traçabilité désactivée");
+            std::sync::Arc::new(pdp_trace::TraceStore::noop())
+        }
+    };
 
     // Construire les producers PPF et AFNOR si configurés
     let ppf_producer = build_ppf_producer(config)?;
