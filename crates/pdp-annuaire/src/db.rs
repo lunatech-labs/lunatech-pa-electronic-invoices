@@ -720,6 +720,13 @@ CREATE INDEX IF NOT EXISTS idx_lignes_matricule ON lignes_annuaire(matricule);
 CREATE INDEX IF NOT EXISTS idx_lignes_nature_dates ON lignes_annuaire(nature, date_debut);
 CREATE INDEX IF NOT EXISTS idx_etab_siren ON etablissements(siren);
 
+-- Index trigram pour la recherche textuelle (ILIKE)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_ul_nom_trgm ON unites_legales USING gin (UPPER(nom) gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_etab_nom_trgm ON etablissements USING gin (UPPER(nom) gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_etab_adresse_trgm ON etablissements USING gin (UPPER(adresse_1) gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_etab_localite_trgm ON etablissements USING gin (UPPER(localite) gin_trgm_ops);
+
 CREATE TABLE IF NOT EXISTS annuaire_sync_metadata (
     id              BIGSERIAL PRIMARY KEY,
     horodate_production TEXT NOT NULL,
