@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 pub struct PdpConfig {
     pub pdp: PdpIdentity,
     pub elasticsearch: ElasticsearchConfig,
+    /// Connexion PostgreSQL (annuaire PPF)
+    #[serde(default)]
+    pub database: Option<DatabaseConfig>,
     pub routes: Vec<RouteConfig>,
     #[serde(default)]
     pub validation: ValidationConfig,
@@ -86,6 +89,36 @@ pub struct PdpIdentity {
 pub struct ElasticsearchConfig {
     #[serde(default = "default_es_url")]
     pub url: String,
+}
+
+/// Configuration PostgreSQL
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseConfig {
+    /// URL de connexion PostgreSQL
+    /// Ex: "postgresql://pdp:pdp@localhost:5432/pdp"
+    #[serde(default = "default_db_url")]
+    pub url: String,
+    /// Nombre maximum de connexions dans le pool (défaut: 10)
+    #[serde(default = "default_db_max_connections")]
+    pub max_connections: u32,
+}
+
+fn default_db_url() -> String {
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://pdp:pdp@localhost:5432/pdp".to_string())
+}
+
+fn default_db_max_connections() -> u32 {
+    10
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            url: default_db_url(),
+            max_connections: default_db_max_connections(),
+        }
+    }
 }
 
 fn default_es_url() -> String {

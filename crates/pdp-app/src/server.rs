@@ -70,6 +70,8 @@ pub struct AppState {
     pub bearer_tokens: Option<Vec<String>>,
     /// Métriques Prometheus
     pub metrics: Metrics,
+    /// Store annuaire PPF (optionnel — nécessite PostgreSQL)
+    pub annuaire_store: Option<pdp_annuaire::AnnuaireStore>,
 }
 
 /// Flux entrant reçu via l'API HTTP
@@ -141,6 +143,17 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/v1/flows/{flow_id}", get(handle_get_flow))
         .route("/v1/stats", get(handle_stats))
         .route("/v1/webhooks/callback", post(handle_webhook_callback))
+        // Annuaire PPF — Directory Service conforme AFNOR XP Z12-013 Annexe B
+        .route("/v1/siren/code-insee:{siren}", get(handle_ds_get_siren))
+        .route("/v1/siren/search", post(handle_ds_search_siren))
+        .route("/v1/siret/code-insee:{siret}", get(handle_ds_get_siret))
+        .route("/v1/siret/search", post(handle_ds_search_siret))
+        .route("/v1/routing-code/search", post(handle_ds_search_routing))
+        .route("/v1/directory-line/code:{addressing_id}", get(handle_ds_get_directory_line))
+        .route("/v1/directory-line/search", post(handle_ds_search_directory_lines))
+        // Endpoints internes (stats, plateformes)
+        .route("/v1/annuaire/stats", get(handle_annuaire_stats))
+        .route("/v1/annuaire/plateformes", get(handle_annuaire_plateformes))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -797,6 +810,257 @@ impl Default for ServerConfig {
             host: "0.0.0.0".to_string(),
             port: 8080,
         }
+    }
+}
+
+// ============================================================
+// Handlers Directory Service — AFNOR XP Z12-013 Annexe B
+// ============================================================
+
+/// Macro pour extraire le store annuaire ou retourner 503
+macro_rules! require_annuaire {
+    ($state:expr) => {
+        match &$state.annuaire_store {
+            Some(s) => s,
+            None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+                "error": "Annuaire non configuré (PostgreSQL requis)"
+            }))).into_response(),
+        }
+    };
+}
+
+/// GET /v1/siren/code-insee:{siren}
+async fn handle_ds_get_siren(
+    State(state): State<Arc<AppState>>,
+    Path(siren): Path<String>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+
+    let ul = match store.lookup_unite_legale(&siren).await {
+        Ok(Some(ul)) => ul,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "error": format!("SIREN {} non trouvé", siren)
+        }))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "siren": ul.siren.trim(),
+        "raisonSociale": ul.nom,
+        "typeEntite": ul.type_entite.as_code(),
+        "statutAdministratif": ul.statut.as_code(),
+    }))).into_response()
+}
+
+/// POST /v1/siren/search
+async fn handle_ds_search_siren(
+    State(state): State<Arc<AppState>>,
+    Json(params): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+    let siren = params.get("siren").and_then(|v| v.as_str()).unwrap_or("");
+
+    if siren.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Le champ 'siren' est requis"}))).into_response();
+    }
+
+    let ul = match store.lookup_unite_legale(siren).await {
+        Ok(Some(ul)) => ul,
+        Ok(None) => return (StatusCode::OK, Json(serde_json::json!({"items": [], "total": 0}))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "items": [{
+            "siren": ul.siren.trim(),
+            "raisonSociale": ul.nom,
+            "typeEntite": ul.type_entite.as_code(),
+            "statutAdministratif": ul.statut.as_code(),
+        }],
+        "total": 1
+    }))).into_response()
+}
+
+/// GET /v1/siret/code-insee:{siret}
+async fn handle_ds_get_siret(
+    State(state): State<Arc<AppState>>,
+    Path(siret): Path<String>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+
+    let siren = if siret.len() >= 9 { &siret[..9] } else { &siret };
+    let etabs = match store.lookup_etablissements(siren).await {
+        Ok(e) => e,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    let etab = etabs.iter().find(|e| e.siret.trim() == siret);
+    match etab {
+        Some(e) => (StatusCode::OK, Json(serde_json::json!({
+            "siret": e.siret.trim(),
+            "siren": siren,
+            "nic": &siret[9..],
+            "raisonSociale": e.nom,
+            "adresse": e.adresse_1,
+            "codePostal": e.code_postal,
+            "ville": e.localite,
+        }))).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": format!("SIRET {} non trouvé", siret)}))).into_response(),
+    }
+}
+
+/// POST /v1/siret/search
+async fn handle_ds_search_siret(
+    State(state): State<Arc<AppState>>,
+    Json(params): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+    let siren = params.get("siren").and_then(|v| v.as_str()).unwrap_or("");
+
+    if siren.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Le champ 'siren' est requis"}))).into_response();
+    }
+
+    match store.lookup_etablissements(siren).await {
+        Ok(etabs) => {
+            let total = etabs.len();
+            let items: Vec<_> = etabs.iter().map(|e| serde_json::json!({
+                "siret": e.siret.trim(),
+                "siren": siren,
+                "raisonSociale": e.nom,
+                "adresse": e.adresse_1,
+                "codePostal": e.code_postal,
+                "ville": e.localite,
+            })).collect();
+            (StatusCode::OK, Json(serde_json::json!({"items": items, "total": total}))).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// POST /v1/routing-code/search
+async fn handle_ds_search_routing(
+    State(state): State<Arc<AppState>>,
+    Json(params): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+    let siren = params.get("siren").and_then(|v| v.as_str()).unwrap_or("");
+    let siret = params.get("siret").and_then(|v| v.as_str());
+    let suffixe = params.get("suffixe").and_then(|v| v.as_str());
+
+    if siren.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Le champ 'siren' est requis"}))).into_response();
+    }
+
+    let today = chrono::Local::now().format("%Y%m%d").to_string();
+    match store.resolve_routing(siren, siret, None, suffixe, &today).await {
+        Ok(Some(r)) => {
+            (StatusCode::OK, Json(serde_json::json!({
+                "items": [{
+                    "siren": siren,
+                    "siret": siret,
+                    "idPdp": r.matricule_plateforme,
+                    "nomPdp": r.nom_plateforme,
+                    "codeRoutage": serde_json::Value::Null,
+                }],
+                "total": 1
+            }))).into_response()
+        }
+        Ok(None) => (StatusCode::OK, Json(serde_json::json!({"items": [], "total": 0}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// GET /v1/directory-line/code:{addressing_id}
+async fn handle_ds_get_directory_line(
+    State(state): State<Arc<AppState>>,
+    Path(addressing_id): Path<String>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+
+    // L'addressing_id dans le fichier PPF est le SIREN
+    let siren = &addressing_id;
+    let today = chrono::Local::now().format("%Y%m%d").to_string();
+
+    match store.resolve_routing(siren, None, None, None, &today).await {
+        Ok(Some(r)) => {
+            (StatusCode::OK, Json(serde_json::json!({
+                "id": addressing_id,
+                "siren": siren,
+                "idPdp": r.matricule_plateforme,
+                "nomPdp": r.nom_plateforme,
+                "statut": "ACTIF",
+            }))).into_response()
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": format!("Ligne d'annuaire {} non trouvée", addressing_id)}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// POST /v1/directory-line/search
+async fn handle_ds_search_directory_lines(
+    State(state): State<Arc<AppState>>,
+    Json(params): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+    let siren = params.get("siren").and_then(|v| v.as_str()).unwrap_or("");
+
+    if siren.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Le champ 'siren' est requis"}))).into_response();
+    }
+
+    let today = chrono::Local::now().format("%Y%m%d").to_string();
+    match store.resolve_routing(siren, None, None, None, &today).await {
+        Ok(Some(r)) => {
+            (StatusCode::OK, Json(serde_json::json!({
+                "items": [{
+                    "id": siren,
+                    "siren": siren,
+                    "idPdp": r.matricule_plateforme,
+                    "nomPdp": r.nom_plateforme,
+                    "statut": "ACTIF",
+                }],
+                "total": 1
+            }))).into_response()
+        }
+        Ok(None) => (StatusCode::OK, Json(serde_json::json!({"items": [], "total": 0}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+// ============================================================
+// Handlers internes — stats et plateformes
+// ============================================================
+
+async fn handle_annuaire_stats(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+
+    match store.count_all().await {
+        Ok(stats) => {
+            let last_sync = store.last_sync_horodate().await.unwrap_or(None);
+            (StatusCode::OK, Json(serde_json::json!({
+                "unitesLegales": stats.unites_legales,
+                "etablissements": stats.etablissements,
+                "codesRoutage": stats.codes_routage,
+                "plateformes": stats.plateformes,
+                "lignesAnnuaire": stats.lignes_annuaire,
+                "derniereSynchro": last_sync,
+            }))).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+async fn handle_annuaire_plateformes(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+
+    match store.list_plateformes().await {
+        Ok(pfs) => (StatusCode::OK, Json(serde_json::json!({"plateformes": pfs, "total": pfs.len()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
     }
 }
 

@@ -38,6 +38,25 @@ services:
       - monitoring
     restart: unless-stopped
 
+  # PostgreSQL — annuaire PPF local
+  postgres:
+    image: postgres:16-alpine
+    container_name: pdp-postgres
+    environment:
+      - POSTGRES_USER=pdp
+      - POSTGRES_PASSWORD=pdp
+      - POSTGRES_DB=pdp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdp"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   # PDP principal - traitement des factures
   pdp:
     build:
@@ -46,6 +65,8 @@ services:
     container_name: pdp-facture
     depends_on:
       elasticsearch:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     volumes:
       - ./data/in:/app/data/in
@@ -58,6 +79,7 @@ services:
       - PDP_SPECS_DIR=/app/specs
       - PDP_CONFIG=/app/config.yaml
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - DATABASE_URL=postgresql://pdp:pdp@postgres:5432/pdp
       - PEPPOL_INBOX=/app/peppol/inbox
       - PEPPOL_OUTBOX=/app/peppol/outbox
     restart: unless-stopped
@@ -186,6 +208,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  pgdata:
   esdata:
   smp-data:               # Données SMP (participants, endpoints)
   peppol-inbound:       # Messages PEPPOL reçus (Oxalis → PDP)

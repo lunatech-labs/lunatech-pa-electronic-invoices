@@ -6,7 +6,30 @@
 use sqlx::postgres::PgPool;
 use tracing::info;
 
+use serde::Serialize;
+
 use crate::model::*;
+
+/// Ligne d'établissement pour les résultats de requête
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct EtablissementRow {
+    pub siret: String,
+    pub nom: String,
+    pub type_etablissement: Option<String>,
+    pub adresse_1: Option<String>,
+    pub localite: Option<String>,
+    pub code_postal: Option<String>,
+}
+
+/// Ligne de plateforme pour les résultats de requête
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct PlateformeRow {
+    pub matricule: String,
+    pub nom: String,
+    pub nom_commercial: Option<String>,
+    pub type_plateforme: String,
+    pub date_debut_immat: String,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -373,6 +396,49 @@ impl AnnuaireStore {
             type_plateforme: tp.and_then(|s| TypePlateforme::from_code(&s)),
             maille: RoutingMaille::Siren,
         }))
+    }
+
+    // --- Lookups directs ---
+
+    /// Recherche une unité légale par SIREN
+    pub async fn lookup_unite_legale(&self, siren: &str) -> Result<Option<UniteLegale>, DbError> {
+        let row = sqlx::query_as::<_, (i64, String, String, String, String, bool)>(
+            "SELECT id_instance, siren, nom, type_entite, statut, diffusible FROM unites_legales WHERE siren = $1",
+        )
+        .bind(siren)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|(id, siren, nom, te, st, diff)| UniteLegale {
+            id_instance: id,
+            motif_presence: MotifPresence::Creation,
+            siren,
+            nom,
+            type_entite: TypeEntite::from_code(&te).unwrap_or(TypeEntite::Assujetti),
+            statut: Statut::from_code(&st).unwrap_or(Statut::Actif),
+            diffusible: if diff { Diffusible::Oui } else { Diffusible::Partiel },
+        }))
+    }
+
+    /// Recherche les établissements d'un SIREN
+    pub async fn lookup_etablissements(&self, siren: &str) -> Result<Vec<EtablissementRow>, DbError> {
+        let rows = sqlx::query_as::<_, EtablissementRow>(
+            "SELECT siret, nom, type_etablissement, adresse_1, localite, code_postal FROM etablissements WHERE siren = $1 ORDER BY siret",
+        )
+        .bind(siren)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Recherche les plateformes enregistrées
+    pub async fn list_plateformes(&self) -> Result<Vec<PlateformeRow>, DbError> {
+        let rows = sqlx::query_as::<_, PlateformeRow>(
+            "SELECT matricule, nom, nom_commercial, type_plateforme, date_debut_immat FROM plateformes ORDER BY matricule",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 
     // --- Stats ---

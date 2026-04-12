@@ -69,6 +69,36 @@ enum Commands {
         /// ID du flux
         flow_id: String,
     },
+
+    /// Gestion de l'annuaire PPF local
+    Annuaire {
+        #[command(subcommand)]
+        action: AnnuaireCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum AnnuaireCommands {
+    /// Importe un fichier F14 (export annuaire PPF) dans PostgreSQL
+    Import {
+        /// Chemin vers le fichier F14 XML
+        file: PathBuf,
+    },
+    /// Affiche les statistiques de l'annuaire local
+    Stats,
+    /// Recherche une entreprise par SIREN
+    Lookup {
+        /// SIREN à rechercher
+        siren: String,
+    },
+    /// Résout le routage pour un destinataire
+    Route {
+        /// SIREN du destinataire
+        siren: String,
+        /// SIRET du destinataire (optionnel)
+        #[arg(long)]
+        siret: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -89,6 +119,7 @@ async fn main() -> Result<()> {
         Commands::Stats => cmd_stats(&cli.config).await,
         Commands::Errors => cmd_errors(&cli.config).await,
         Commands::FlowEvents { flow_id } => cmd_flow_events(&cli.config, &flow_id).await,
+        Commands::Annuaire { action } => cmd_annuaire(&cli.config, action).await,
     }
 }
 
@@ -128,6 +159,30 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
             }
         };
 
+        // Connexion PostgreSQL pour l'annuaire PPF (optionnelle)
+        let annuaire_store = if let Some(ref db_config) = config.database {
+            match sqlx::postgres::PgPoolOptions::new()
+                .max_connections(db_config.max_connections)
+                .connect(&db_config.url)
+                .await
+            {
+                Ok(pool) => {
+                    let store = pdp_annuaire::AnnuaireStore::new(pool);
+                    if let Err(e) = store.migrate().await {
+                        tracing::warn!(error = %e, "Migration annuaire échouée");
+                    }
+                    tracing::info!("Annuaire PPF connecté (PostgreSQL)");
+                    Some(store)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Impossible de connecter PostgreSQL pour l'annuaire");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let app_state = std::sync::Arc::new(server::AppState {
             pdp_name: config.pdp.name.clone(),
             pdp_matricule: config.pdp.matricule.clone().unwrap_or_default(),
@@ -136,6 +191,7 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
             bearer_tokens: http_config.bearer_tokens.clone(),
             trace_store,
             metrics: server::Metrics::default(),
+            annuaire_store,
         });
 
         let server_config = server::ServerConfig {
@@ -1158,4 +1214,112 @@ fn build_afnor_clients(
     }
 
     Ok((Some(annuaire), Some(partner_directory), afnor_producers))
+}
+
+// ============================================================
+// Commandes annuaire PPF
+// ============================================================
+
+async fn connect_annuaire_db(config_path: &std::path::Path) -> Result<pdp_annuaire::AnnuaireStore> {
+    let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
+    let db_config = config.database.unwrap_or_default();
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(db_config.max_connections)
+        .connect(&db_config.url)
+        .await?;
+    let store = pdp_annuaire::AnnuaireStore::new(pool);
+    store.migrate().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+    Ok(store)
+}
+
+async fn cmd_annuaire(config_path: &std::path::Path, action: AnnuaireCommands) -> Result<()> {
+    match action {
+        AnnuaireCommands::Import { file } => {
+            let store = connect_annuaire_db(config_path).await?;
+
+            println!("Import F14 : {}", file.display());
+            let f = std::fs::File::open(&file)?;
+            let reader = std::io::BufReader::with_capacity(8 * 1024 * 1024, f);
+
+            let start = std::time::Instant::now();
+            let stats = pdp_annuaire::ingest_f14(reader, &store, None)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let elapsed = start.elapsed();
+
+            println!("\nImport terminé en {:.1}s", elapsed.as_secs_f64());
+            println!("  Unités légales  : {}", stats.unites_legales);
+            println!("  Établissements  : {}", stats.etablissements);
+            println!("  Codes routage   : {}", stats.codes_routage);
+            println!("  Plateformes     : {}", stats.plateformes);
+            println!("  Lignes annuaire : {}", stats.lignes_annuaire);
+            if stats.errors > 0 {
+                println!("  Erreurs         : {}", stats.errors);
+            }
+            Ok(())
+        }
+
+        AnnuaireCommands::Stats => {
+            let store = connect_annuaire_db(config_path).await?;
+            let stats = store.count_all().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let last_sync = store.last_sync_horodate().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            println!("Annuaire PPF local :");
+            println!("  Unités légales  : {}", stats.unites_legales);
+            println!("  Établissements  : {}", stats.etablissements);
+            println!("  Codes routage   : {}", stats.codes_routage);
+            println!("  Plateformes     : {}", stats.plateformes);
+            println!("  Lignes annuaire : {}", stats.lignes_annuaire);
+            if let Some(h) = last_sync {
+                println!("  Dernière synchro: {}", h);
+            } else {
+                println!("  Dernière synchro: jamais");
+            }
+            Ok(())
+        }
+
+        AnnuaireCommands::Lookup { siren } => {
+            let store = connect_annuaire_db(config_path).await?;
+            let result = store.lookup_unite_legale(&siren)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            match result {
+                Some(ul) => {
+                    println!("SIREN {} : {}", ul.siren, ul.nom);
+                    println!("  Type      : {:?}", ul.type_entite);
+                    println!("  Statut    : {:?}", ul.statut);
+                    println!("  Diffusible: {:?}", ul.diffusible);
+                }
+                None => println!("SIREN {} non trouvé dans l'annuaire local", siren),
+            }
+            Ok(())
+        }
+
+        AnnuaireCommands::Route { siren, siret } => {
+            let store = connect_annuaire_db(config_path).await?;
+            let today = chrono::Local::now().format("%Y%m%d").to_string();
+            let result = store.resolve_routing(
+                &siren,
+                siret.as_deref(),
+                None,
+                None,
+                &today,
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            match result {
+                Some(r) => {
+                    println!("Routage pour SIREN {} :", siren);
+                    println!("  Plateforme : {}", r.matricule_plateforme);
+                    if let Some(nom) = &r.nom_plateforme {
+                        println!("  Nom        : {}", nom);
+                    }
+                    println!("  Type       : {:?}", r.type_plateforme);
+                    println!("  Maille     : {:?}", r.maille);
+                }
+                None => println!("Aucun routage trouvé pour SIREN {}", siren),
+            }
+            Ok(())
+        }
+    }
 }
