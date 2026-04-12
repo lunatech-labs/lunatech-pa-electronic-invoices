@@ -118,6 +118,39 @@ Mesurent la performance end-to-end sur des volumes realistes :
 | `scaling_by_invoice_size/standard` | Facture CII standard |
 | `scaling_by_invoice_size/large_50_lines` | Facture CII avec 50+ lignes |
 
+### Resultats de reference (Apple Silicon)
+
+**Parsing batch :**
+
+| Format | 10 factures | 100 factures | 1000 factures | Throughput |
+|--------|------------|-------------|---------------|-----------|
+| CII | 290 us | 2.9 ms | 29 ms | ~34 000/s |
+| UBL | 160 us | 1.6 ms | 16 ms | ~62 000/s |
+
+**Pipeline complet (CII -> CDV 200 -> XML) :**
+
+| Volume | Temps | Throughput |
+|--------|-------|-----------|
+| 1 facture | ~35 us | ~28 500/s |
+| 100 factures | ~3.5 ms | ~28 500/s |
+
+Scalabilite lineaire confirmee.
+
+**Generation CDV batch :**
+
+| Volume | Generate + XML | Roundtrip complet |
+|--------|---------------|-------------------|
+| 10 | 52 us (191K/s) | 150 us (66K/s) |
+| 100 | 530 us (186K/s) | 1.5 ms (66K/s) |
+| 1000 | 5.3 ms (190K/s) | 15 ms (66K/s) |
+
+**Scalabilite par taille de facture :**
+
+| Facture | Taille | Parsing | Throughput |
+|---------|--------|---------|-----------|
+| Standard | ~10 KB | 29 us | 346 MiB/s |
+| 50+ lignes | ~165 KB | 334 us | 493 MiB/s |
+
 ## Generation de fixtures
 
 Les fixtures Factur-X sont des PDF/A-3a conformes generes via le pipeline complet (Typst + lopdf + qpdf).
