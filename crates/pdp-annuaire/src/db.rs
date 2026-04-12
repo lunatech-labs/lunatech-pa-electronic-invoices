@@ -50,7 +50,13 @@ impl AnnuaireStore {
 
     /// Crée les tables si elles n'existent pas
     pub async fn migrate(&self) -> Result<(), DbError> {
-        sqlx::query(SCHEMA_SQL).execute(&self.pool).await?;
+        for statement in SCHEMA_SQL.split(';') {
+            let stmt = statement.trim();
+            if stmt.is_empty() {
+                continue;
+            }
+            sqlx::query(stmt).execute(&self.pool).await?;
+        }
         info!("Schéma annuaire initialisé");
         Ok(())
     }

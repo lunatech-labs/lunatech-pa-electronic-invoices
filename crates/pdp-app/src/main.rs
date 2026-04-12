@@ -1237,15 +1237,29 @@ async fn cmd_annuaire(config_path: &std::path::Path, action: AnnuaireCommands) -
         AnnuaireCommands::Import { file } => {
             let store = connect_annuaire_db(config_path).await?;
 
-            println!("Import F14 : {}", file.display());
+            let file_size = std::fs::metadata(&file)?.len();
             let f = std::fs::File::open(&file)?;
-            let reader = std::io::BufReader::with_capacity(8 * 1024 * 1024, f);
+
+            // Barre de progression sur les bytes lus
+            let pb = indicatif::ProgressBar::new(file_size);
+            pb.set_style(
+                indicatif::ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})")
+                    .unwrap()
+                    .progress_chars("##-"),
+            );
+            pb.set_message("Parsing F14...");
+
+            let reader = pb.wrap_read(f);
+            let reader = std::io::BufReader::with_capacity(8 * 1024 * 1024, reader);
 
             let start = std::time::Instant::now();
             let stats = pdp_annuaire::ingest_f14(reader, &store, None)
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             let elapsed = start.elapsed();
+
+            pb.finish_with_message("Import terminé");
 
             println!("\nImport terminé en {:.1}s", elapsed.as_secs_f64());
             println!("  Unités légales  : {}", stats.unites_legales);
@@ -1256,6 +1270,9 @@ async fn cmd_annuaire(config_path: &std::path::Path, action: AnnuaireCommands) -
             if stats.errors > 0 {
                 println!("  Erreurs         : {}", stats.errors);
             }
+            let total = stats.unites_legales + stats.etablissements + stats.codes_routage
+                + stats.plateformes + stats.lignes_annuaire;
+            println!("  Throughput      : {:.0} éléments/s", total as f64 / elapsed.as_secs_f64());
             Ok(())
         }
 
