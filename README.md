@@ -1,6 +1,14 @@
-# PDP Facture - Plateforme de Dématérialisation Partenaire
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/ferrite_logo_dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/ferrite_logo_light.svg">
+    <img alt="Ferrite" src="assets/ferrite_logo_light.svg" width="680">
+  </picture>
+</p>
 
-Librairie modulaire en Rust pour la facturation électronique conforme à la réforme française (EN16931, Factur-X, PPF, AFNOR).
+# Ferrite — Plateforme de Dématérialisation Partenaire
+
+Librairie modulaire open source en Rust pour la facturation électronique conforme à la réforme française (EN16931, Factur-X, PPF, AFNOR).
 
 ## Architecture modulaire
 

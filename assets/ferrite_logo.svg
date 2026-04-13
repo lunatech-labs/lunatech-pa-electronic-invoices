@@ -1,0 +1,108 @@
+<svg width="100%" viewBox="0 0 680 240" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Ferrite — PA e-invoicing e-reporting open source</title>
+  <desc>Bold startup logo with detailed hexagon icon and elegant serif wordmark</desc>
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&amp;family=DM+Sans:wght@400;500&amp;display=swap');
+
+      @media (prefers-color-scheme: dark) {
+        .hex-outer  { fill: #26215C; stroke: #7F77DD; }
+        .hex-inner  { fill: #3C3489; }
+        .hex-accent { fill: #534AB7; }
+        .line-main  { stroke: #CECBF6; }
+        .line-dim   { stroke: #7F77DD; }
+        .dot-amber  { fill: #EF9F27; }
+        .dot-teal   { fill: #1D9E75; }
+        .wordmark   { fill: #CECBF6; }
+        .tagline    { fill: #888780; }
+        .divider    { stroke: #444441; }
+        .os-bg      { fill: #085041; stroke: #1D9E75; }
+        .os-text    { fill: #9FE1CB; }
+        .os-check   { stroke: #9FE1CB; }
+        .rust-bg    { fill: #4A1B0C; stroke: #D85A30; }
+        .rust-text  { fill: #F0997B; }
+        .eu-bg      { fill: #0C447C; stroke: #378ADD; }
+        .eu-text    { fill: #B5D4F4; }
+        .eu-star    { fill: #FAC775; }
+      }
+      @media (prefers-color-scheme: light) {
+        .hex-outer  { fill: #EEEDFE; stroke: #534AB7; }
+        .hex-inner  { fill: #7F77DD; }
+        .hex-accent { fill: #AFA9EC; }
+        .line-main  { stroke: #FFFFFF; }
+        .line-dim   { stroke: #CECBF6; }
+        .dot-amber  { fill: #EF9F27; }
+        .dot-teal   { fill: #1D9E75; }
+        .wordmark   { fill: #26215C; }
+        .tagline    { fill: #888780; }
+        .divider    { stroke: #D3D1C7; }
+        .os-bg      { fill: #E1F5EE; stroke: #1D9E75; }
+        .os-text    { fill: #0F6E56; }
+        .os-check   { stroke: #0F6E56; }
+        .rust-bg    { fill: #FAECE7; stroke: #D85A30; }
+        .rust-text  { fill: #993C1D; }
+        .eu-bg      { fill: #E6F1FB; stroke: #378ADD; }
+        .eu-text    { fill: #185FA5; }
+        .eu-star    { fill: #BA7517; }
+      }
+    </style>
+  </defs>
+
+  <!-- HEXAGON -->
+  <polygon points="108,18 164,50 164,114 108,146 52,114 52,50"
+    class="hex-outer" stroke-width="2.5"/>
+  <polygon points="108,38 138,55 138,91 108,108 78,91 78,55"
+    class="hex-inner"/>
+  <polygon points="138,55 164,50 164,114" class="hex-accent" opacity="0.5"/>
+
+  <!-- Invoice lines -->
+  <line x1="84" y1="66" x2="132" y2="66" class="line-main" stroke-width="3" stroke-linecap="round"/>
+  <line x1="84" y1="79" x2="110" y2="79" class="line-dim"  stroke-width="2" stroke-linecap="round"/>
+  <line x1="116" y1="79" x2="132" y2="79" class="line-main" stroke-width="2" stroke-linecap="round"/>
+  <line x1="84" y1="92" x2="120" y2="92" class="line-dim"  stroke-width="2" stroke-linecap="round"/>
+
+  <circle cx="113" cy="79" r="4.5" class="dot-amber"/>
+  <circle cx="132" cy="92" r="3.5" class="dot-teal"/>
+
+  <!-- WORDMARK -->
+  <text x="192" y="100"
+    font-family="'Playfair Display', 'Georgia', 'Times New Roman', serif"
+    font-size="64" font-weight="700" letter-spacing="-2"
+    class="wordmark">ferrite</text>
+
+  <line x1="192" y1="114" x2="620" y2="114" class="divider" stroke-width="0.5"/>
+
+  <!-- Tagline -->
+  <text x="192" y="133"
+    font-family="'DM Sans', 'Helvetica Neue', Arial, sans-serif"
+    font-size="13" letter-spacing="2"
+    class="tagline">PA · E-INVOICING · E-REPORTING · FERRITE.EU.COM</text>
+
+  <!-- BADGES -->
+  <!-- Open source -->
+  <rect x="192" y="155" width="130" height="26" rx="5" class="os-bg" stroke-width="1"/>
+  <path d="M204,168 L207,172 L214,163" fill="none"
+    class="os-check" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="222" y="173"
+    font-family="'DM Sans', 'Helvetica Neue', Arial, sans-serif"
+    font-size="12" font-weight="500" class="os-text">open source</text>
+
+  <!-- Built in Rust -->
+  <rect x="332" y="155" width="108" height="26" rx="5" class="rust-bg" stroke-width="1"/>
+  <text x="386" y="173"
+    font-family="'DM Sans', 'Helvetica Neue', Arial, sans-serif"
+    font-size="12" font-weight="500" class="rust-text" text-anchor="middle">built in Rust</text>
+
+  <!-- EN 16931 -->
+  <rect x="450" y="155" width="108" height="26" rx="5" class="eu-bg" stroke-width="1"/>
+  <circle cx="466" cy="162" r="1.8" class="eu-star"/>
+  <circle cx="471" cy="160" r="1.8" class="eu-star"/>
+  <circle cx="476" cy="162" r="1.8" class="eu-star"/>
+  <circle cx="477" cy="167" r="1.8" class="eu-star"/>
+  <circle cx="474" cy="172" r="1.8" class="eu-star"/>
+  <circle cx="469" cy="173" r="1.8" class="eu-star"/>
+  <circle cx="465" cy="170" r="1.8" class="eu-star"/>
+  <text x="490" y="173"
+    font-family="'DM Sans', 'Helvetica Neue', Arial, sans-serif"
+    font-size="12" font-weight="500" class="eu-text">EN 16931</text>
+</svg>

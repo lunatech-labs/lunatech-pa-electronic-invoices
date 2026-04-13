@@ -1,0 +1,63 @@
+<svg width="1360" height="480" viewBox="0 0 680 240" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Ferrite — PA e-invoicing e-reporting open source</title>
+  <rect width="680" height="240" fill="white"/>
+
+  <!-- Hexagon outer -->
+  <polygon points="108,18 164,50 164,114 108,146 52,114 52,50"
+    fill="#EEEDFE" stroke="#534AB7" stroke-width="2.5"/>
+  <!-- Hexagon inner -->
+  <polygon points="108,38 138,55 138,91 108,108 78,91 78,55"
+    fill="#7F77DD"/>
+  <!-- Accent triangle -->
+  <polygon points="138,55 164,50 164,114" fill="#AFA9EC" opacity="0.5"/>
+
+  <!-- Invoice lines -->
+  <line x1="84" y1="66" x2="132" y2="66" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+  <line x1="84" y1="79" x2="110" y2="79" stroke="#CECBF6" stroke-width="2" stroke-linecap="round"/>
+  <line x1="116" y1="79" x2="132" y2="79" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <line x1="84" y1="92" x2="120" y2="92" stroke="#CECBF6" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="113" cy="79" r="4.5" fill="#EF9F27"/>
+  <circle cx="132" cy="92" r="3.5" fill="#1D9E75"/>
+
+  <!-- Wordmark -->
+  <text x="192" y="100"
+    font-family="Georgia, 'Times New Roman', serif"
+    font-size="64" font-weight="700" letter-spacing="-2"
+    fill="#26215C">ferrite</text>
+
+  <!-- Divider -->
+  <line x1="192" y1="114" x2="620" y2="114" stroke="#D3D1C7" stroke-width="0.5"/>
+
+  <!-- Tagline -->
+  <text x="192" y="133"
+    font-family="'Helvetica Neue', Arial, sans-serif"
+    font-size="13" letter-spacing="2"
+    fill="#888780">PA · E-INVOICING · E-REPORTING · FERRITE.EU.COM</text>
+
+  <!-- Badge: open source -->
+  <rect x="192" y="155" width="130" height="26" rx="5" fill="#E1F5EE" stroke="#1D9E75" stroke-width="1"/>
+  <path d="M204,168 L207,172 L214,163" fill="none"
+    stroke="#0F6E56" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="222" y="173"
+    font-family="'Helvetica Neue', Arial, sans-serif"
+    font-size="12" font-weight="500" fill="#0F6E56">open source</text>
+
+  <!-- Badge: built in Rust -->
+  <rect x="332" y="155" width="108" height="26" rx="5" fill="#FAECE7" stroke="#D85A30" stroke-width="1"/>
+  <text x="386" y="173"
+    font-family="'Helvetica Neue', Arial, sans-serif"
+    font-size="12" font-weight="500" fill="#993C1D" text-anchor="middle">built in Rust</text>
+
+  <!-- Badge: EN 16931 -->
+  <rect x="450" y="155" width="108" height="26" rx="5" fill="#E6F1FB" stroke="#378ADD" stroke-width="1"/>
+  <circle cx="466" cy="162" r="1.8" fill="#BA7517"/>
+  <circle cx="471" cy="160" r="1.8" fill="#BA7517"/>
+  <circle cx="476" cy="162" r="1.8" fill="#BA7517"/>
+  <circle cx="477" cy="167" r="1.8" fill="#BA7517"/>
+  <circle cx="474" cy="172" r="1.8" fill="#BA7517"/>
+  <circle cx="469" cy="173" r="1.8" fill="#BA7517"/>
+  <circle cx="465" cy="170" r="1.8" fill="#BA7517"/>
+  <text x="490" y="173"
+    font-family="'Helvetica Neue', Arial, sans-serif"
+    font-size="12" font-weight="500" fill="#185FA5">EN 16931</text>
+</svg>
