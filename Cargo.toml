@@ -39,7 +39,7 @@ quick-xml = { version = "0.31", features = ["serialize"] }
 roxmltree = "0.19"
 
 # PDF
-lopdf = "0.32"
+lopdf = "0.40"
 typst-as-lib = { version = "0.15", features = ["typst-kit-fonts"] }
 typst-pdf = "0.14"
 typst = "0.14"
