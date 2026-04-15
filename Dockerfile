@@ -6,7 +6,7 @@
 # =============================================================================
 
 # --- Stage 1: Build ---
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
 
 # Dépendances de build pour libxml2 (binding Rust)
 RUN apt-get update && apt-get install -y \
