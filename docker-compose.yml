@@ -5,7 +5,7 @@
 services:
   # Elasticsearch - traçabilité + archivage (un index par SIREN)
   elasticsearch:
-    image: elasticsearch:8.15.0
+    image: elasticsearch:9.3.3
     container_name: pdp-elasticsearch
     environment:
       - discovery.type=single-node
