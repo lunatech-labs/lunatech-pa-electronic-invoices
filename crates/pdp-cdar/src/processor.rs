@@ -1009,4 +1009,119 @@ mod tests {
         let exchange = Exchange::new(Vec::new()).with_filename("FFE0654A_AAA123_flux.xml");
         assert_eq!(determine_cdar_source(&exchange), "ppf");
     }
+
+    // ===== Tests exhaustifs : classify_error_reason =====
+    // Vérifie que chaque pattern de message d'erreur produit le bon StatusReasonCode
+    // conforme au "Tableau des motifs de STATUTS" (XP Z12-012 Annexe A V1.2)
+
+    #[test]
+    fn test_classify_syntax_xml_parse() {
+        // Erreurs de syntaxe XML → REJ_SEMAN
+        assert_eq!(classify_error_reason("parsing", "XML syntax error at line 42"), StatusReasonCode::RejSeman);
+        assert_eq!(classify_error_reason("parsing", "Parse error: unexpected token"), StatusReasonCode::RejSeman);
+        assert_eq!(classify_error_reason("parsing", "Invalid syntax in document"), StatusReasonCode::RejSeman);
+    }
+
+    #[test]
+    fn test_classify_schematron_br_rules() {
+        // Violations Schematron / BR-* → REJ_SEMAN
+        assert_eq!(classify_error_reason("validate", "Schematron validation failed"), StatusReasonCode::RejSeman);
+        assert_eq!(classify_error_reason("validate", "BR-FR-01: ID trop long"), StatusReasonCode::RejSeman);
+        assert_eq!(classify_error_reason("validate", "Rule BR-CO-17 violated"), StatusReasonCode::RejSeman);
+    }
+
+    #[test]
+    fn test_classify_xsd_schema() {
+        // Erreurs XSD → REJ_UNI
+        assert_eq!(classify_error_reason("validate", "XSD validation error"), StatusReasonCode::RejUni);
+        assert_eq!(classify_error_reason("validate", "Schema validation failed"), StatusReasonCode::RejUni);
+    }
+
+    #[test]
+    fn test_classify_doublon() {
+        // Doublon → DOUBLON
+        assert_eq!(classify_error_reason("dedup", "Facture en doublon"), StatusReasonCode::Doublon);
+        assert_eq!(classify_error_reason("dedup", "Duplicate invoice detected"), StatusReasonCode::Doublon);
+    }
+
+    #[test]
+    fn test_classify_siret_siren() {
+        // SIRET/SIREN → SIRET_ERR
+        assert_eq!(classify_error_reason("validate", "SIRET vendeur invalide"), StatusReasonCode::SiretErr);
+        assert_eq!(classify_error_reason("validate", "SIREN acheteur manquant"), StatusReasonCode::SiretErr);
+    }
+
+    #[test]
+    fn test_classify_tva() {
+        // TVA → TX_TVA_ERR
+        assert_eq!(classify_error_reason("validate", "Taux de TVA incorrect"), StatusReasonCode::TxTvaErr);
+        assert_eq!(classify_error_reason("validate", "VAT rate mismatch"), StatusReasonCode::TxTvaErr);
+    }
+
+    #[test]
+    fn test_classify_montant_total() {
+        // Montant/Total → MONTANTTOTAL_ERR
+        assert_eq!(classify_error_reason("validate", "Montant total incorrect"), StatusReasonCode::MontantTotalErr);
+        assert_eq!(classify_error_reason("validate", "Total amount mismatch"), StatusReasonCode::MontantTotalErr);
+    }
+
+    #[test]
+    fn test_classify_calcul() {
+        // Calcul → CALCUL_ERR
+        assert_eq!(classify_error_reason("validate", "Erreur de calcul"), StatusReasonCode::CalculErr);
+        assert_eq!(classify_error_reason("validate", "Calculation error on line 3"), StatusReasonCode::CalculErr);
+    }
+
+    #[test]
+    fn test_classify_adresse() {
+        // Adresse → ADR_ERR
+        assert_eq!(classify_error_reason("validate", "Adresse de facturation manquante"), StatusReasonCode::AdrErr);
+        assert_eq!(classify_error_reason("validate", "Invalid address for buyer"), StatusReasonCode::AdrErr);
+    }
+
+    #[test]
+    fn test_classify_destinataire() {
+        // Destinataire → DEST_ERR
+        assert_eq!(classify_error_reason("routing", "Destinataire inconnu"), StatusReasonCode::DestErr);
+        assert_eq!(classify_error_reason("routing", "Recipient not found"), StatusReasonCode::DestErr);
+    }
+
+    #[test]
+    fn test_classify_validation_step_fallback() {
+        // Step "validate" sans mot-clé reconnu → REJ_SEMAN
+        assert_eq!(classify_error_reason("validate", "Facture invalide sans détail"), StatusReasonCode::RejSeman);
+        assert_eq!(classify_error_reason("Validate", "Erreur générique"), StatusReasonCode::RejSeman);
+    }
+
+    #[test]
+    fn test_classify_fallback_non_conforme() {
+        // Aucun pattern reconnu → NON_CONFORME
+        assert_eq!(classify_error_reason("unknown", "Erreur inconnue"), StatusReasonCode::NonConforme);
+        assert_eq!(classify_error_reason("transform", "Conversion impossible"), StatusReasonCode::NonConforme);
+    }
+
+    #[test]
+    fn test_classify_all_irr_mappings() {
+        // Vérifie tous les mappings IRR via map_reception_to_irrecevabilite
+        assert_eq!(map_reception_to_irrecevabilite("REC-01", "vide.xml").0, StatusReasonCode::IrrVideF);
+        assert_eq!(map_reception_to_irrecevabilite("BR-FR-19", "gros.xml").0, StatusReasonCode::IrrTailleF);
+        assert_eq!(map_reception_to_irrecevabilite("REC-02", "fichier.csv").0, StatusReasonCode::IrrTypeF);
+        assert_eq!(map_reception_to_irrecevabilite("REC-03", "mauvais nom!.xml").0, StatusReasonCode::IrrNomPj);
+        assert_eq!(map_reception_to_irrecevabilite("REC-04", "").0, StatusReasonCode::IrrNomPj);
+        assert_eq!(map_reception_to_irrecevabilite("REC-05", "doublon.xml").0, StatusReasonCode::IrrTypeF);
+        assert_eq!(map_reception_to_irrecevabilite("INCONNU", "fichier.xml").0, StatusReasonCode::IrrSyntax);
+    }
+
+    #[test]
+    fn test_irr_messages_contain_filename() {
+        // Vérifie que les messages d'irrecevabilité contiennent le nom du fichier
+        let (_, msg) = map_reception_to_irrecevabilite("REC-01", "facture.xml");
+        assert!(msg.contains("facture.xml"), "Message IRR_VIDE_F devrait contenir le filename");
+
+        let (_, msg) = map_reception_to_irrecevabilite("REC-02", "export.csv");
+        assert!(msg.contains("export.csv"), "Message IRR_TYPE_F devrait contenir le filename");
+
+        let (_, msg) = map_reception_to_irrecevabilite("BR-FR-19", "enorme.xml");
+        assert!(msg.contains("enorme.xml"), "Message IRR_TAILLE_F devrait contenir le filename");
+    }
 }
