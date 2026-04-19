@@ -30,9 +30,14 @@ skipperont automatiquement si `document.type = "CDAR"`.
 
 ### `CdarProcessor`
 
-Génère un CDV après traitement d'une facture :
-- **200 Déposée** si la facture est valide
-- **213 Rejetée** si la facture a des erreurs
+Génère un CDV après traitement d'une facture. Paramétré par `CdarMode` :
+
+- **`CdarProcessor::emission()`** (PDP émettrice) :
+  - **200 Déposée** si la facture est valide
+  - **213 Rejetée** si la facture a des erreurs
+- **`CdarProcessor::reception()`** (PDP réceptrice) :
+  - **202 Reçue** si la facture est valide
+  - **213 Rejetée** si la facture a des erreurs
 
 ### `IrrecevabiliteProcessor`
 
@@ -104,27 +109,125 @@ propriété `cdv.source` :
 | 214 | Visée | Acknowledged |
 | 220 | Annulée | Cancelled |
 
-## Pipeline complet
+## Codes motifs CDV
+
+Référence : XP Z12-012 Annexe A V1.2, onglet "Tableau des motifs de STATUTS".
+
+### Codes IRR — Irrecevabilité (CDV 501)
+
+Utilisés par `IrrecevabiliteProcessor` quand les contrôles de réception échouent.
+
+| Code | Libellé | Contrôle | Mapping |
+|------|---------|----------|---------|
+| `IRR_VIDE_F` | Contrôle de non vide sur les fichiers du flux | Fichier vide | REC-01 |
+| `IRR_TYPE_F` | Contrôle de type et extension des fichiers du flux | Extension invalide (.csv, .txt...) | REC-02 |
+| `IRR_SYNTAX` | Contrôle syntaxique des fichiers du flux | XML non parseable | Fallback |
+| `IRR_TAILLE_F` | Contrôle de taille max des fichiers du flux | Fichier > 100 Mo | BR-FR-19 |
+| `IRR_NOM_PJ` | Contrôle du nom des PJ (caractères spéciaux) | Nom invalide ou absent | REC-03/04 |
+| `IRR_TAILLE_PJ` | Contrôle de taille des PJ | PJ trop volumineuse | (non implémenté) |
+| `IRR_VID_PJ` | Contrôle de PJ non vide | PJ vide | (non implémenté) |
+| `IRR_EXT_DOC` | Contrôle de l'extension des PJ | Extension PJ invalide | (non implémenté) |
+| `IRR_ANTIVIRUS` | Contrôle anti-virus | Fichier infecté | (non implémenté) |
+
+### Codes REJ — Rejet technique (CDV 213)
+
+Utilisés par `CdarProcessor` quand la validation échoue. Le code est déterminé
+par `classify_error_reason()` en analysant le message d'erreur.
+
+| Code | Libellé | Pattern détecté |
+|------|---------|-----------------|
+| `REJ_SEMAN` | Rejet pour erreur sémantique | "syntax", "xml", "parse", "schematron", "br-", "rule", step "validate" |
+| `REJ_UNI` | Rejet sur contrôle unicité | "xsd", "schema" |
+| `REJ_COH` | Rejet sur contrôle cohérence de données | (disponible, non mappé automatiquement) |
+| `REJ_ADR` | Rejet sur contrôle d'adressage | (disponible, non mappé automatiquement) |
+| `REJ_CONT_B2G` | Rejet sur contrôles métier B2G | (disponible, non mappé automatiquement) |
+| `REJ_REF_PJ` | Rejet sur référence de PJ | (disponible, non mappé automatiquement) |
+| `REJ_ASS_PJ` | Rejet sur erreur d'association de la PJ | (disponible, non mappé automatiquement) |
+
+### Codes métier — Refus, litige, etc. (CDV 210, 207, 206, 208)
+
+Utilisés par l'acheteur ou le vendeur dans les CDV de phase Traitement (TypeCode 23).
+Classés par `classify_error_reason()` quand le message contient les mots-clés.
+
+| Code | Libellé | Pattern détecté |
+|------|---------|-----------------|
+| `DOUBLON` | Facture en doublon | "doublon", "duplicate" |
+| `SIRET_ERR` | SIRET erroné ou absent | "siret", "siren" |
+| `TX_TVA_ERR` | Taux de TVA erroné | "tva", "vat" |
+| `MONTANTTOTAL_ERR` | Montant total erroné | "montant", "total", "amount" |
+| `CALCUL_ERR` | Erreur de calcul | "calcul", "calculation" |
+| `ADR_ERR` | Adresse de facturation erronée | "adresse", "address" |
+| `DEST_ERR` | Erreur de destinataire | "destinataire", "recipient" |
+| `DEST_INC` | Destinataire inconnu | (dans l'enum, non mappé auto) |
+| `NON_CONFORME` | Mention légale manquante | Fallback (aucun pattern reconnu) |
+| `COORD_BANC_ERR` | Erreur de coordonnées bancaires | (dans l'enum) |
+| `TRANSAC_INC` | Transaction inconnue | (dans l'enum) |
+| `EMMET_INC` | Émetteur inconnu | (dans l'enum) |
+| `CONTRAT_TERM` | Contrat terminé | (dans l'enum) |
+| `DOUBLE_FACT` | Double facture | (dans l'enum) |
+| `CMD_ERR` | N° de commande incorrect | (dans l'enum) |
+| `CODE_ROUTAGE_ERR` | Code routage absent ou erroné | (dans l'enum) |
+| `REF_CT_ABSENT` | Référence contractuelle manquante | (dans l'enum) |
+| `REF_ERR` | Référence incorrecte | (dans l'enum) |
+| `PU_ERR` | Prix unitaires incorrects | (dans l'enum) |
+| `REM_ERR` | Remise erronée | (dans l'enum) |
+| `QTE_ERR` | Quantité facturée incorrecte | (dans l'enum) |
+| `ART_ERR` | Article facturé incorrect | (dans l'enum) |
+| `MODPAI_ERR` | Modalités de paiement incorrectes | (dans l'enum) |
+| `QUALITE_ERR` | Qualité d'article incorrecte | (dans l'enum) |
+| `LIVR_INCOMP` | Problème de livraison | (dans l'enum) |
+| `ROUTAGE_ERR` | Erreur de routage | (dans l'enum) |
+| `JUSTIF_ABS` | Justificatif absent | (dans l'enum) |
+| `NON_TRANSMISE` | Destinataire non connecté | (dans l'enum) |
+| `AUTRE` | Autre | (dans l'enum) |
+
+## Pipelines émission et réception
+
+### Pipeline Émission (PDP émettrice)
 
 ```
 1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
-2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501 si échec réception)
+2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501 si échec, codes IRR_*)
 3. Routage            → DocumentTypeRouter (facture vs CDAR vs e-reporting)
-   ├─ Si CDAR         → parse CDV, set cdv.*, skip étapes 4-6
+   ├─ Si CDAR         → parse CDV, set cdv.*, skip étapes 4-7
+   └─ Si Facture      → continuer
+4. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
+5. Validation         → ValidateProcessor + XmlValidateProcessor (EN16931, BR-FR)
+6. Flux 1 PPF         → PpfFlux1Processor (TOUJOURS — données réglementaires)
+7. Transformation     → TransformProcessor (UBL ↔ CII, Factur-X)
+8. Génération CDV     → CdarProcessor::emission() (200 Déposée ou 213 Rejetée, codes REJ_*)
+9. Routage            → RoutingResolverProcessor (Annuaire PPF → PPF / PDP / intra-PDP)
+10. Distribution      → DynamicRoutingProducer (SFTP PPF, AFNOR Flow, ou intra-PDP)
+```
+
+### Pipeline Réception (PDP réceptrice)
+
+```
+1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
+2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501 si échec, codes IRR_*)
+3. Routage            → DocumentTypeRouter (facture vs CDAR)
+   ├─ Si CDAR         → CdvReceptionProcessor, set cdv.*, skip suite
    └─ Si Facture      → continuer
 4. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
 5. Validation         → ValidateProcessor + XmlValidateProcessor
-6. Transformation     → TransformProcessor (UBL ↔ CII, Factur-X)
-7. Génération CDV     → CdarProcessor (200 Déposée ou 213 Rejetée)
-8. Distribution       → destination (fichier, SFTP, PEPPOL, AFNOR)
+   PAS de Flux 1 PPF  (la PDP émettrice l'a déjà envoyé)
+6. Transformation     → TransformProcessor (optionnel)
+7. Génération CDV     → CdarProcessor::reception() (202 Reçue ou 213 Rejetée, codes REJ_*)
+8. Livraison          → FileEndpoint (répertoire acheteur)
 ```
 
 ## Tests
 
-108 tests (106 unit + 2 doc-tests) couvrant :
+147 tests couvrant :
 
 - **model** (12) : statuts, rôles, codes action, parties, sérialisation
-- **generator** (15) : génération XML pour tous les statuts
+- **generator** (15) : génération XML pour tous les statuts (200, 202, 213, 501)
 - **parser** (18) : parsing XML, fixtures officielles UC1-UC4
-- **processor** (63) : CdarProcessor, CdvReceptionProcessor, IrrecevabiliteProcessor,
-  DocumentTypeRouter (détection, sources, routage, skip)
+- **processor** (110) : CdarProcessor (émission/réception), CdvReceptionProcessor,
+  IrrecevabiliteProcessor, DocumentTypeRouter, classify_error_reason (14 tests),
+  map_reception_to_irrecevabilite
+- **pipeline_error_tests** (23) : tests d'intégration pipeline complet avec fichiers
+  invalides (vide, non-XML, XML mal formé, PDF sans XML, validation échouée, BR-FR)
+  en mode émission et réception, vérification des codes motifs et messages
+- **lifecycle_integration** (28) : CDV 200/202/213/501, émission vs réception,
+  conformité AFNOR (recipients, issuer, status codes)
