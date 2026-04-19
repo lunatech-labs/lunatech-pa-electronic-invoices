@@ -550,13 +550,16 @@ impl Processor for IrrecevabiliteProcessor {
 /// Mappe les rule_ids de réception vers un StatusReasonCode d'irrecevabilité
 /// et un message descriptif.
 ///
-/// Correspondance :
+/// Correspondance conforme au "Tableau des motifs de STATUTS"
+/// (XP Z12-012 Formats & profils, onglet "Tableau des motifs de STATUTS") :
 /// - REC-01 (fichier vide) → IRR_VIDE_F
 /// - BR-FR-19 (taille > 100 Mo) → IRR_TAILLE_F
-/// - REC-02 (extension non reconnue) → IRR_EXT_DOC
+/// - REC-02 (extension non reconnue) → IRR_TYPE_F (type/extension du fichier du flux)
 /// - REC-03 (caractères invalides dans le nom) → IRR_NOM_PJ
 /// - REC-04 (nom de fichier absent) → IRR_NOM_PJ
 /// - REC-05 (doublon) → IRR_TYPE_F
+///
+/// Note : IRR_EXT_DOC est réservé aux pièces jointes (PJ), pas au fichier principal.
 fn map_reception_to_irrecevabilite(rule_ids: &str, filename: &str) -> (StatusReasonCode, String) {
     let rules: Vec<&str> = rule_ids.split(',').collect();
 
@@ -575,7 +578,7 @@ fn map_reception_to_irrecevabilite(rule_ids: &str, filename: &str) -> (StatusRea
     }
     if rules.contains(&"REC-02") {
         return (
-            StatusReasonCode::IrrExtDoc,
+            StatusReasonCode::IrrTypeF,
             format!("Extension de fichier non reconnue : '{}' (attendu : xml, pdf)", filename),
         );
     }
@@ -740,7 +743,7 @@ mod tests {
 
         let result = processor.process(exchange).await.unwrap();
 
-        assert_eq!(result.get_property("cdv.reason_code").map(|s| s.as_str()), Some("IRR_EXT_DOC"));
+        assert_eq!(result.get_property("cdv.reason_code").map(|s| s.as_str()), Some("IRR_TYPE_F"));
     }
 
     #[tokio::test]
@@ -802,7 +805,7 @@ mod tests {
     fn test_map_reception_to_irrecevabilite() {
         assert_eq!(map_reception_to_irrecevabilite("REC-01", "f.xml").0, StatusReasonCode::IrrVideF);
         assert_eq!(map_reception_to_irrecevabilite("BR-FR-19", "f.xml").0, StatusReasonCode::IrrTailleF);
-        assert_eq!(map_reception_to_irrecevabilite("REC-02", "f.csv").0, StatusReasonCode::IrrExtDoc);
+        assert_eq!(map_reception_to_irrecevabilite("REC-02", "f.csv").0, StatusReasonCode::IrrTypeF);
         assert_eq!(map_reception_to_irrecevabilite("REC-03", "f.xml").0, StatusReasonCode::IrrNomPj);
         assert_eq!(map_reception_to_irrecevabilite("REC-04", "").0, StatusReasonCode::IrrNomPj);
         assert_eq!(map_reception_to_irrecevabilite("REC-05", "f.xml").0, StatusReasonCode::IrrTypeF);

@@ -169,7 +169,7 @@ async fn test_emission_fichier_texte_brut_irr_ext_doc() {
 
     assert!(exchange.get_property("reception.failed").is_some());
     assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
-    assert_cdv_reason(&exchange, "IRR_EXT_DOC");
+    assert_cdv_reason(&exchange, "IRR_TYPE_F");
 }
 
 #[tokio::test]
@@ -181,7 +181,7 @@ async fn test_emission_fichier_binaire_random_irr_ext_doc() {
 
     assert!(exchange.get_property("reception.failed").is_some());
     assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
-    assert_cdv_reason(&exchange, "IRR_EXT_DOC");
+    assert_cdv_reason(&exchange, "IRR_TYPE_F");
 }
 
 #[tokio::test]
@@ -193,7 +193,7 @@ async fn test_emission_fichier_csv_irr_ext_doc() {
 
     assert!(exchange.get_property("reception.failed").is_some());
     assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
-    assert_cdv_reason(&exchange, "IRR_EXT_DOC");
+    assert_cdv_reason(&exchange, "IRR_TYPE_F");
 }
 
 // ============================================================
