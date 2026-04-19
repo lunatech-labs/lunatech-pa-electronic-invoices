@@ -213,8 +213,20 @@ impl CdarGenerator {
         }
     }
 
-    /// Génère un CDV de rejet (statut 213 — Rejetée, phase Transmission)
+    /// Génère un CDV de rejet (statut 213 — Rejetée, phase Transmission).
+    /// Backward compatible : génère un CDV 213 en mode émission (SE + PPF, Issuer=WK).
     pub fn generate_rejetee(
+        &self,
+        invoice: &InvoiceData,
+        invoice_type_code: &str,
+        errors: Vec<CdarValidationError>,
+    ) -> CdvResponse {
+        self.generate_rejetee_emission(invoice, invoice_type_code, errors)
+    }
+
+    /// CDV 213 à l'émission (PA-E) : Recipients = SE + PPF, Issuer = PA-E
+    /// Conforme onglet Acteurs CDV : "Rejetée A l'émission"
+    pub fn generate_rejetee_emission(
         &self,
         invoice: &InvoiceData,
         invoice_type_code: &str,
@@ -263,38 +275,125 @@ impl CdarGenerator {
                 endpoint_id: None,
                 endpoint_scheme: None,
             },
+            // Issuer = PA-E (la PDP émettrice qui rejette)
             issuer: Some(TradeParty {
-                global_id: None,
-                global_id_scheme: None,
-                name: None,
+                global_id: Some(self.pdp_siren.clone()),
+                global_id_scheme: Some("0002".to_string()),
+                name: Some(self.pdp_name.clone()),
                 role_code: RoleCode::WK,
                 endpoint_id: None,
                 endpoint_scheme: None,
             }),
-            recipients: {
-                let mut r = vec![
-                    TradeParty {
+            // Recipients émission = SE + PPF (pas de BY)
+            recipients: vec![
+                TradeParty {
+                    global_id: Some(seller_siren.to_string()),
+                    global_id_scheme: Some("0002".to_string()),
+                    name: invoice.seller_name.clone(),
+                    role_code: RoleCode::SE,
+                    endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
+                    endpoint_scheme: Some("0225".to_string()),
+                },
+                Self::ppf_recipient(),
+            ],
+            multiple_references: false,
+            type_code: CdvTypeCode::Transmission,
+            status_datetime: dt.clone(),
+            referenced_documents: vec![
+                ReferencedDocument {
+                    invoice_id: invoice.invoice_number.clone(),
+                    status_code: Some(8),
+                    type_code: Some(invoice_type_code.to_string()),
+                    receipt_datetime: Some(dt.clone()),
+                    issue_date: Some(issue_date_102),
+                    process_condition_code: 213,
+                    process_condition: Some("Rejetée".to_string()),
+                    issuer: Some(TradeParty {
                         global_id: Some(seller_siren.to_string()),
                         global_id_scheme: Some("0002".to_string()),
-                        name: invoice.seller_name.clone(),
+                        name: None,
                         role_code: RoleCode::SE,
-                        endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
-                        endpoint_scheme: Some("0225".to_string()),
-                    },
-                ];
-                if let Some(bs) = buyer_siren {
-                    r.push(TradeParty {
-                        global_id: Some(bs.to_string()),
-                        global_id_scheme: Some("0002".to_string()),
-                        name: invoice.buyer_name.clone(),
-                        role_code: RoleCode::BY,
-                        endpoint_id: Some(bs.to_string()),
+                        endpoint_id: None,
                         endpoint_scheme: None,
-                    });
-                }
-                r.push(Self::ppf_recipient());
-                r
+                    }),
+                    recipient: None,
+                    statuses,
+                },
+            ],
+        }
+    }
+
+    /// CDV 213 en réception (PA-R) : Recipients = SE + BY, PAS de PPF.
+    /// Conforme onglet Acteurs CDV : "Rejetée" (première ligne, émis par PA-R)
+    /// PA-R n'envoie jamais au PPF — c'est PA-E qui relaie.
+    pub fn generate_rejetee_reception(
+        &self,
+        invoice: &InvoiceData,
+        invoice_type_code: &str,
+        errors: Vec<CdarValidationError>,
+    ) -> CdvResponse {
+        let now = Utc::now();
+        let dt = Self::format_datetime_204(&now);
+        let issue_date_102 = invoice.issue_date.as_deref()
+            .map(|d| Self::format_date_102(d))
+            .unwrap_or_default();
+
+        let seller_siren = invoice.seller_siret.as_deref()
+            .map(|s| if s.len() >= 9 { &s[..9] } else { s })
+            .unwrap_or("000000000");
+        let buyer_siren = invoice.buyer_siret.as_deref()
+            .map(|s| if s.len() >= 9 { &s[..9] } else { s })
+            .unwrap_or("000000000");
+
+        let statuses: Vec<DocumentStatus> = errors.iter().enumerate().map(|(i, err)| {
+            let reason_code = err.reason_code.as_ref()
+                .map(|r| r.code().to_string())
+                .unwrap_or_else(|| "REJ_SEMAN".to_string());
+            DocumentStatus {
+                status_code: None,
+                reason_code: Some(reason_code),
+                reason: Some(err.message.clone()),
+                action_code: Some("NIN".to_string()),
+                action: Some("Corriger et redéposer".to_string()),
+                sequence: Some((i + 1) as u32),
+                characteristics: Vec::new(),
+            }
+        }).collect();
+
+        CdvResponse {
+            business_process: "REGULATED".to_string(),
+            guideline_id: "urn.cpro.gouv.fr:1p0:CDV:invoice".to_string(),
+            document_id: format!("{}_{}_{}#{}_{}",
+                invoice.invoice_number, 213, &dt, invoice_type_code, &issue_date_102),
+            document_name: Some(format!("CDV-213_Rejetee_{}", invoice.invoice_number)),
+            issue_datetime: dt.clone(),
+            sender: TradeParty {
+                global_id: None, global_id_scheme: None, name: None,
+                role_code: RoleCode::WK, endpoint_id: None, endpoint_scheme: None,
             },
+            issuer: Some(TradeParty {
+                global_id: None, global_id_scheme: None, name: None,
+                role_code: RoleCode::WK, endpoint_id: None, endpoint_scheme: None,
+            }),
+            // Recipients réception = SE + BY, PAS de PPF
+            recipients: vec![
+                TradeParty {
+                    global_id: Some(seller_siren.to_string()),
+                    global_id_scheme: Some("0002".to_string()),
+                    name: invoice.seller_name.clone(),
+                    role_code: RoleCode::SE,
+                    endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
+                    endpoint_scheme: Some("0225".to_string()),
+                },
+                TradeParty {
+                    global_id: Some(buyer_siren.to_string()),
+                    global_id_scheme: Some("0002".to_string()),
+                    name: invoice.buyer_name.clone(),
+                    role_code: RoleCode::BY,
+                    endpoint_id: Some(buyer_siren.to_string()),
+                    endpoint_scheme: None,
+                },
+            ],
             multiple_references: false,
             type_code: CdvTypeCode::Transmission,
             status_datetime: dt.clone(),

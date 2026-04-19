@@ -176,12 +176,13 @@ async fn test_facture_invalide_genere_cdv_213_rejetee() {
     let parser = CdarParser::new();
     let cdv = parser.parse(cdv_xml).unwrap();
 
-    // Phase Transmission → destinataires = vendeur + acheteur + PPF
+    // CDV 213 émission : Recipients = SE + PPF (pas de BY — conforme Acteurs CDV)
     assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
-    assert_eq!(cdv.recipients.len(), 3);
+    assert_eq!(cdv.recipients.len(), 2);
     assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::SE));
-    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
     assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
+    // Pas de BY en émission
+    assert!(!cdv.recipients.iter().any(|r| r.role_code == RoleCode::BY));
 
     // Référence avec statut de rejet
     let ref_doc = &cdv.referenced_documents[0];
@@ -614,20 +615,26 @@ async fn test_cdv_contient_siren_correct() {
     let generator = CdarGenerator::new("999888777", "Ma PDP Test");
     let invoice = make_invoice();
 
-    // CDV 213 (Rejetée) pour vérifier les deux parties (SE + BY + DFH)
-    let cdv = generator.generate_rejetee(&invoice, "380", Vec::new());
+    // CDV 213 émission : SE + PPF (pas BY)
+    let cdv = generator.generate_rejetee_emission(&invoice, "380", Vec::new());
     let xml = generator.to_xml(&cdv).unwrap();
 
     // Le XML doit contenir le SIREN vendeur (9 premiers chars du SIRET)
     assert!(
         xml.contains("456789012"),
-        "SIREN vendeur absent du XML CDV"
+        "SIREN vendeur absent du XML CDV émission"
     );
 
-    // Le XML doit contenir le SIREN acheteur
+    // CDV 213 réception : SE + BY (pas PPF) — vérifie aussi l'acheteur
+    let cdv_rec = generator.generate_rejetee_reception(&invoice, "380", Vec::new());
+    let xml_rec = generator.to_xml(&cdv_rec).unwrap();
     assert!(
-        xml.contains("321654987"),
-        "SIREN acheteur absent du XML CDV"
+        xml_rec.contains("321654987"),
+        "SIREN acheteur absent du XML CDV réception"
+    );
+    assert!(
+        xml_rec.contains("456789012"),
+        "SIREN vendeur absent du XML CDV réception"
     );
 
     // Le XML doit contenir le numéro de facture

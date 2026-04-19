@@ -284,13 +284,24 @@ impl Processor for CdarProcessor {
                 })
                 .collect();
 
-            tracing::warn!(
-                invoice = %invoice.invoice_number,
-                error_count = errors.len(),
-                "Génération CDV de rejet (213)"
-            );
-
-            self.generator.generate_rejetee(invoice, invoice_type_code, errors)
+            match self.mode {
+                CdarMode::Emission => {
+                    tracing::warn!(
+                        invoice = %invoice.invoice_number,
+                        error_count = errors.len(),
+                        "Génération CDV de rejet 213 (émission — SE + PPF)"
+                    );
+                    self.generator.generate_rejetee_emission(invoice, invoice_type_code, errors)
+                }
+                CdarMode::Reception => {
+                    tracing::warn!(
+                        invoice = %invoice.invoice_number,
+                        error_count = errors.len(),
+                        "Génération CDV de rejet 213 (réception — SE + BY, pas de PPF)"
+                    );
+                    self.generator.generate_rejetee_reception(invoice, invoice_type_code, errors)
+                }
+            }
         } else {
             match self.mode {
                 CdarMode::Emission => {
