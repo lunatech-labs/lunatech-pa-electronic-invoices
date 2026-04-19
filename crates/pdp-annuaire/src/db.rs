@@ -478,6 +478,17 @@ impl AnnuaireStore {
         Ok(rows)
     }
 
+    /// Recherche un établissement par SIRET exact
+    pub async fn lookup_etablissement_by_siret(&self, siret: &str) -> Result<Option<EtablissementRow>, DbError> {
+        let row = sqlx::query_as::<_, EtablissementRow>(
+            "SELECT siret, nom, type_etablissement, adresse_1, localite, code_postal FROM etablissements WHERE siret = $1",
+        )
+        .bind(siret)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
     /// Recherche les plateformes enregistrées
     pub async fn list_plateformes(&self) -> Result<Vec<PlateformeRow>, DbError> {
         let rows = sqlx::query_as::<_, PlateformeRow>(

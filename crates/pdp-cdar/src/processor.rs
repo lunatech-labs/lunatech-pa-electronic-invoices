@@ -606,6 +606,21 @@ fn map_reception_to_irrecevabilite(rule_ids: &str, filename: &str) -> (StatusRea
 fn classify_error_reason(step: &str, message: &str) -> StatusReasonCode {
     let msg_lower = message.to_lowercase();
 
+    // Priorité 1 : validations annuaire (step = "annuaire-validation")
+    // Doivent passer AVANT les checks "br-" car les messages contiennent "(BR-FR-10/11)"
+    if step == "annuaire-validation" || msg_lower.contains("vendeur inconnu") || msg_lower.contains("vendeur inactif") {
+        if msg_lower.contains("destinataire") {
+            return StatusReasonCode::DestInc;
+        }
+        if msg_lower.contains("vendeur") || msg_lower.contains("seller") {
+            return StatusReasonCode::RejCoh;
+        }
+    }
+    if msg_lower.contains("destinataire inconnu") || msg_lower.contains("destinataire inactif") {
+        return StatusReasonCode::DestInc;
+    }
+
+    // Priorité 2 : contrôles syntaxiques et sémantiques
     if msg_lower.contains("syntax") || msg_lower.contains("xml") || msg_lower.contains("parse") {
         return StatusReasonCode::RejSeman;
     }
@@ -1081,9 +1096,27 @@ mod tests {
 
     #[test]
     fn test_classify_destinataire() {
-        // Destinataire → DEST_ERR
-        assert_eq!(classify_error_reason("routing", "Destinataire inconnu"), StatusReasonCode::DestErr);
+        // "Destinataire inconnu" → DEST_INC (acheteur absent de l'annuaire)
+        assert_eq!(classify_error_reason("routing", "Destinataire inconnu dans l'annuaire PPF"), StatusReasonCode::DestInc);
+        assert_eq!(classify_error_reason("routing", "Destinataire inactif dans l'annuaire"), StatusReasonCode::DestInc);
+        // "Destinataire" sans "inconnu/inactif" → DEST_ERR (erreur de destinataire générique)
+        assert_eq!(classify_error_reason("routing", "Destinataire erroné"), StatusReasonCode::DestErr);
         assert_eq!(classify_error_reason("routing", "Recipient not found"), StatusReasonCode::DestErr);
+    }
+
+    #[test]
+    fn test_classify_vendeur_inconnu() {
+        // Vendeur inconnu dans l'annuaire → REJ_COH (contrôle cohérence référentiels)
+        // Note : EMMET_INC est un code acheteur (REFUSÉE), pas un code PDP
+        assert_eq!(classify_error_reason("annuaire-validation", "Vendeur inconnu dans l'annuaire PPF (BR-FR-10)"), StatusReasonCode::RejCoh);
+        assert_eq!(classify_error_reason("annuaire-validation", "Vendeur inactif dans l'annuaire PPF (BR-FR-10)"), StatusReasonCode::RejCoh);
+    }
+
+    #[test]
+    fn test_classify_destinataire_inconnu_annuaire() {
+        // Destinataire inconnu dans l'annuaire → DEST_INC (rejet émission)
+        assert_eq!(classify_error_reason("annuaire-validation", "Destinataire inconnu dans l'annuaire PPF (BR-FR-11) (SIREN: 123)"), StatusReasonCode::DestInc);
+        assert_eq!(classify_error_reason("annuaire-validation", "Destinataire inactif dans l'annuaire PPF (BR-FR-11) (SIREN: 456)"), StatusReasonCode::DestInc);
     }
 
     #[test]
