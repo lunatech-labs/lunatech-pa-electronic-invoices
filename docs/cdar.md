@@ -88,6 +88,7 @@ propriété `cdv.source` :
 | 202 | Reçue | Acknowledged |
 | 203 | Mise à disposition | Distributed |
 | 213 | Rejetée | Rejected |
+| 221 | Erreur de routage | Error |
 | 300 | Transmise PPF | Distributed |
 | 301 | Transmise PDP | Distributed |
 | 400 | Transmise destinataire | Distributed |
@@ -108,6 +109,42 @@ propriété `cdv.source` :
 | 212 | Encaissée | Acknowledged |
 | 214 | Visée | Acknowledged |
 | 220 | Annulée | Cancelled |
+
+## Acteurs CDV (qui émet quoi)
+
+Référence : XP Z12-012 Annexe A V1.2, onglet "Acteurs CDV".
+
+PA-E = PDP émettrice, PA-R = PDP réceptrice, WK = Plateforme,
+C1 = Émetteur (vendeur), C4 = Destinataire (acheteur).
+
+### Statuts émis par la PDP
+
+| Code | Statut | Émetteur CDV | Issuer | Sender | Recipients |
+|------|--------|-------------|--------|--------|------------|
+| 200 | Déposée | PA-E | WK | WK | Émetteur (C1) |
+| 201 | Émise | PA-E | WK | WK | Émetteur (C1) |
+| 202 | Reçue | PA-R | WK | WK | Émetteur (C1) + Destinataire (C4) |
+| 203 | Mise à disposition | PA-R | WK | WK | Émetteur (C1) + Destinataire (C4) |
+| 213 | Rejetée (réception) | PA-R | WK | WK | Émetteur (C1) + Destinataire (C4) |
+| 213 | Rejetée (émission) | PA-E | PA-E | WK | Émetteur (C1) |
+| 221 | Erreur routage | PA-R | PA-R | PA-R | PA-E |
+| 501 | Irrecevable | PA-R | PA-R | PA-R | PA-E |
+
+### Statuts émis par l'acheteur/vendeur (relayés par la PDP)
+
+| Code | Statut | Émetteur CDV | Issuer | Recipients |
+|------|--------|-------------|--------|------------|
+| 204 | Prise en charge | Destinataire | Destinataire | Émetteur (C1) |
+| 205 | Approuvée | Destinataire | Destinataire | Émetteur (C1) |
+| 206 | Approuvée partiellement | Destinataire | Destinataire | Émetteur (C1) |
+| 207 | En litige | Destinataire | Destinataire | Émetteur (C1) |
+| 208 | Suspendue | Destinataire | Destinataire | Émetteur (C1) |
+| 209 | Complétée | Émetteur | Émetteur | Destinataire (C4) |
+| 210 | Refusée | Destinataire | Destinataire | Émetteur (C1) |
+| 211 | Paiement transmis | Acheteur | Acheteur | Vendeur |
+| 212 | Encaissée | Vendeur | Vendeur | Acheteur |
+| 214 | Visée | Agent vendeur/acheteur | Agent | Émetteur + Destinataire |
+| 220 | Annulée | Émetteur | Émetteur | Destinataire (C4) |
 
 ## Codes motifs CDV
 
@@ -210,35 +247,63 @@ Provenance : B2G (acheteur public) ou IMR/CDAR (intermédiaire).
 ### Pipeline Émission (PDP émettrice)
 
 ```
-1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
-2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501 si échec, codes IRR_*)
-3. Routage            → DocumentTypeRouter (facture vs CDAR vs e-reporting)
-   ├─ Si CDAR         → parse CDV, set cdv.*, skip étapes 4-7
-   └─ Si Facture      → continuer
-4. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
-5. Validation         → ValidateProcessor + XmlValidateProcessor (EN16931, BR-FR)
-6. Flux 1 PPF         → PpfFlux1Processor (TOUJOURS — données réglementaires)
-7. Transformation     → TransformProcessor (UBL ↔ CII, Factur-X)
-8. Génération CDV     → CdarProcessor::emission() (200 Déposée ou 213 Rejetée, codes REJ_*)
-9. Routage            → RoutingResolverProcessor (Annuaire PPF → PPF / PDP / intra-PDP)
-10. Distribution      → DynamicRoutingProducer (SFTP PPF, AFNOR Flow, ou intra-PDP)
+ 1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
+ 2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501 si échec, codes IRR_*)
+ 3. Routage            → DocumentTypeRouter (facture vs CDAR vs e-reporting)
+    ├─ Si CDAR         → parse CDV, set cdv.*, skip étapes 4-9
+    └─ Si Facture      → continuer
+ 4. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
+ 5. Doublons           → DuplicateCheckProcessor (BR-FR-12/13)
+ 6. Validation         → ValidateProcessor + XmlValidateProcessor (EN16931, BR-FR, Schematron)
+ 7. Annuaire           → AnnuaireValidationProcessor(Emission) (BR-FR-10 vendeur + BR-FR-11 acheteur)
+                          Vendeur absent → REJ_COH, Acheteur absent → DEST_INC
+ 8. Flux 1 PPF         → PpfFlux1Processor (TOUJOURS — données réglementaires)
+ 9. Transformation     → TransformProcessor (UBL ↔ CII, Factur-X)
+10. Génération CDV     → CdarProcessor::emission()
+                          Succès → 200 Déposée (Recipients: SE + PPF)
+                          Erreur → 213 Rejetée à l'émission (Recipients: SE seul)
+11. Routage            → RoutingResolverProcessor (Annuaire PPF → PPF / PDP / intra-PDP)
+12. Distribution       → DynamicRoutingProducer (SFTP PPF, AFNOR Flow, ou intra-PDP)
 ```
 
 ### Pipeline Réception (PDP réceptrice)
 
 ```
-1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
-2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501 si échec, codes IRR_*)
-3. Routage            → DocumentTypeRouter (facture vs CDAR)
-   ├─ Si CDAR         → CdvReceptionProcessor, set cdv.*, skip suite
-   └─ Si Facture      → continuer
-4. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
-5. Validation         → ValidateProcessor + XmlValidateProcessor
-   PAS de Flux 1 PPF  (la PDP émettrice l'a déjà envoyé)
-6. Transformation     → TransformProcessor (optionnel)
-7. Génération CDV     → CdarProcessor::reception() (202 Reçue ou 213 Rejetée, codes REJ_*)
-8. Livraison          → FileEndpoint (répertoire acheteur)
+ 1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
+ 2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501, Sender=PA-R)
+ 3. Routage            → DocumentTypeRouter (facture vs CDAR)
+    ├─ Si CDAR         → CdvReceptionProcessor, set cdv.*, skip suite
+    └─ Si Facture      → continuer
+ 4. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
+ 5. Doublons           → DuplicateCheckProcessor
+ 6. Validation         → ValidateProcessor + XmlValidateProcessor (EN16931, BR-FR, Schematron)
+ 7. Annuaire           → AnnuaireValidationProcessor(Reception) (BR-FR-10 vendeur uniquement)
+                          Vendeur absent → REJ_COH (PAS de check acheteur en réception)
+    PAS de Flux 1 PPF  (la PDP émettrice l'a déjà envoyé)
+ 8. Transformation     → TransformProcessor (optionnel)
+ 9. Génération CDV     → CdarProcessor::reception()
+                          Succès → 202 Reçue (Recipients: SE + BY, pas de PPF)
+                          Erreur → 213 Rejetée en réception (Recipients: SE + BY)
+10. Livraison          → FileEndpoint (répertoire acheteur)
 ```
+
+### Ordre des contrôles et codes d'erreur
+
+| Étape | Contrôle | Code erreur | CDV |
+|-------|----------|-------------|-----|
+| 1. Réception | Fichier vide | IRR_VIDE_F | 501 |
+| 1. Réception | Extension invalide | IRR_TYPE_F | 501 |
+| 1. Réception | Fichier > 100 Mo | IRR_TAILLE_F | 501 |
+| 1. Réception | Nom fichier invalide | IRR_NOM_PJ | 501 |
+| 2. Irrecevabilité | XML non parseable | IRR_SYNTAX | 501 |
+| 5. Doublons | Facture en doublon | DOUBLON | 213 |
+| 6. Validation | Erreur sémantique | REJ_SEMAN | 213 |
+| 6. Validation | Erreur XSD | REJ_UNI | 213 |
+| 6. Validation | Montant erroné | MONTANTTOTAL_ERR | 213 |
+| 6. Validation | Erreur de calcul | CALCUL_ERR | 213 |
+| 6. Validation | Adresse erronée | ADR_ERR | 213 |
+| 7. Annuaire | Vendeur absent (BR-FR-10) | REJ_COH | 213 |
+| 7. Annuaire | Acheteur absent (BR-FR-11) | DEST_INC | 213 |
 
 ## Tests
 
