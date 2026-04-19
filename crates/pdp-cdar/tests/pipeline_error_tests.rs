@@ -108,30 +108,52 @@ async fn run_validation(exchange: Exchange) -> Exchange {
 // 1. Fichier vide
 // ============================================================
 
-#[tokio::test]
-async fn test_emission_fichier_vide_genere_cdv_501() {
-    let mut exchange = Exchange::new(vec![]);
-    exchange.source_filename = Some("facture_vide.xml".to_string());
+/// Parse le CDV XML et vérifie le code raison du premier motif
+fn assert_cdv_reason(exchange: &Exchange, expected_reason_prefix: &str) {
+    let cdv_xml = exchange.get_property("cdv.xml")
+        .expect("CDV XML absent de l'exchange");
+    let cdv = CdarParser::new().parse(cdv_xml)
+        .expect("Impossible de parser le CDV XML généré");
 
-    // Réception → Irrecevabilité
-    let exchange = run_reception_checks(exchange).await;
+    assert!(!cdv.referenced_documents.is_empty(), "CDV sans document référencé");
+    let ref_doc = &cdv.referenced_documents[0];
+    assert!(!ref_doc.statuses.is_empty(),
+        "CDV {} sans motif (statuses vide)", ref_doc.process_condition_code);
 
-    // Le fichier est rejeté en réception → CDV 501 généré par IrrecevabiliteProcessor
-    assert!(exchange.get_property("reception.failed").is_some());
-    assert!(exchange.get_property("cdv.xml").is_some());
-    assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
+    let first_reason = ref_doc.statuses[0].reason_code.as_deref()
+        .expect("Premier motif sans reason_code");
+    assert!(first_reason.starts_with(expected_reason_prefix),
+        "Code raison '{}' ne commence pas par '{}' (CDV {})",
+        first_reason, expected_reason_prefix, ref_doc.process_condition_code);
+
+    // Vérifier qu'il y a un message lisible
+    assert!(ref_doc.statuses[0].reason.is_some(),
+        "Premier motif sans message lisible (CDV {})", ref_doc.process_condition_code);
 }
 
 #[tokio::test]
-async fn test_reception_fichier_vide_genere_cdv_501() {
+async fn test_emission_fichier_vide_genere_cdv_501_irr_vide_f() {
+    let mut exchange = Exchange::new(vec![]);
+    exchange.source_filename = Some("facture_vide.xml".to_string());
+
+    let exchange = run_reception_checks(exchange).await;
+
+    assert!(exchange.get_property("reception.failed").is_some());
+    assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
+    // Vérifier le code raison IRR_VIDE_F et le message
+    assert_cdv_reason(&exchange, "IRR_VIDE_F");
+}
+
+#[tokio::test]
+async fn test_reception_fichier_vide_genere_cdv_501_irr_vide_f() {
     let mut exchange = Exchange::new(vec![]);
     exchange.source_filename = Some("facture_vide.xml".to_string());
     exchange.set_header("source.protocol", "afnor-flow");
 
     let exchange = run_reception_checks(exchange).await;
 
-    assert!(exchange.get_property("reception.failed").is_some());
     assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
+    assert_cdv_reason(&exchange, "IRR_VIDE_F");
 }
 
 // ============================================================
@@ -139,19 +161,19 @@ async fn test_reception_fichier_vide_genere_cdv_501() {
 // ============================================================
 
 #[tokio::test]
-async fn test_emission_fichier_texte_brut() {
+async fn test_emission_fichier_texte_brut_irr_ext_doc() {
     let mut exchange = Exchange::new(b"Ceci n'est pas du XML, juste du texte brut.".to_vec());
     exchange.source_filename = Some("readme.txt".to_string());
 
-    // Réception échoue car extension .txt non autorisée
     let exchange = run_reception_checks(exchange).await;
 
     assert!(exchange.get_property("reception.failed").is_some());
     assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
+    assert_cdv_reason(&exchange, "IRR_EXT_DOC");
 }
 
 #[tokio::test]
-async fn test_emission_fichier_binaire_random() {
+async fn test_emission_fichier_binaire_random_irr_ext_doc() {
     let mut exchange = Exchange::new(vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A]);
     exchange.source_filename = Some("image.jpg".to_string());
 
@@ -159,10 +181,11 @@ async fn test_emission_fichier_binaire_random() {
 
     assert!(exchange.get_property("reception.failed").is_some());
     assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
+    assert_cdv_reason(&exchange, "IRR_EXT_DOC");
 }
 
 #[tokio::test]
-async fn test_emission_fichier_csv() {
+async fn test_emission_fichier_csv_irr_ext_doc() {
     let mut exchange = Exchange::new(b"nom;prenom;montant\nDupont;Jean;1234.56".to_vec());
     exchange.source_filename = Some("export.csv".to_string());
 
@@ -170,6 +193,7 @@ async fn test_emission_fichier_csv() {
 
     assert!(exchange.get_property("reception.failed").is_some());
     assert_eq!(exchange.get_property("cdv.status_code").unwrap(), "501");
+    assert_cdv_reason(&exchange, "IRR_EXT_DOC");
 }
 
 // ============================================================
@@ -192,38 +216,42 @@ async fn test_emission_xml_mal_forme() {
 }
 
 #[tokio::test]
-async fn test_emission_xml_mal_forme_genere_cdv_213() {
+async fn test_emission_xml_mal_forme_genere_cdv_213_rej_seman() {
     let mut exchange = Exchange::new(b"<invoice><broken>xml".to_vec());
     exchange.source_filename = Some("facture_cassee.xml".to_string());
-    // Simuler que le parsing a échoué et a laissé une erreur
     exchange.invoice = Some(make_invoice());
     exchange.add_error("parsing", &PdpError::ParseError("XML mal formé".to_string()));
 
-    // CdarProcessor en émission → CDV 213 (rejet)
     let processor = CdarProcessor::emission("999888777", "Ma PDP");
     let result = processor.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
+    // Le parsing XML mal formé → REJ_SEMAN (car le message contient "xml")
+    assert_cdv_reason(&result, "REJ_SEMAN");
 
     let cdv_xml = result.get_property("cdv.xml").unwrap();
     let cdv = CdarParser::new().parse(cdv_xml).unwrap();
     assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
-    assert!(!cdv.referenced_documents[0].statuses.is_empty());
+
+    // Vérifier le motif complet
+    let status = &cdv.referenced_documents[0].statuses[0];
+    assert!(status.reason.as_deref().unwrap().contains("XML mal formé"));
+    assert_eq!(status.sequence, Some(1));
 }
 
 #[tokio::test]
-async fn test_reception_xml_mal_forme_genere_cdv_213() {
+async fn test_reception_xml_mal_forme_genere_cdv_213_rej_seman() {
     let mut exchange = Exchange::new(b"<invoice><broken>xml".to_vec());
     exchange.source_filename = Some("facture_cassee.xml".to_string());
     exchange.set_header("source.protocol", "afnor-flow");
     exchange.invoice = Some(make_invoice());
     exchange.add_error("parsing", &PdpError::ParseError("XML mal formé".to_string()));
 
-    // CdarProcessor en réception → CDV 213 (rejet, pas 202)
     let processor = CdarProcessor::reception("111222333", "PDP Réceptrice");
     let result = processor.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
+    assert_cdv_reason(&result, "REJ_SEMAN");
 }
 
 // ============================================================
@@ -250,38 +278,45 @@ async fn test_emission_pdf_sans_xml_parse_error() {
 // ============================================================
 
 #[tokio::test]
-async fn test_emission_xml_invalide_cii_genere_cdv_213() {
+async fn test_emission_xml_invalide_cii_genere_cdv_213_avec_motifs() {
     let body = load_error_fixture("facture_invalide_001.xml");
     let mut exchange = Exchange::new(body);
     exchange.source_filename = Some("facture_invalide_001.xml".to_string());
 
-    // Réception OK
     let exchange = run_reception_checks(exchange).await;
     assert!(exchange.get_property("reception.failed").is_none());
 
-    // Parsing OK (XML structurellement valide)
     let exchange = run_parse(exchange).await;
     assert!(exchange.invoice.is_some());
 
-    // Validation → erreurs
     let exchange = run_validation(exchange).await;
     assert!(exchange.has_errors(), "La validation devrait trouver des erreurs");
 
-    // CdarProcessor émission → CDV 213
     let processor = CdarProcessor::emission("999888777", "Ma PDP");
     let result = processor.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
 
-    // Vérifier que les motifs de rejet sont dans le CDV
+    // Vérifier les motifs de rejet dans le CDV
     let cdv_xml = result.get_property("cdv.xml").unwrap();
     let cdv = CdarParser::new().parse(cdv_xml).unwrap();
-    assert!(!cdv.referenced_documents[0].statuses.is_empty(),
+    let ref_doc = &cdv.referenced_documents[0];
+    assert!(!ref_doc.statuses.is_empty(),
         "Le CDV 213 devrait contenir au moins un motif de rejet");
+
+    // Chaque motif a un code raison et un message
+    for (i, status) in ref_doc.statuses.iter().enumerate() {
+        assert!(status.reason_code.is_some(),
+            "Motif {} sans code raison", i + 1);
+        assert!(status.reason.is_some(),
+            "Motif {} sans message lisible", i + 1);
+        assert_eq!(status.sequence, Some((i + 1) as u32),
+            "Motif {} : séquence incorrecte", i + 1);
+    }
 }
 
 #[tokio::test]
-async fn test_reception_xml_invalide_cii_genere_cdv_213() {
+async fn test_reception_xml_invalide_cii_genere_cdv_213_avec_motifs() {
     let body = load_error_fixture("facture_invalide_001.xml");
     let mut exchange = Exchange::new(body);
     exchange.source_filename = Some("facture_invalide_001.xml".to_string());
@@ -292,11 +327,20 @@ async fn test_reception_xml_invalide_cii_genere_cdv_213() {
     let exchange = run_validation(exchange).await;
     assert!(exchange.has_errors());
 
-    // CdarProcessor réception → CDV 213 (pas 202, car erreurs)
     let processor = CdarProcessor::reception("111222333", "PDP Réceptrice");
     let result = processor.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
+
+    // Vérifier que les motifs sont aussi présents en mode réception
+    let cdv_xml = result.get_property("cdv.xml").unwrap();
+    let cdv = CdarParser::new().parse(cdv_xml).unwrap();
+    let ref_doc = &cdv.referenced_documents[0];
+    assert!(!ref_doc.statuses.is_empty());
+    for status in &ref_doc.statuses {
+        assert!(status.reason_code.is_some(), "Motif sans code raison en réception");
+        assert!(status.reason.is_some(), "Motif sans message en réception");
+    }
 }
 
 #[tokio::test]
@@ -360,6 +404,8 @@ async fn test_emission_cii_id_trop_long_genere_cdv_213() {
     let result = processor.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
+    // Vérifier que le motif contient un code raison valide
+    assert_cdv_reason(&result, "REJ_");
 }
 
 #[tokio::test]
@@ -377,6 +423,8 @@ async fn test_emission_cii_sans_acheteur_genere_cdv_213() {
     let result = processor.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
+    // classify_error_reason matche "destinataire" dans le message ou "validate" dans le step
+    assert_cdv_reason(&result, "REJ_");
 }
 
 #[tokio::test]
@@ -395,6 +443,8 @@ async fn test_emission_cii_type_invalide_genere_cdv_213() {
     let result = processor.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
+    // Le message de validation passe par classify_error_reason → REJ_SEMAN
+    assert_cdv_reason(&result, "REJ_");
 }
 
 #[tokio::test]
@@ -501,6 +551,7 @@ async fn test_emission_fichier_trop_gros_genere_cdv_501() {
     let result = irrecevabilite.process(exchange).await.unwrap();
 
     assert_eq!(result.get_property("cdv.status_code").unwrap(), "501");
+    assert_cdv_reason(&result, "IRR_");
 }
 
 // ============================================================
