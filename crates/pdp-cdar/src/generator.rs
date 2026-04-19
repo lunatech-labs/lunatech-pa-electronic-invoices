@@ -125,6 +125,76 @@ impl CdarGenerator {
         }
     }
 
+    /// Génère un CDV de réception (statut 202 — Reçue, phase Transmission)
+    /// Utilisé par la PDP réceptrice quand elle reçoit une facture d'une autre PDP.
+    pub fn generate_recue(
+        &self,
+        invoice: &InvoiceData,
+        invoice_type_code: &str,
+    ) -> CdvResponse {
+        let now = Utc::now();
+        let dt = Self::format_datetime_204(&now);
+        let issue_date_102 = invoice.issue_date.as_deref()
+            .map(|d| Self::format_date_102(d))
+            .unwrap_or_default();
+
+        let buyer_siren = invoice.buyer_siret.as_deref()
+            .map(|s| if s.len() >= 9 { &s[..9] } else { s })
+            .unwrap_or("000000000");
+
+        CdvResponse {
+            business_process: "REGULATED".to_string(),
+            guideline_id: "urn.cpro.gouv.fr:1p0:CDV:invoice".to_string(),
+            document_id: format!("{}_{}_{}#{}_{}",
+                invoice.invoice_number, 202, &dt, invoice_type_code, &issue_date_102),
+            document_name: Some(format!("CDV-202_Recue_{}", invoice.invoice_number)),
+            issue_datetime: dt.clone(),
+            sender: TradeParty {
+                global_id: None, global_id_scheme: None, name: None,
+                role_code: RoleCode::WK, endpoint_id: None, endpoint_scheme: None,
+            },
+            issuer: Some(TradeParty {
+                global_id: None, global_id_scheme: None, name: None,
+                role_code: RoleCode::WK, endpoint_id: None, endpoint_scheme: None,
+            }),
+            recipients: vec![
+                TradeParty {
+                    global_id: Some(buyer_siren.to_string()),
+                    global_id_scheme: Some("0002".to_string()),
+                    name: invoice.buyer_name.clone(),
+                    role_code: RoleCode::BY,
+                    endpoint_id: Some(format!("{}_STATUTS", buyer_siren)),
+                    endpoint_scheme: Some("0225".to_string()),
+                },
+                Self::ppf_recipient(),
+            ],
+            multiple_references: false,
+            type_code: CdvTypeCode::Transmission,
+            status_datetime: dt.clone(),
+            referenced_documents: vec![
+                ReferencedDocument {
+                    invoice_id: invoice.invoice_number.clone(),
+                    status_code: Some(43), // Transferred to the next party
+                    type_code: Some(invoice_type_code.to_string()),
+                    receipt_datetime: Some(dt.clone()),
+                    issue_date: Some(issue_date_102),
+                    process_condition_code: 202,
+                    process_condition: Some("Reçue".to_string()),
+                    issuer: Some(TradeParty {
+                        global_id: Some(buyer_siren.to_string()),
+                        global_id_scheme: Some("0002".to_string()),
+                        name: None,
+                        role_code: RoleCode::BY,
+                        endpoint_id: None,
+                        endpoint_scheme: None,
+                    }),
+                    recipient: None,
+                    statuses: Vec::new(),
+                },
+            ],
+        }
+    }
+
     /// Génère un CDV de rejet (statut 213 — Rejetée, phase Transmission)
     pub fn generate_rejetee(
         &self,

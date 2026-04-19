@@ -421,6 +421,8 @@ pub enum Destination {
         /// URL du Flow Service
         flow_service_url: String,
     },
+    /// Injection intra-PDP : le destinataire est sur la même PDP
+    IntraPdp,
     /// Écrire sur le filesystem local
     File { path: String },
 }
@@ -430,6 +432,7 @@ impl std::fmt::Display for Destination {
         match self {
             Self::PpfSe => write!(f, "PPF-SE"),
             Self::AfnorPdp { matricule, .. } => write!(f, "PDP-{}", matricule),
+            Self::IntraPdp => write!(f, "INTRA-PDP"),
             Self::File { path } => write!(f, "FILE:{}", path),
         }
     }

@@ -157,6 +157,7 @@ mod tests {
                 matricule: Some("0001".to_string()),
             },
             elasticsearch: ElasticsearchConfig::default(),
+            database: None,
             routes: vec![],
             validation: ValidationConfig::default(),
             polling: PollingConfig::default(),

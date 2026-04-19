@@ -214,17 +214,42 @@ fn determine_cdar_source(exchange: &Exchange) -> String {
     "client".to_string()
 }
 
+/// Mode du CdarProcessor : émission (CDV 200) ou réception (CDV 202)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CdarMode {
+    /// PDP émettrice : génère CDV 200 "Déposée" (ou 213 "Rejetée" si erreurs)
+    Emission,
+    /// PDP réceptrice : génère CDV 202 "Reçue" (ou 213 "Rejetée" si erreurs)
+    Reception,
+}
+
 /// Processor qui génère un CDV (Compte-rendu De Vie) après traitement d'une facture.
 /// Il ajoute le XML CDV conforme D22B dans les propriétés de l'exchange.
 pub struct CdarProcessor {
     generator: CdarGenerator,
+    mode: CdarMode,
 }
 
 impl CdarProcessor {
-    pub fn new(pdp_siren: &str, pdp_name: &str) -> Self {
+    /// Crée un CdarProcessor en mode émission (CDV 200 "Déposée")
+    pub fn emission(pdp_siren: &str, pdp_name: &str) -> Self {
         Self {
             generator: CdarGenerator::new(pdp_siren, pdp_name),
+            mode: CdarMode::Emission,
         }
+    }
+
+    /// Crée un CdarProcessor en mode réception (CDV 202 "Reçue")
+    pub fn reception(pdp_siren: &str, pdp_name: &str) -> Self {
+        Self {
+            generator: CdarGenerator::new(pdp_siren, pdp_name),
+            mode: CdarMode::Reception,
+        }
+    }
+
+    /// Backward-compatible : même comportement que `emission()`
+    pub fn new(pdp_siren: &str, pdp_name: &str) -> Self {
+        Self::emission(pdp_siren, pdp_name)
     }
 }
 
@@ -267,12 +292,22 @@ impl Processor for CdarProcessor {
 
             self.generator.generate_rejetee(invoice, invoice_type_code, errors)
         } else {
-            tracing::info!(
-                invoice = %invoice.invoice_number,
-                "Génération CDV de dépôt (200)"
-            );
-
-            self.generator.generate_deposee(invoice, invoice_type_code)
+            match self.mode {
+                CdarMode::Emission => {
+                    tracing::info!(
+                        invoice = %invoice.invoice_number,
+                        "Génération CDV de dépôt (200)"
+                    );
+                    self.generator.generate_deposee(invoice, invoice_type_code)
+                }
+                CdarMode::Reception => {
+                    tracing::info!(
+                        invoice = %invoice.invoice_number,
+                        "Génération CDV de réception (202)"
+                    );
+                    self.generator.generate_recue(invoice, invoice_type_code)
+                }
+            }
         };
 
         let cdv_xml = self.generator.to_xml(&cdv)?;

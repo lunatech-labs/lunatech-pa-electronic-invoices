@@ -134,6 +134,17 @@ impl Default for ElasticsearchConfig {
     }
 }
 
+/// Mode de fonctionnement d'un pipeline PDP
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PipelineMode {
+    /// PDP émettrice : valide, génère Flux 1 PPF, route vers destination
+    #[default]
+    Emission,
+    /// PDP réceptrice : reçoit d'une autre PDP ou en intra-PDP, livre à l'acheteur
+    Reception,
+}
+
 /// Configuration d'une route
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouteConfig {
@@ -141,6 +152,9 @@ pub struct RouteConfig {
     pub description: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Mode du pipeline : emission (défaut) ou reception
+    #[serde(default)]
+    pub pipeline_mode: PipelineMode,
     pub source: EndpointConfig,
     pub destination: EndpointConfig,
     #[serde(default)]
@@ -184,6 +198,25 @@ pub struct EndpointConfig {
     /// Chemin vers le fichier known_hosts pour vérification des clés serveur SSH (SFTP)
     #[serde(default)]
     pub known_hosts_path: Option<String>,
+}
+
+impl EndpointConfig {
+    /// Crée un EndpointConfig de type fichier avec les valeurs par défaut
+    pub fn default_file(path: &str) -> Self {
+        Self {
+            endpoint_type: "file".to_string(),
+            path: path.to_string(),
+            host: None,
+            port: None,
+            username: None,
+            password: None,
+            private_key_path: None,
+            file_pattern: None,
+            archive_path: None,
+            delete_after_read: None,
+            known_hosts_path: None,
+        }
+    }
 }
 
 /// Configuration du destinataire CDAR

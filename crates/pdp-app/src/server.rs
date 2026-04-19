@@ -1217,6 +1217,7 @@ mod tests {
             trace_store: None,
             bearer_tokens: None,
             metrics: Metrics::default(),
+            annuaire_store: None,
         })
     }
 
@@ -1231,6 +1232,7 @@ mod tests {
             trace_store: None,
             bearer_tokens: None,
             metrics: Metrics::default(),
+            annuaire_store: None,
         })
     }
 
@@ -1245,6 +1247,7 @@ mod tests {
             trace_store: None,
             bearer_tokens: None,
             metrics: Metrics::default(),
+            annuaire_store: None,
         });
         (state, rx)
     }
@@ -1260,6 +1263,7 @@ mod tests {
             trace_store: None,
             bearer_tokens: Some(vec!["valid-token-123".to_string(), "valid-token-456".to_string()]),
             metrics: Metrics::default(),
+            annuaire_store: None,
         })
     }
 
@@ -1743,6 +1747,7 @@ mod tests {
                 trace_store: None,
                 bearer_tokens: Some(vec!["my-secret-token".to_string()]),
                 metrics: Metrics::default(),
+                annuaire_store: None,
             });
             (state, rx)
         };
@@ -1804,6 +1809,7 @@ mod tests {
             bearer_tokens: None,
             trace_store: None,
             metrics: Metrics::default(),
+            annuaire_store: None,
         });
         let app = build_api_router(state);
 
@@ -2150,6 +2156,7 @@ mod tests {
             trace_store: None,
             bearer_tokens: Some(vec!["e2e-token-valid".to_string()]),
             metrics: Metrics::default(),
+            annuaire_store: None,
         });
         let app = build_api_router(state);
 

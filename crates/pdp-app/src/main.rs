@@ -20,10 +20,18 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Démarre la PDP en mode polling (boucle continue)
-    Start,
+    Start {
+        /// Mode : emitter (émission), receiver (réception), both (défaut)
+        #[arg(short, long, default_value = "both")]
+        mode: String,
+    },
 
     /// Exécute toutes les routes une seule fois
-    Run,
+    Run {
+        /// Mode : emitter (émission), receiver (réception), both (défaut)
+        #[arg(short, long, default_value = "both")]
+        mode: String,
+    },
 
     /// Exécute une route spécifique
     RunRoute {
@@ -109,8 +117,8 @@ async fn main() -> Result<()> {
     pdp_trace::init_tracing();
 
     match cli.command {
-        Commands::Start => cmd_start(&cli.config).await,
-        Commands::Run => cmd_run(&cli.config).await,
+        Commands::Start { mode } => cmd_start(&cli.config, &mode).await,
+        Commands::Run { mode } => cmd_run(&cli.config, &mode).await,
         Commands::RunRoute { route_id } => cmd_run_route(&cli.config, &route_id).await,
         Commands::ListRoutes => cmd_list_routes(&cli.config).await,
         Commands::Parse { file } => cmd_parse(&file).await,
@@ -123,7 +131,8 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
+async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> {
+    let cli_mode = CliMode::from_str(mode_str)?;
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
 
     tracing::info!(
@@ -131,6 +140,7 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
         pdp_name = %config.pdp.name,
         routes = config.routes.len(),
         interval = config.polling.interval_secs,
+        mode = ?cli_mode,
         "Démarrage de la PDP en mode polling"
     );
 
@@ -147,10 +157,13 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
 
     // Construire le router avec la route HTTP inbound
-    let router = build_router(&config, base_dir, Some(http_exchange_rx)).await?;
+    let router = build_router(&config, base_dir, Some(http_exchange_rx), cli_mode).await?;
 
-    // Démarrer le serveur HTTP si configuré
+    // Démarrer le serveur HTTP si configuré ET si le mode réception est actif
     if let Some(ref http_config) = config.http_server {
+        if !cli_mode.should_run_reception() {
+            tracing::info!("Serveur HTTP non démarré (mode emitter uniquement)");
+        } else {
         let trace_store = match pdp_trace::TraceStore::new(&config.elasticsearch.url).await {
             Ok(store) => Some(std::sync::Arc::new(store)),
             Err(e) => {
@@ -211,6 +224,7 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
             port = http_config.port,
             "Serveur HTTP API AFNOR démarré"
         );
+        } // fin else (mode réception)
     }
 
     // Gérer Ctrl+C
@@ -262,12 +276,13 @@ async fn cmd_start(config_path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_run(config_path: &std::path::Path) -> Result<()> {
+async fn cmd_run(config_path: &std::path::Path, mode_str: &str) -> Result<()> {
+    let cli_mode = CliMode::from_str(mode_str)?;
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
 
-    tracing::info!("Exécution unique de toutes les routes");
+    tracing::info!(mode = ?cli_mode, "Exécution unique de toutes les routes");
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
-    let router = build_router(&config, base_dir, None).await?;
+    let router = build_router(&config, base_dir, None, cli_mode).await?;
     let results = router.execute_all().await;
 
     let mut total_success = 0;
@@ -296,7 +311,7 @@ async fn cmd_run(config_path: &std::path::Path) -> Result<()> {
 async fn cmd_run_route(config_path: &std::path::Path, route_id: &str) -> Result<()> {
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
-    let router = build_router(&config, base_dir, None).await?;
+    let router = build_router(&config, base_dir, None, CliMode::Both).await?;
 
     tracing::info!(route_id = %route_id, "Exécution de la route");
     let exchanges = router.execute_route(route_id).await?;
@@ -559,16 +574,51 @@ async fn cmd_flow_events(config_path: &std::path::Path, flow_id: &str) -> Result
     Ok(())
 }
 
+/// Mode de fonctionnement du CLI
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CliMode {
+    Emitter,
+    Receiver,
+    Both,
+}
+
+impl CliMode {
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "emitter" | "emission" | "emettrice" => Ok(CliMode::Emitter),
+            "receiver" | "reception" | "receptrice" => Ok(CliMode::Receiver),
+            "both" | "all" | "" => Ok(CliMode::Both),
+            other => Err(anyhow::anyhow!(
+                "Mode inconnu: '{}'. Valeurs: emitter, receiver, both", other
+            )),
+        }
+    }
+
+    fn should_run_emission(&self) -> bool {
+        matches!(self, CliMode::Emitter | CliMode::Both)
+    }
+
+    fn should_run_reception(&self) -> bool {
+        matches!(self, CliMode::Receiver | CliMode::Both)
+    }
+}
+
 /// Construit le Router à partir de la configuration.
 /// Si `http_rx` est fourni, une route "http-inbound" est ajoutée pour traiter
-/// les flux reçus via l'API HTTP (ChannelConsumer).
+/// les flux reçus via l'API HTTP (ChannelConsumer) en mode réception.
 ///
 /// Si `tenants_dir` est configuré, des routes auto-générées sont créées pour
-/// chaque tenant découvert : `{siren}/in` → pipeline → `{siren}/out`.
+/// chaque tenant découvert.
+///
+/// Le `cli_mode` filtre les routes selon leur `pipeline_mode` :
+/// - Emitter : routes émission uniquement
+/// - Receiver : routes réception + HTTP inbound
+/// - Both : toutes les routes
 async fn build_router(
     config: &pdp_config::PdpConfig,
     base_dir: &std::path::Path,
     http_rx: Option<tokio::sync::mpsc::Receiver<pdp_core::Exchange>>,
+    cli_mode: CliMode,
 ) -> Result<pdp_core::Router> {
     let store = match pdp_trace::TraceStore::new(&config.elasticsearch.url).await {
         Ok(s) => std::sync::Arc::new(s),
@@ -585,12 +635,28 @@ async fn build_router(
     // Construire le AlertErrorHandler depuis la config
     let alert_config = config.alerts.as_ref();
 
+    // Canal intra-PDP : émission → réception locale
+    let (intra_pdp_tx, intra_pdp_rx) = tokio::sync::mpsc::channel::<pdp_core::Exchange>(100);
+
     let mut router = pdp_core::Router::new();
 
     for route_config in &config.routes {
         if !route_config.enabled {
             tracing::info!(route_id = %route_config.id, "Route désactivée, skip");
             continue;
+        }
+
+        // Filtrer selon le mode CLI
+        match route_config.pipeline_mode {
+            pdp_config::PipelineMode::Emission if !cli_mode.should_run_emission() => {
+                tracing::info!(route_id = %route_config.id, "Route émission ignorée (mode receiver)");
+                continue;
+            }
+            pdp_config::PipelineMode::Reception if !cli_mode.should_run_reception() => {
+                tracing::info!(route_id = %route_config.id, "Route réception ignorée (mode emitter)");
+                continue;
+            }
+            _ => {}
         }
 
         // Construire le consumer (source)
@@ -638,6 +704,8 @@ async fn build_router(
                     for (matricule, producer) in &afnor_producers {
                         dynamic.add_afnor_producer(matricule, producer.clone());
                     }
+                    // Canal intra-PDP pour routage local
+                    dynamic = dynamic.with_intra_pdp(intra_pdp_tx.clone());
                     // Fallback sur fichier si aucun producer ne correspond
                     dynamic = dynamic.with_fallback_path(&route_config.destination.path);
                     Box::new(dynamic)
@@ -709,88 +777,28 @@ async fn build_router(
             Some(Box::new(handler) as Box<dyn pdp_core::endpoint::Producer>)
         };
 
-        // Construire la chaîne de processors
+        // Construire la chaîne de processors selon le mode (émission ou réception)
         let mut builder = pdp_core::RouteBuilder::new(&route_config.id)
             .description(&route_config.description)
-            .from_source(consumer)
-            // 1. Trace : réception
-            .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
-            .process(Box::new(pdp_core::processor::LogProcessor::info("reception")))
-            // 1b. Contrôles de réception (taille, extension, nom, doublons)
-            .process(Box::new(pdp_core::reception::ReceptionProcessor::strict()))
-            // 1c. CDAR 501 d'irrecevabilité si contrôles de réception échoués
-            .process(Box::new(pdp_cdar::IrrecevabiliteProcessor::new(
-                &config.pdp.id,
-                &config.pdp.name,
-            )))
-            // 1d. Détection type de document (facture vs CDAR vs e-reporting)
-            .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
-            // 2. Parsing : détection format + extraction données (skip si CDAR)
-            .process(Box::new(pdp_invoice::ParseProcessor::new()))
-            .process(Box::new(pdp_trace::TraceProcessor::parsed(store.clone())))
-            // 2b. Détection de doublons persistante (BR-FR-12/13 via Elasticsearch)
-            .process(Box::new(pdp_trace::DuplicateCheckProcessor::new(store.clone())));
+            .from_source(consumer);
 
-        // 3. Validation (optionnelle)
-        if route_config.validate {
-            builder = builder
-                .process(Box::new(pdp_invoice::ValidateProcessor::new()))
-                .process(Box::new(pdp_validate::XmlValidateProcessor::with_options(
-                    &config.validation.specs_dir,
-                    config.validation.xsd_enabled,
-                    config.validation.en16931_enabled,
-                    config.validation.br_fr_enabled,
-                    true, // strict
-                )))
-                .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
-        }
+        builder = add_common_processors(builder, config, &store);
 
-        // 4a. Génération Flux 1 PPF (données réglementaires pour la PPF)
-        if config.ppf.is_some() {
-            let ppf = config.ppf.as_ref().unwrap();
-            let strategy = pdp_transform::Flux1ProfileStrategy::from_config(&ppf.flux1_profile);
-            builder = builder.process(Box::new(pdp_transform::PpfFlux1Processor::new(
-                std::path::Path::new(&ppf.flux1_output_dir),
-                std::path::Path::new(&config.validation.specs_dir),
-            ).with_strategy(strategy)));
-        }
-
-        // 4b. Transformation (optionnelle)
-        if let Some(ref target) = route_config.transform_to {
-            let target_format = match target.to_uppercase().as_str() {
-                "CII" => pdp_core::model::InvoiceFormat::CII,
-                "UBL" => pdp_core::model::InvoiceFormat::UBL,
-                _ => {
-                    tracing::warn!(target = %target, "Format de transformation non supporté");
-                    continue;
-                }
-            };
-            builder = builder
-                .process(Box::new(pdp_transform::TransformProcessor::new(target_format)))
-                .process(Box::new(pdp_trace::TraceProcessor::transformed(store.clone())));
-        }
-
-        // 5. Génération CDAR (optionnelle)
-        if route_config.generate_cdar {
-            if let Some(ref _receiver) = route_config.cdar_receiver {
-                builder = builder.process(Box::new(pdp_cdar::CdarProcessor::new(
-                    &config.pdp.id,
-                    &config.pdp.name,
-                )));
+        match route_config.pipeline_mode {
+            pdp_config::PipelineMode::Emission => {
+                builder = add_emission_processors(
+                    builder, config, route_config, &store,
+                    &annuaire_client, &partner_directory, &intra_pdp_tx,
+                );
+            }
+            pdp_config::PipelineMode::Reception => {
+                builder = add_reception_processors(
+                    builder, config, route_config, &store,
+                );
             }
         }
 
-        // 5b. Résolution de routage (si destination PPF, après parsing et validation)
-        if route_config.destination.endpoint_type == "ppf" {
-            if let (Some(ref annuaire), Some(ref partner_dir)) = (&annuaire_client, &partner_directory) {
-                builder = builder.process(Box::new(pdp_client::RoutingResolverProcessor::new(
-                    annuaire.clone(),
-                    partner_dir.clone(),
-                )));
-            }
-        }
-
-        // 6. Destination + trace finale
+        // Destination + trace finale
         builder = builder
             .to_destination(producer)
             .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())));
@@ -851,6 +859,7 @@ async fn build_router(
                 for (matricule, producer) in &afnor_producers {
                     dynamic.add_afnor_producer(matricule, producer.clone());
                 }
+                dynamic = dynamic.with_intra_pdp(intra_pdp_tx.clone());
                 dynamic = dynamic.with_fallback_path(out_path.to_str().unwrap_or("."));
                 Box::new(dynamic)
             } else {
@@ -881,28 +890,19 @@ async fn build_router(
             let pdp_id = &tenant.config.pdp.id;
             let pdp_name = &tenant.config.pdp.name;
 
-            // Chaîne de processors identique aux routes manuelles
+            // Chaîne de processors — émission par défaut pour les tenants
             let mut builder = pdp_core::RouteBuilder::new(&route_id)
-                .description(&format!("Route auto-générée pour tenant {}", siren))
+                .description(&format!("Route émission auto-générée pour tenant {}", siren))
                 .from_source(consumer)
                 // 0. Tag tenant SIREN sur chaque exchange
-                .process(Box::new(pdp_core::TenantTagProcessor::new(siren)))
-                // 1. Trace : réception
-                .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
-                .process(Box::new(pdp_core::processor::LogProcessor::info(&format!("reception-{}", siren))))
-                // 1b. Contrôles de réception
-                .process(Box::new(pdp_core::reception::ReceptionProcessor::strict()))
-                // 1c. CDAR 501 d'irrecevabilité
-                .process(Box::new(pdp_cdar::IrrecevabiliteProcessor::new(pdp_id, pdp_name)))
-                // 1d. Détection type de document
-                .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
-                // 2. Parsing
-                .process(Box::new(pdp_invoice::ParseProcessor::new()))
-                .process(Box::new(pdp_trace::TraceProcessor::parsed(store.clone())))
-                // 2b. Détection de doublons
-                .process(Box::new(pdp_trace::DuplicateCheckProcessor::new(store.clone())));
+                .process(Box::new(pdp_core::TenantTagProcessor::new(siren)));
 
-            // 3. Validation
+            builder = add_common_processors(builder, config, &store);
+
+            // Tenant route = pipeline émission avec config PPF du tenant
+            let tenant_ppf = tenant.config.ppf.as_ref().or(config.ppf.as_ref());
+
+            // Validation
             builder = builder
                 .process(Box::new(pdp_invoice::ValidateProcessor::new()))
                 .process(Box::new(pdp_validate::XmlValidateProcessor::with_options(
@@ -914,8 +914,7 @@ async fn build_router(
                 )))
                 .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
 
-            // 4a. Génération Flux 1 PPF
-            let tenant_ppf = tenant.config.ppf.as_ref().or(config.ppf.as_ref());
+            // Flux 1 PPF (TOUJOURS en émission)
             if let Some(ppf) = tenant_ppf {
                 let strategy = pdp_transform::Flux1ProfileStrategy::from_config(&ppf.flux1_profile);
                 builder = builder.process(Box::new(pdp_transform::PpfFlux1Processor::new(
@@ -924,18 +923,22 @@ async fn build_router(
                 ).with_strategy(strategy)));
             }
 
-            // 5. Génération CDAR
-            builder = builder.process(Box::new(pdp_cdar::CdarProcessor::new(pdp_id, pdp_name)));
+            // CDAR émission (CDV 200)
+            builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(pdp_id, pdp_name)));
 
-            // 5b. Résolution de routage
+            // Résolution de routage (avec détection intra-PDP)
             if let (Some(ref annuaire), Some(ref partner_dir)) = (&annuaire_client, &partner_directory) {
-                builder = builder.process(Box::new(pdp_client::RoutingResolverProcessor::new(
+                let mut resolver = pdp_client::RoutingResolverProcessor::new(
                     annuaire.clone(),
                     partner_dir.clone(),
-                )));
+                );
+                if let Some(ref matricule) = config.pdp.matricule {
+                    resolver = resolver.with_our_matricule(matricule);
+                }
+                builder = builder.process(Box::new(resolver));
             }
 
-            // 6. Destination + trace finale
+            // Destination + trace finale
             builder = builder
                 .to_destination(producer)
                 .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
@@ -954,56 +957,165 @@ async fn build_router(
         }
     }
 
-    // Route HTTP inbound : traite les flux reçus via l'API HTTP AFNOR
+    // Route HTTP inbound : flux reçus via l'API HTTP AFNOR = pipeline RÉCEPTION
+    // (pas de Flux 1 PPF, CDV 202 "Reçue")
     if let Some(rx) = http_rx {
-        let consumer: Box<dyn pdp_core::endpoint::Consumer> =
-            Box::new(pdp_core::ChannelConsumer::new("http-inbound-source", rx));
+        if cli_mode.should_run_reception() {
+            let consumer: Box<dyn pdp_core::endpoint::Consumer> =
+                Box::new(pdp_core::ChannelConsumer::new("http-inbound-source", rx));
 
-        // Destination par défaut : même que la première route configurée, ou fichier local
+            let default_output = config.routes.first()
+                .map(|r| r.destination.path.clone())
+                .unwrap_or_else(|| "output/http-inbound".to_string());
+
+            let producer: Box<dyn pdp_core::endpoint::Producer> =
+                Box::new(pdp_core::endpoint::FileEndpoint::output(
+                    "http-inbound-dest",
+                    &default_output,
+                ));
+
+            // Pipeline RÉCEPTION (pas de Flux 1, CDV 202)
+            let mut builder = pdp_core::RouteBuilder::new("http-inbound")
+                .description("Route réception pour les flux d'autres PDP via l'API HTTP AFNOR")
+                .from_source(consumer);
+
+            builder = add_common_processors(builder, config, &store);
+            builder = add_reception_processors(builder, config, &pdp_config::model::RouteConfig {
+                id: "http-inbound".to_string(),
+                description: "HTTP inbound".to_string(),
+                enabled: true,
+                pipeline_mode: pdp_config::PipelineMode::Reception,
+                source: pdp_config::model::EndpointConfig::default_file("."),
+                destination: pdp_config::model::EndpointConfig::default_file(&default_output),
+                error_destination: None,
+                transform_to: None,
+                validate: true,
+                generate_cdar: true,
+                cdar_receiver: None,
+            }, &store);
+
+            // Error handler avec alertes
+            let http_error_dir = alert_config
+                .map(|a| a.error_dir.clone())
+                .unwrap_or_else(|| "errors/http-inbound".to_string());
+            let mut http_alert_handler = pdp_core::AlertErrorHandler::new(
+                std::path::PathBuf::from(&http_error_dir),
+            );
+            if let Some(ref ac) = alert_config {
+                if let Some(ref url) = ac.webhook_url {
+                    http_alert_handler = http_alert_handler.with_webhook(url);
+                }
+                let level = match ac.min_webhook_level.to_lowercase().as_str() {
+                    "warning" => pdp_core::AlertLevel::Warning,
+                    "info" => pdp_core::AlertLevel::Info,
+                    _ => pdp_core::AlertLevel::Critical,
+                };
+                http_alert_handler = http_alert_handler.with_min_webhook_level(level);
+            }
+
+            builder = builder
+                .to_destination(producer)
+                .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
+                .on_error(Box::new(http_alert_handler));
+
+            let route = builder.build()?;
+            router.add_route(route)?;
+
+            tracing::info!("Route 'http-inbound' ajoutée (pipeline réception)");
+        }
+    }
+
+    // Route intra-PDP réception : reçoit les exchanges du canal intra-PDP
+    if cli_mode.should_run_reception() {
+        let intra_consumer: Box<dyn pdp_core::endpoint::Consumer> =
+            Box::new(pdp_core::ChannelConsumer::new("intra-pdp-source", intra_pdp_rx));
+
         let default_output = config.routes.first()
             .map(|r| r.destination.path.clone())
-            .unwrap_or_else(|| "output/http-inbound".to_string());
+            .unwrap_or_else(|| "output/intra-pdp".to_string());
 
-        // Construire le producer (destination) — utilise PPF si configuré, sinon fichier
-        let producer: Box<dyn pdp_core::endpoint::Producer> = if ppf_producer.is_some() {
-            let ppf_prod = ppf_producer.as_ref().unwrap();
-            let mut dynamic = pdp_client::DynamicRoutingProducer::new(
-                "http-inbound-dynamic-dest",
-                ppf_prod.clone(),
-            );
-            for (matricule, producer) in &afnor_producers {
-                dynamic.add_afnor_producer(matricule, producer.clone());
-            }
-            dynamic = dynamic.with_fallback_path(&default_output);
-            Box::new(dynamic)
-        } else {
+        let intra_producer: Box<dyn pdp_core::endpoint::Producer> =
             Box::new(pdp_core::endpoint::FileEndpoint::output(
-                "http-inbound-dest",
+                "intra-pdp-dest",
                 &default_output,
-            ))
-        };
+            ));
 
-        let mut builder = pdp_core::RouteBuilder::new("http-inbound")
-            .description("Route pour les flux reçus via l'API HTTP AFNOR")
-            .from_source(consumer)
-            // 1. Trace : réception
-            .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
-            .process(Box::new(pdp_core::processor::LogProcessor::info("http-reception")))
-            // 1b. Contrôles de réception
-            .process(Box::new(pdp_core::reception::ReceptionProcessor::strict()))
-            // 1c. CDAR 501 d'irrecevabilité
-            .process(Box::new(pdp_cdar::IrrecevabiliteProcessor::new(
-                &config.pdp.id,
-                &config.pdp.name,
-            )))
-            // 1d. Détection type de document
-            .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
-            // 2. Parsing
-            .process(Box::new(pdp_invoice::ParseProcessor::new()))
-            .process(Box::new(pdp_trace::TraceProcessor::parsed(store.clone())))
-            // 2b. Détection de doublons persistante (BR-FR-12/13)
-            .process(Box::new(pdp_trace::DuplicateCheckProcessor::new(store.clone())))
-            // 3. Validation
+        let mut intra_builder = pdp_core::RouteBuilder::new("intra-pdp-reception")
+            .description("Route réception pour les flux intra-PDP")
+            .from_source(intra_consumer);
+
+        intra_builder = add_common_processors(intra_builder, config, &store);
+        intra_builder = add_reception_processors(intra_builder, config, &pdp_config::model::RouteConfig {
+            id: "intra-pdp".to_string(),
+            description: "Intra-PDP reception".to_string(),
+            enabled: true,
+            pipeline_mode: pdp_config::PipelineMode::Reception,
+            source: pdp_config::model::EndpointConfig::default_file("."),
+            destination: pdp_config::model::EndpointConfig::default_file(&default_output),
+            error_destination: None,
+            transform_to: None,
+            validate: true,
+            generate_cdar: true,
+            cdar_receiver: None,
+        }, &store);
+
+        let intra_error_dir = alert_config
+            .map(|a| a.error_dir.clone())
+            .unwrap_or_else(|| "errors/intra-pdp".to_string());
+        let intra_alert_handler = pdp_core::AlertErrorHandler::new(
+            std::path::PathBuf::from(&intra_error_dir),
+        );
+
+        intra_builder = intra_builder
+            .to_destination(intra_producer)
+            .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
+            .on_error(Box::new(intra_alert_handler));
+
+        let route = intra_builder.build()?;
+        router.add_route(route)?;
+
+        tracing::info!("Route 'intra-pdp-reception' ajoutée");
+    }
+
+    Ok(router)
+}
+
+/// Processors communs à tous les pipelines (émission et réception) :
+/// trace réception, contrôles de réception, irrecevabilité, détection type,
+/// parsing, détection doublons
+fn add_common_processors(
+    builder: pdp_core::RouteBuilder,
+    config: &pdp_config::PdpConfig,
+    store: &std::sync::Arc<pdp_trace::TraceStore>,
+) -> pdp_core::RouteBuilder {
+    builder
+        .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
+        .process(Box::new(pdp_core::processor::LogProcessor::info("reception")))
+        .process(Box::new(pdp_core::reception::ReceptionProcessor::strict()))
+        .process(Box::new(pdp_cdar::IrrecevabiliteProcessor::new(
+            &config.pdp.id,
+            &config.pdp.name,
+        )))
+        .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
+        .process(Box::new(pdp_invoice::ParseProcessor::new()))
+        .process(Box::new(pdp_trace::TraceProcessor::parsed(store.clone())))
+        .process(Box::new(pdp_trace::DuplicateCheckProcessor::new(store.clone())))
+}
+
+/// Processors spécifiques au pipeline ÉMISSION :
+/// validation, Flux 1 PPF (TOUJOURS), transformation, CDAR 200, routage
+fn add_emission_processors(
+    mut builder: pdp_core::RouteBuilder,
+    config: &pdp_config::PdpConfig,
+    route_config: &pdp_config::model::RouteConfig,
+    store: &std::sync::Arc<pdp_trace::TraceStore>,
+    annuaire_client: &Option<std::sync::Arc<pdp_client::annuaire::AnnuaireClient>>,
+    partner_directory: &Option<pdp_client::PartnerDirectory>,
+    _intra_pdp_tx: &tokio::sync::mpsc::Sender<pdp_core::Exchange>,
+) -> pdp_core::RouteBuilder {
+    // Validation
+    if route_config.validate {
+        builder = builder
             .process(Box::new(pdp_invoice::ValidateProcessor::new()))
             .process(Box::new(pdp_validate::XmlValidateProcessor::with_options(
                 &config.validation.specs_dir,
@@ -1013,62 +1125,107 @@ async fn build_router(
                 true,
             )))
             .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+    }
 
-        // 4a. Flux 1 PPF
-        if let Some(ref ppf) = config.ppf {
-            let strategy = pdp_transform::Flux1ProfileStrategy::from_config(&ppf.flux1_profile);
-            builder = builder.process(Box::new(pdp_transform::PpfFlux1Processor::new(
-                std::path::Path::new(&ppf.flux1_output_dir),
-                std::path::Path::new(&config.validation.specs_dir),
-            ).with_strategy(strategy)));
-        }
+    // Flux 1 PPF (TOUJOURS en émission — données réglementaires)
+    if let Some(ref ppf) = config.ppf {
+        let strategy = pdp_transform::Flux1ProfileStrategy::from_config(&ppf.flux1_profile);
+        builder = builder.process(Box::new(pdp_transform::PpfFlux1Processor::new(
+            std::path::Path::new(&ppf.flux1_output_dir),
+            std::path::Path::new(&config.validation.specs_dir),
+        ).with_strategy(strategy)));
+    }
 
-        // 5. CDAR
-        builder = builder.process(Box::new(pdp_cdar::CdarProcessor::new(
+    // Transformation (optionnelle)
+    if let Some(ref target) = route_config.transform_to {
+        let target_format = match target.to_uppercase().as_str() {
+            "CII" => pdp_core::model::InvoiceFormat::CII,
+            "UBL" => pdp_core::model::InvoiceFormat::UBL,
+            _ => {
+                tracing::warn!(target = %target, "Format de transformation non supporté");
+                return builder;
+            }
+        };
+        builder = builder
+            .process(Box::new(pdp_transform::TransformProcessor::new(target_format)))
+            .process(Box::new(pdp_trace::TraceProcessor::transformed(store.clone())));
+    }
+
+    // CDAR émission (CDV 200 "Déposée" ou 213 "Rejetée")
+    if route_config.generate_cdar {
+        builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(
             &config.pdp.id,
             &config.pdp.name,
         )));
-
-        // 5b. Résolution de routage
-        if let (Some(ref annuaire), Some(ref partner_dir)) = (&annuaire_client, &partner_directory) {
-            builder = builder.process(Box::new(pdp_client::RoutingResolverProcessor::new(
-                annuaire.clone(),
-                partner_dir.clone(),
-            )));
-        }
-
-        // Error handler avec alertes
-        let http_error_dir = alert_config
-            .map(|a| a.error_dir.clone())
-            .unwrap_or_else(|| "errors/http-inbound".to_string());
-        let mut http_alert_handler = pdp_core::AlertErrorHandler::new(
-            std::path::PathBuf::from(&http_error_dir),
-        );
-        if let Some(ref ac) = alert_config {
-            if let Some(ref url) = ac.webhook_url {
-                http_alert_handler = http_alert_handler.with_webhook(url);
-            }
-            let level = match ac.min_webhook_level.to_lowercase().as_str() {
-                "warning" => pdp_core::AlertLevel::Warning,
-                "info" => pdp_core::AlertLevel::Info,
-                _ => pdp_core::AlertLevel::Critical,
-            };
-            http_alert_handler = http_alert_handler.with_min_webhook_level(level);
-        }
-
-        // 6. Destination + trace finale + error handler
-        builder = builder
-            .to_destination(producer)
-            .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
-            .on_error(Box::new(http_alert_handler));
-
-        let route = builder.build()?;
-        router.add_route(route)?;
-
-        tracing::info!("Route 'http-inbound' ajoutée pour les flux API HTTP");
     }
 
-    Ok(router)
+    // Résolution de routage (avec détection intra-PDP)
+    if route_config.destination.endpoint_type == "ppf" {
+        if let (Some(ref annuaire), Some(ref partner_dir)) = (annuaire_client, partner_directory) {
+            let mut resolver = pdp_client::RoutingResolverProcessor::new(
+                annuaire.clone(),
+                partner_dir.clone(),
+            );
+            if let Some(ref matricule) = config.pdp.matricule {
+                resolver = resolver.with_our_matricule(matricule);
+            }
+            builder = builder.process(Box::new(resolver));
+        }
+    }
+
+    builder
+}
+
+/// Processors spécifiques au pipeline RÉCEPTION :
+/// validation, PAS de Flux 1, transformation optionnelle, CDAR 202 "Reçue"
+fn add_reception_processors(
+    mut builder: pdp_core::RouteBuilder,
+    config: &pdp_config::PdpConfig,
+    route_config: &pdp_config::model::RouteConfig,
+    store: &std::sync::Arc<pdp_trace::TraceStore>,
+) -> pdp_core::RouteBuilder {
+    // Validation
+    if route_config.validate {
+        builder = builder
+            .process(Box::new(pdp_invoice::ValidateProcessor::new()))
+            .process(Box::new(pdp_validate::XmlValidateProcessor::with_options(
+                &config.validation.specs_dir,
+                config.validation.xsd_enabled,
+                config.validation.en16931_enabled,
+                config.validation.br_fr_enabled,
+                true,
+            )))
+            .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+    }
+
+    // PAS de Flux 1 PPF — la PDP émettrice l'a déjà fait
+
+    // Transformation (optionnelle — si l'acheteur a besoin d'un format différent)
+    if let Some(ref target) = route_config.transform_to {
+        let target_format = match target.to_uppercase().as_str() {
+            "CII" => pdp_core::model::InvoiceFormat::CII,
+            "UBL" => pdp_core::model::InvoiceFormat::UBL,
+            _ => {
+                tracing::warn!(target = %target, "Format de transformation non supporté");
+                return builder;
+            }
+        };
+        builder = builder
+            .process(Box::new(pdp_transform::TransformProcessor::new(target_format)))
+            .process(Box::new(pdp_trace::TraceProcessor::transformed(store.clone())));
+    }
+
+    // CDAR réception (CDV 202 "Reçue" ou 213 "Rejetée")
+    if route_config.generate_cdar {
+        builder = builder.process(Box::new(pdp_cdar::CdarProcessor::reception(
+            &config.pdp.id,
+            &config.pdp.name,
+        )));
+    }
+
+    // PAS de résolution de routage — la facture est livrée directement à l'acheteur
+
+    builder
 }
 
 /// Construit le producer PPF SFTP si la configuration PPF est présente

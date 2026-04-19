@@ -147,7 +147,13 @@ where
                             header_field = None;
                         }
                         "AnnuaireConsultationF14" => {
-                            // Header déjà émis à l'ouverture du premier bloc
+                            // Fallback : émettre le Header ici si pas de blocs (F14 vide/différentiel sans données)
+                            if !header_emitted {
+                                if let Some(h) = header.build() {
+                                    callback(F14Event::Header(h))?;
+                                }
+                                header_emitted = true;
+                            }
                         }
                         _ => {}
                     }

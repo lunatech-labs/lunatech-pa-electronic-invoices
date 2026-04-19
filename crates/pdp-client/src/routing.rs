@@ -218,6 +218,12 @@ impl RoutingProcessor {
                     )))
                 }
             }
+            Destination::IntraPdp => {
+                // Intra-PDP est géré par le DynamicRoutingProducer, pas par le RoutingProcessor
+                Err(PdpError::RoutingError(
+                    "IntraPdp non supporté par le RoutingProcessor, utiliser DynamicRoutingProducer".into()
+                ))
+            }
             Destination::File { path } => {
                 // Fallback : ecrire dans un repertoire local
                 let endpoint = pdp_core::endpoint::FileEndpoint::output("routing-file", path);
@@ -274,6 +280,9 @@ impl Processor for RoutingProcessor {
                 exchange.set_property("routing.pdp_matricule", matricule);
                 exchange.set_property("routing.flow_service_url", flow_service_url);
             }
+            Destination::IntraPdp => {
+                exchange.set_property("routing.intra_pdp", "true");
+            }
             Destination::File { path } => {
                 exchange.set_property("routing.file_path", path);
             }
@@ -301,6 +310,8 @@ impl Processor for RoutingProcessor {
 pub struct RoutingResolverProcessor {
     annuaire: Arc<AnnuaireClient>,
     partner_directory: PartnerDirectory,
+    /// Matricule de notre PDP (pour détecter le routage intra-PDP)
+    our_matricule: Option<String>,
 }
 
 impl RoutingResolverProcessor {
@@ -311,7 +322,15 @@ impl RoutingResolverProcessor {
         Self {
             annuaire,
             partner_directory,
+            our_matricule: None,
         }
+    }
+
+    /// Configure le matricule de notre PDP pour la détection intra-PDP.
+    /// Quand le matricule destination = notre matricule, on route en intra-PDP.
+    pub fn with_our_matricule(mut self, matricule: &str) -> Self {
+        self.our_matricule = Some(matricule.to_string());
+        self
     }
 }
 
@@ -356,6 +375,11 @@ impl Processor for RoutingResolverProcessor {
             exchange.set_property("routing.destination", "PPF-SE");
             exchange.set_property("routing.pdp_matricule", "0000");
             exchange.set_property("routing.pdp_name", "PPF");
+        } else if self.our_matricule.as_deref() == Some(&resolution.pdp_matricule) {
+            // Intra-PDP : le destinataire est sur la même PDP
+            exchange.set_property("routing.destination", "INTRA-PDP");
+            exchange.set_property("routing.pdp_matricule", &resolution.pdp_matricule);
+            exchange.set_property("routing.pdp_name", &resolution.pdp_name);
         } else {
             exchange.set_property(
                 "routing.destination",
@@ -385,6 +409,8 @@ pub struct DynamicRoutingProducer {
     name: String,
     ppf_producer: Arc<PpfSftpProducer>,
     afnor_producers: HashMap<String, Arc<AfnorFlowProducer>>,
+    /// Channel pour injection intra-PDP vers le pipeline réception
+    intra_pdp_tx: Option<tokio::sync::mpsc::Sender<Exchange>>,
     /// Fallback : ecrire sur le filesystem si aucun producer n'est configure
     fallback_path: Option<String>,
 }
@@ -398,12 +424,21 @@ impl DynamicRoutingProducer {
             name: name.to_string(),
             ppf_producer,
             afnor_producers: HashMap::new(),
+            intra_pdp_tx: None,
             fallback_path: None,
         }
     }
 
     pub fn add_afnor_producer(&mut self, matricule: &str, producer: Arc<AfnorFlowProducer>) {
         self.afnor_producers.insert(matricule.to_string(), producer);
+    }
+
+    /// Configure le channel pour le routage intra-PDP.
+    /// Les exchanges destinés à un acheteur sur la même PDP sont envoyés
+    /// via ce channel vers le pipeline réception.
+    pub fn with_intra_pdp(mut self, tx: tokio::sync::mpsc::Sender<Exchange>) -> Self {
+        self.intra_pdp_tx = Some(tx);
+        self
     }
 
     pub fn with_fallback_path(mut self, path: &str) -> Self {
@@ -430,6 +465,28 @@ impl Producer for DynamicRoutingProducer {
                 "DynamicRoutingProducer: envoi vers PPF via SFTP"
             );
             return self.ppf_producer.send(exchange).await;
+        }
+
+        // INTRA-PDP
+        if destination == "INTRA-PDP" {
+            if let Some(ref tx) = self.intra_pdp_tx {
+                tracing::info!(
+                    exchange_id = %exchange.id,
+                    "DynamicRoutingProducer: injection intra-PDP vers pipeline réception"
+                );
+                let mut exchange = exchange;
+                exchange.set_property("intra_pdp", "true");
+                exchange.set_header("source.protocol", "intra-pdp");
+                tx.send(exchange.clone()).await.map_err(|_| {
+                    PdpError::RoutingError("Channel intra-PDP fermé".into())
+                })?;
+                return Ok(exchange);
+            } else {
+                tracing::warn!(
+                    exchange_id = %exchange.id,
+                    "Intra-PDP demandé mais pas de channel configuré, fallback PDP distante"
+                );
+            }
         }
 
         // PDP-{matricule}
