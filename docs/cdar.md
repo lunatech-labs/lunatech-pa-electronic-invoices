@@ -5,22 +5,30 @@ conforme au format UN/CEFACT CrossDomainAcknowledgementAndResponse (CDAR) D23B.
 
 ## Architecture
 
-```
- Fichier entrant ──▶ Réception → DocumentTypeRouter ──┐
-                                                       │
-                     ┌─────────────────────────────────┤
-                     │                                  │
-                Facture ?                          CDAR ?
-                     │                                  │
-                     ▼                                  ▼
-           Parsing → Validation              CdvPpfRelayProcessor
-           → Annuaire (G1.63)                (210/212 → Flux 6 PPF)
-           → Flux 1 PPF (émission)                  │
-           → CdarProcessor                         skip
-              ├─ 200 Déposée (émission)       Parse/Validate/Transform
-              ├─ 202 Reçue (réception)
-              └─ 213 Rejetée
-           → Routage → Distribution
+```mermaid
+flowchart TD
+    In[Fichier entrant] --> Rec[ReceptionProcessor]
+    Rec --> Irr[IrrecevabiliteProcessor<br/>CDV 501 si échec]
+    Irr --> Dtr{DocumentTypeRouter}
+    Dtr -->|CDAR| Relay[CdvPpfRelayProcessor]
+    Dtr -->|Facture| Parse[ParseProcessor]
+    Relay -->|210 / 212| PpfF6[Flux 6 FFE0654A<br/>→ PPF]
+    Relay -->|Autres CDV| Skip[Skip]
+    Parse --> Dup[DuplicateCheck]
+    Dup --> Val[ValidateProcessor<br/>+ XmlValidateProcessor]
+    Val --> Ann[AnnuaireValidationProcessor<br/>G1.63 — BR-FR-10/11]
+    Ann --> Flux1[PpfFlux1Processor<br/>émission uniquement]
+    Flux1 --> Trans[TransformProcessor]
+    Trans --> Cdar[CdarProcessor<br/>200 / 202 / 213]
+    Cdar --> Route[RoutingResolver<br/>+ DynamicRoutingProducer]
+    Route -->|PPF| PpfSFTP[SFTP PPF]
+    Route -->|Autre PDP| Afnor[AFNOR Flow Service]
+    Route -->|Intra-PDP| Intra[Canal mpsc local]
+
+    style PpfF6 fill:#fef3c7,stroke:#92400e
+    style PpfSFTP fill:#fef3c7,stroke:#92400e
+    style Ann fill:#dbeafe,stroke:#1e40af
+    style Flux1 fill:#dbeafe,stroke:#1e40af
 ```
 
 ## Processors
@@ -274,51 +282,93 @@ Provenance : B2G (acheteur public) ou IMR/CDAR (intermédiaire).
 
 ### Pipeline Émission (PDP émettrice — PA-E)
 
-```
- 1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
- 2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501 si échec, codes IRR_*)
- 3. Détection type     → DocumentTypeRouter (facture vs CDAR vs e-reporting)
-    ├─ Si CDAR         → parse CDV, set cdv.*
-    │                     → CdvPpfRelayProcessor (210/212 → Flux 6 FFE0654A → PPF)
-    │                     → skip étapes 5-10
-    └─ Si Facture      → continuer
- 4. Relay CDV→PPF      → CdvPpfRelayProcessor (no-op pour les factures)
- 5. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
- 6. Doublons           → DuplicateCheckProcessor (BR-FR-12/13)
- 7. Validation         → ValidateProcessor + XmlValidateProcessor (EN16931, BR-FR, Schematron)
- 8. Annuaire           → AnnuaireValidationProcessor(Emission) (BR-FR-10 vendeur + BR-FR-11 acheteur)
-                          Vendeur absent → REJ_COH, Acheteur absent → DEST_INC
- 9. Flux 1 PPF         → PpfFlux1Processor (TOUJOURS — données réglementaires pour la PPF)
-10. Transformation     → TransformProcessor (UBL ↔ CII, Factur-X)
-11. Génération CDV     → CdarProcessor::emission()
-                          Succès → 200 Déposée (Recipients: SE + PPF)
-                          Erreur → 213 Rejetée à l'émission (Recipients: SE + PPF, Issuer: PA-E)
-12. Routage            → RoutingResolverProcessor (Annuaire PPF → PPF / PDP / intra-PDP)
-13. Distribution       → DynamicRoutingProducer (SFTP PPF, AFNOR Flow, ou intra-PDP)
+```mermaid
+flowchart TD
+    S[Source: fichier / SFTP / HTTP] --> E1[ReceptionProcessor]
+    E1 --> E2[IrrecevabiliteProcessor<br/>501 si échec]
+    E2 --> E3{DocumentTypeRouter}
+    E3 -->|CDAR 210/212| R[CdvPpfRelayProcessor<br/>→ Flux 6 FFE0654A → PPF]
+    E3 -->|Facture| E4[ParseProcessor]
+    E4 --> E5[DuplicateCheckProcessor]
+    E5 --> E6[ValidateProcessor<br/>EN16931 + BR-FR + Schematron]
+    E6 --> E7[AnnuaireValidation<br/>BR-FR-10 vendeur + BR-FR-11 acheteur]
+    E7 --> E8[PpfFlux1Processor<br/>TOUJOURS — données régl.]
+    E8 --> E9[TransformProcessor]
+    E9 --> E10{CdarProcessor::emission}
+    E10 -->|succès| OK[200 Déposée<br/>Recipients: SE + PPF]
+    E10 -->|erreur| KO[213 Rejetée<br/>Recipients: SE + PPF<br/>Issuer: PA-E]
+    OK --> E11[RoutingResolver]
+    KO --> E11
+    E11 --> D{DynamicRoutingProducer}
+    D -->|PPF| D1[SFTP tar.gz]
+    D -->|PDP distante| D2[AFNOR Flow Service]
+    D -->|Intra-PDP| D3[Canal mpsc local]
+
+    style E7 fill:#dbeafe,stroke:#1e40af
+    style E8 fill:#dbeafe,stroke:#1e40af
+    style R fill:#fef3c7,stroke:#92400e
+    style KO fill:#fee2e2,stroke:#991b1b
+    style OK fill:#d1fae5,stroke:#065f46
 ```
 
 ### Pipeline Réception (PDP réceptrice — PA-R)
 
+```mermaid
+flowchart TD
+    S[Source: POST /v1/flows<br/>ou canal intra-PDP] --> R1[ReceptionProcessor]
+    R1 --> R2[IrrecevabiliteProcessor<br/>501 si échec — Sender=PA-R, pas de PPF]
+    R2 --> R3{DocumentTypeRouter}
+    R3 -->|CDAR 210/212| CR[CdvPpfRelayProcessor<br/>→ Flux 6 FFE0654A → PPF]
+    R3 -->|Facture| R4[ParseProcessor]
+    R4 --> R5[DuplicateCheckProcessor]
+    R5 --> R6[ValidateProcessor<br/>EN16931 + BR-FR + Schematron]
+    R6 --> R7[AnnuaireValidation<br/>BR-FR-10 vendeur uniquement]
+    R7 --> NOPPF[PAS de Flux 1 PPF<br/>PA-E l'a déjà envoyé]
+    NOPPF --> R8[TransformProcessor]
+    R8 --> R9{CdarProcessor::reception}
+    R9 -->|succès| OK[202 Reçue<br/>Recipients: SE + BY<br/>PAS de PPF]
+    R9 -->|erreur| KO[213 Rejetée<br/>Recipients: SE + BY<br/>PAS de PPF]
+    OK --> R10[Livraison FileEndpoint<br/>répertoire acheteur]
+    KO --> R10
+
+    style R7 fill:#dbeafe,stroke:#1e40af
+    style NOPPF fill:#fef3c7,stroke:#92400e
+    style CR fill:#fef3c7,stroke:#92400e
+    style KO fill:#fee2e2,stroke:#991b1b
+    style OK fill:#d1fae5,stroke:#065f46
 ```
- 1. Réception          → ReceptionProcessor (taille, extension, nom, doublons)
- 2. Irrecevabilité     → IrrecevabiliteProcessor (CDAR 501, Sender=PA-R, pas de PPF)
- 3. Détection type     → DocumentTypeRouter (facture vs CDAR)
-    ├─ Si CDAR         → parse CDV, set cdv.*
-    │                     → CdvPpfRelayProcessor (210/212 → Flux 6 FFE0654A → PPF)
-    │                     → skip étapes 5-9
-    └─ Si Facture      → continuer
- 4. Relay CDV→PPF      → CdvPpfRelayProcessor (no-op pour les factures)
- 5. Parsing            → ParseProcessor (UBL/CII/Factur-X → InvoiceData)
- 6. Doublons           → DuplicateCheckProcessor
- 7. Validation         → ValidateProcessor + XmlValidateProcessor (EN16931, BR-FR, Schematron)
- 8. Annuaire           → AnnuaireValidationProcessor(Reception) (BR-FR-10 vendeur uniquement)
-                          Vendeur absent → REJ_COH (PAS de check acheteur en réception)
-    PAS de Flux 1 PPF  (la PDP émettrice l'a déjà envoyé)
- 9. Transformation     → TransformProcessor (optionnel)
-10. Génération CDV     → CdarProcessor::reception()
-                          Succès → 202 Reçue (Recipients: SE + BY, PAS de PPF)
-                          Erreur → 213 Rejetée en réception (Recipients: SE + BY, PAS de PPF)
-11. Livraison          → FileEndpoint (répertoire acheteur)
+
+### Séquence complète émission → réception → retours CDV
+
+```mermaid
+sequenceDiagram
+    participant V as Vendeur (C1)
+    participant PAE as PA-E (PDP émettrice)
+    participant PPF as PPF
+    participant PAR as PA-R (PDP réceptrice)
+    participant A as Acheteur (C4)
+
+    V->>PAE: Facture
+    PAE->>PAE: Validation + Annuaire (G1.63)
+    PAE->>PPF: Flux 1 (données régl.)
+    PAE-->>V: CDV 200 Déposée (SE + PPF)
+    PAE->>PAR: AFNOR Flow Service
+    PAR-->>V: CDV 202 Reçue (SE + BY, sans PPF)
+    PAR->>A: Livraison facture
+
+    Note over A: L'acheteur traite la facture
+
+    A->>PAR: CDV 210 Refusée (ou 205, 207, 208…)
+    PAR->>PAE: Transmission CDV
+    PAE->>PPF: Flux 6 FFE0654A (si 210/212)
+    PAE-->>V: Transmission CDV à l'émetteur
+
+    Note over V: Le vendeur encaisse la facture
+
+    V->>PAE: CDV 212 Encaissée
+    PAE->>PPF: Flux 6 FFE0654A
+    PAE->>PAR: Transmission CDV
+    PAR-->>A: Transmission CDV à l'acheteur
 ```
 
 ### Résumé : qui envoie quoi au PPF ?
