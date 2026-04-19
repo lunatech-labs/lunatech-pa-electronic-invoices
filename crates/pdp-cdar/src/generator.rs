@@ -421,7 +421,11 @@ impl CdarGenerator {
         }
     }
 
-    /// Génère un CDV d'irrecevabilité (statut 501, phase Transmission)
+    /// Génère un CDV d'irrecevabilité (statut 501, phase Transmission).
+    ///
+    /// Conforme onglet Acteurs CDV : CDV 501 émis par PA-R.
+    /// Sender = PA-R, Issuer = PA-R, Recipients = PA-E uniquement.
+    /// PAS de PPF comme recipient (PA-R n'envoie jamais au PPF).
     pub fn generate_irrecevable(
         &self,
         invoice: &InvoiceData,
@@ -431,6 +435,8 @@ impl CdarGenerator {
         let now = Utc::now();
         let dt = Self::format_datetime_204(&now);
 
+        // Recipient = PA-E (la PDP émettrice qui a envoyé le flux irrecevable)
+        // On utilise le SIREN vendeur comme proxy de PA-E
         let seller_siren = invoice.seller_siret.as_deref()
             .map(|s| if s.len() >= 9 { &s[..9] } else { s })
             .unwrap_or("000000000");
@@ -441,14 +447,25 @@ impl CdarGenerator {
             document_id: format!("{}_501_{}", invoice.invoice_number, &dt),
             document_name: Some(format!("CDV-501_Irrecevable_{}", invoice.invoice_number)),
             issue_datetime: dt.clone(),
+            // Sender = PA-R (la PDP réceptrice qui rejette)
             sender: TradeParty {
-                global_id: None, global_id_scheme: None, name: None,
-                role_code: RoleCode::WK, endpoint_id: None, endpoint_scheme: None,
+                global_id: Some(self.pdp_siren.clone()),
+                global_id_scheme: Some("0238".to_string()),
+                name: Some(self.pdp_name.clone()),
+                role_code: RoleCode::WK,
+                endpoint_id: None,
+                endpoint_scheme: None,
             },
+            // Issuer = PA-R
             issuer: Some(TradeParty {
-                global_id: None, global_id_scheme: None, name: None,
-                role_code: RoleCode::WK, endpoint_id: None, endpoint_scheme: None,
+                global_id: Some(self.pdp_siren.clone()),
+                global_id_scheme: Some("0238".to_string()),
+                name: Some(self.pdp_name.clone()),
+                role_code: RoleCode::WK,
+                endpoint_id: None,
+                endpoint_scheme: None,
             }),
+            // Recipients = PA-E uniquement (pas de PPF)
             recipients: vec![
                 TradeParty {
                     global_id: Some(seller_siren.to_string()),
@@ -458,7 +475,6 @@ impl CdarGenerator {
                     endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
                     endpoint_scheme: Some("0225".to_string()),
                 },
-                Self::ppf_recipient(),
             ],
             multiple_references: false,
             type_code: CdvTypeCode::Transmission,

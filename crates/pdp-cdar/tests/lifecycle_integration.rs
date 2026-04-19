@@ -216,11 +216,16 @@ async fn test_fichier_vide_genere_cdv_501_irrecevable() {
     assert_eq!(cdv.status_code(), Some(501));
     assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
 
-    // Destinataires = vendeur (SE) + PPF (DFH)
-    assert_eq!(cdv.recipients.len(), 2);
+    // CDV 501 : Recipients = PA-E (SE) uniquement, PAS de PPF
+    // Conforme Acteurs CDV : PA-R envoie à PA-E, pas au PPF
+    assert_eq!(cdv.recipients.len(), 1);
     let seller = cdv.recipients.iter().find(|r| r.role_code == RoleCode::SE).unwrap();
     assert_eq!(seller.global_id.as_deref(), Some("456789012"));
-    assert!(cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
+    assert!(!cdv.recipients.iter().any(|r| r.role_code == RoleCode::DFH));
+
+    // Sender = PA-R (la PDP qui rejette)
+    assert_eq!(cdv.sender.global_id.as_deref(), Some("999888777"));
+    assert_eq!(cdv.sender.global_id_scheme.as_deref(), Some("0238"));
 
     // Motif d'irrecevabilité
     let ref_doc = &cdv.referenced_documents[0];
