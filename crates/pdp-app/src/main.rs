@@ -782,7 +782,7 @@ async fn build_router(
             .description(&route_config.description)
             .from_source(consumer);
 
-        builder = add_common_processors(builder, config, &store);
+        builder = add_common_processors(builder, config, &store, &ppf_producer);
 
         match route_config.pipeline_mode {
             pdp_config::PipelineMode::Emission => {
@@ -897,7 +897,7 @@ async fn build_router(
                 // 0. Tag tenant SIREN sur chaque exchange
                 .process(Box::new(pdp_core::TenantTagProcessor::new(siren)));
 
-            builder = add_common_processors(builder, config, &store);
+            builder = add_common_processors(builder, config, &store, &ppf_producer);
 
             // Tenant route = pipeline émission avec config PPF du tenant
             let tenant_ppf = tenant.config.ppf.as_ref().or(config.ppf.as_ref());
@@ -979,7 +979,7 @@ async fn build_router(
                 .description("Route réception pour les flux d'autres PDP via l'API HTTP AFNOR")
                 .from_source(consumer);
 
-            builder = add_common_processors(builder, config, &store);
+            builder = add_common_processors(builder, config, &store, &ppf_producer);
             builder = add_reception_processors(builder, config, &pdp_config::model::RouteConfig {
                 id: "http-inbound".to_string(),
                 description: "HTTP inbound".to_string(),
@@ -1044,7 +1044,7 @@ async fn build_router(
             .description("Route réception pour les flux intra-PDP")
             .from_source(intra_consumer);
 
-        intra_builder = add_common_processors(intra_builder, config, &store);
+        intra_builder = add_common_processors(intra_builder, config, &store, &ppf_producer);
         intra_builder = add_reception_processors(intra_builder, config, &pdp_config::model::RouteConfig {
             id: "intra-pdp".to_string(),
             description: "Intra-PDP reception".to_string(),
@@ -1082,13 +1082,14 @@ async fn build_router(
 
 /// Processors communs à tous les pipelines (émission et réception) :
 /// trace réception, contrôles de réception, irrecevabilité, détection type,
-/// parsing, détection doublons
+/// relay CDV→PPF (210/212), parsing, détection doublons
 fn add_common_processors(
     builder: pdp_core::RouteBuilder,
     config: &pdp_config::PdpConfig,
     store: &std::sync::Arc<pdp_trace::TraceStore>,
+    ppf_producer: &Option<std::sync::Arc<pdp_client::PpfSftpProducer>>,
 ) -> pdp_core::RouteBuilder {
-    builder
+    let mut builder = builder
         .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
         .process(Box::new(pdp_core::processor::LogProcessor::info("reception")))
         .process(Box::new(pdp_core::reception::ReceptionProcessor::strict()))
@@ -1096,7 +1097,17 @@ fn add_common_processors(
             &config.pdp.id,
             &config.pdp.name,
         )))
-        .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
+        .process(Box::new(pdp_cdar::DocumentTypeRouter::new()));
+
+    // Relay CDV 210 (Refusée) et 212 (Encaissée) vers le PPF via Flux 6
+    // Placé juste après DocumentTypeRouter qui parse les CDAR et set cdv.*
+    if let Some(ref ppf_prod) = ppf_producer {
+        builder = builder.process(Box::new(pdp_cdar::CdvPpfRelayProcessor::new(
+            ppf_prod.clone(),
+        )));
+    }
+
+    builder
         .process(Box::new(pdp_invoice::ParseProcessor::new()))
         .process(Box::new(pdp_trace::TraceProcessor::parsed(store.clone())))
         .process(Box::new(pdp_trace::DuplicateCheckProcessor::new(store.clone())))
