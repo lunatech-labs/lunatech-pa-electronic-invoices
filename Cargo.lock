@@ -3068,7 +3068,9 @@ dependencies = [
 name = "pdp-annuaire"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
+ "pdp-core",
  "quick-xml 0.31.0",
  "serde",
  "sqlx",
