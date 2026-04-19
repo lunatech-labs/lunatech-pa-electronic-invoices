@@ -113,73 +113,97 @@ propriété `cdv.source` :
 
 Référence : XP Z12-012 Annexe A V1.2, onglet "Tableau des motifs de STATUTS".
 
+Les codes motifs ont des applicabilités différentes selon le contexte (émission,
+réception, PPF). Un code applicable en "REJETÉE Émission" n'est pas forcément
+applicable en "REJETÉE Réception" ou en "REFUSÉE".
+
 ### Codes IRR — Irrecevabilité (CDV 501)
 
 Utilisés par `IrrecevabiliteProcessor` quand les contrôles de réception échouent.
+Applicables en émission ET en réception (même contrôles dans les deux pipelines).
 
-| Code | Libellé | Contrôle | Mapping |
-|------|---------|----------|---------|
-| `IRR_VIDE_F` | Contrôle de non vide sur les fichiers du flux | Fichier vide | REC-01 |
-| `IRR_TYPE_F` | Contrôle de type et extension des fichiers du flux | Extension invalide (.csv, .txt...) | REC-02 |
-| `IRR_SYNTAX` | Contrôle syntaxique des fichiers du flux | XML non parseable | Fallback |
-| `IRR_TAILLE_F` | Contrôle de taille max des fichiers du flux | Fichier > 100 Mo | BR-FR-19 |
-| `IRR_NOM_PJ` | Contrôle du nom des PJ (caractères spéciaux) | Nom invalide ou absent | REC-03/04 |
-| `IRR_TAILLE_PJ` | Contrôle de taille des PJ | PJ trop volumineuse | (non implémenté) |
-| `IRR_VID_PJ` | Contrôle de PJ non vide | PJ vide | (non implémenté) |
-| `IRR_EXT_DOC` | Contrôle de l'extension des PJ | Extension PJ invalide | (non implémenté) |
-| `IRR_ANTIVIRUS` | Contrôle anti-virus | Fichier infecté | (non implémenté) |
+| Code | Libellé | Mapping | Implémenté |
+|------|---------|---------|------------|
+| `IRR_VIDE_F` | Fichier du flux vide | REC-01 | oui |
+| `IRR_TYPE_F` | Type/extension du fichier invalide | REC-02 | oui |
+| `IRR_SYNTAX` | Fichier syntaxiquement invalide | Fallback | oui |
+| `IRR_TAILLE_F` | Fichier > 100 Mo | BR-FR-19 | oui |
+| `IRR_NOM_PJ` | Nom de fichier invalide (caractères, absent) | REC-03/04 | oui |
+| `IRR_TAILLE_PJ` | Pièce jointe trop volumineuse | — | non |
+| `IRR_VID_PJ` | Pièce jointe vide | — | non |
+| `IRR_EXT_DOC` | Extension de pièce jointe invalide | — | non |
+| `IRR_ANTIVIRUS` | Fichier infecté | — | non |
 
 ### Codes REJ — Rejet technique (CDV 213)
 
-Utilisés par `CdarProcessor` quand la validation échoue. Le code est déterminé
-par `classify_error_reason()` en analysant le message d'erreur.
+Contrôles automatiques effectués par la PDP (pas par l'acheteur).
+Applicables en **REJETÉE Émission** ET **REJETÉE Réception**.
+Provenance : contrôles PDP (pas B2G).
 
-| Code | Libellé | Pattern détecté |
-|------|---------|-----------------|
-| `REJ_SEMAN` | Rejet pour erreur sémantique | "syntax", "xml", "parse", "schematron", "br-", "rule", step "validate" |
-| `REJ_UNI` | Rejet sur contrôle unicité | "xsd", "schema" |
-| `REJ_COH` | Rejet sur contrôle cohérence de données | (disponible, non mappé automatiquement) |
-| `REJ_ADR` | Rejet sur contrôle d'adressage | (disponible, non mappé automatiquement) |
-| `REJ_CONT_B2G` | Rejet sur contrôles métier B2G | (disponible, non mappé automatiquement) |
-| `REJ_REF_PJ` | Rejet sur référence de PJ | (disponible, non mappé automatiquement) |
-| `REJ_ASS_PJ` | Rejet sur erreur d'association de la PJ | (disponible, non mappé automatiquement) |
+| Code | Libellé | Pattern `classify_error_reason()` | Émission | Réception |
+|------|---------|-----------------------------------|----------|-----------|
+| `REJ_SEMAN` | Erreur sémantique | "syntax", "xml", "parse", "schematron", "br-", step "validate" | X | X |
+| `REJ_UNI` | Contrôle unicité | "xsd", "schema" | X | X |
+| `REJ_COH` | Cohérence de données | (dans l'enum) | X | X |
+| `REJ_ADR` | Contrôle d'adressage | (dans l'enum) | X | X |
+| `REJ_CONT_B2G` | Contrôles métier B2G | (dans l'enum) | X | X |
+| `REJ_REF_PJ` | Référence de PJ | (dans l'enum) | X | X |
+| `REJ_ASS_PJ` | Association de la PJ | (dans l'enum) | X | X |
 
-### Codes métier — Refus, litige, etc. (CDV 210, 207, 206, 208)
+### Codes applicables en REJETÉE Émission + Réception + REFUSÉE
 
-Utilisés par l'acheteur ou le vendeur dans les CDV de phase Traitement (TypeCode 23).
-Classés par `classify_error_reason()` quand le message contient les mots-clés.
+Ces codes peuvent être générés par la PDP (rejet) ou par l'acheteur (refus).
 
-| Code | Libellé | Pattern détecté |
-|------|---------|-----------------|
-| `DOUBLON` | Facture en doublon | "doublon", "duplicate" |
-| `SIRET_ERR` | SIRET erroné ou absent | "siret", "siren" |
-| `TX_TVA_ERR` | Taux de TVA erroné | "tva", "vat" |
-| `MONTANTTOTAL_ERR` | Montant total erroné | "montant", "total", "amount" |
-| `CALCUL_ERR` | Erreur de calcul | "calcul", "calculation" |
-| `ADR_ERR` | Adresse de facturation erronée | "adresse", "address" |
-| `DEST_ERR` | Erreur de destinataire | "destinataire", "recipient" |
-| `DEST_INC` | Destinataire inconnu | (dans l'enum, non mappé auto) |
-| `NON_CONFORME` | Mention légale manquante | Fallback (aucun pattern reconnu) |
-| `COORD_BANC_ERR` | Erreur de coordonnées bancaires | (dans l'enum) |
-| `TRANSAC_INC` | Transaction inconnue | (dans l'enum) |
-| `EMMET_INC` | Émetteur inconnu | (dans l'enum) |
-| `CONTRAT_TERM` | Contrat terminé | (dans l'enum) |
-| `DOUBLE_FACT` | Double facture | (dans l'enum) |
-| `CMD_ERR` | N° de commande incorrect | (dans l'enum) |
-| `CODE_ROUTAGE_ERR` | Code routage absent ou erroné | (dans l'enum) |
-| `REF_CT_ABSENT` | Référence contractuelle manquante | (dans l'enum) |
-| `REF_ERR` | Référence incorrecte | (dans l'enum) |
-| `PU_ERR` | Prix unitaires incorrects | (dans l'enum) |
-| `REM_ERR` | Remise erronée | (dans l'enum) |
-| `QTE_ERR` | Quantité facturée incorrecte | (dans l'enum) |
-| `ART_ERR` | Article facturé incorrect | (dans l'enum) |
-| `MODPAI_ERR` | Modalités de paiement incorrectes | (dans l'enum) |
-| `QUALITE_ERR` | Qualité d'article incorrecte | (dans l'enum) |
-| `LIVR_INCOMP` | Problème de livraison | (dans l'enum) |
-| `ROUTAGE_ERR` | Erreur de routage | (dans l'enum) |
-| `JUSTIF_ABS` | Justificatif absent | (dans l'enum) |
-| `NON_TRANSMISE` | Destinataire non connecté | (dans l'enum) |
-| `AUTRE` | Autre | (dans l'enum) |
+| Code | Libellé | Pattern | Rej. Émi | Rej. Réc | Refusée |
+|------|---------|---------|----------|----------|---------|
+| `DOUBLON` | Facture en doublon | "doublon", "duplicate" | X | X | X |
+| `MONTANTTOTAL_ERR` | Montant total erroné | "montant", "total", "amount" | X | X | X |
+| `CALCUL_ERR` | Erreur de calcul | "calcul", "calculation" | X | X | X |
+| `ADR_ERR` | Adresse de facturation erronée | "adresse", "address" | X | X | X |
+
+### Codes applicables uniquement en REJETÉE Émission
+
+| Code | Libellé | Pattern | Commentaire |
+|------|---------|---------|-------------|
+| `DEST_INC` | Destinataire inconnu | (dans l'enum) | Annuaire PPF : SIREN introuvable |
+
+### Codes métier — Refusée / En litige (CDV 210, 207, 206, 208)
+
+Utilisés par l'**acheteur** dans les CDV de phase Traitement (TypeCode 23).
+La PDP les reçoit mais ne les génère pas elle-même.
+Provenance : B2G (acheteur public) ou IMR/CDAR (intermédiaire).
+
+| Code | Libellé | Refusée | En litige | Approv. part. | Suspendue |
+|------|---------|---------|-----------|---------------|-----------|
+| `TX_TVA_ERR` | Taux de TVA erroné | X | | | |
+| `NON_CONFORME` | Mention légale manquante | X | X | | |
+| `DEST_ERR` | Erreur de destinataire | X | X | | |
+| `TRANSAC_INC` | Transaction inconnue | X | X | | |
+| `EMMET_INC` | Émetteur inconnu | X | X | | |
+| `CONTRAT_TERM` | Contrat terminé | X | X | | |
+| `DOUBLE_FACT` | Double facture | X | X | | |
+| `CMD_ERR` | Commande incorrecte | X | X | X | X |
+| `COORD_BANC_ERR` | Coordonnées bancaires | X | | X | |
+| `SIRET_ERR` | SIRET erroné | | X | X | X |
+| `CODE_ROUTAGE_ERR` | Code routage erroné | | X | X | X |
+| `REF_CT_ABSENT` | Référence contractuelle absente | X | X | X | X |
+| `REF_ERR` | Référence incorrecte | | X | X | X |
+| `PU_ERR` | Prix unitaires incorrects | | X | X | |
+| `REM_ERR` | Remise erronée | | X | X | |
+| `QTE_ERR` | Quantité incorrecte | | X | X | |
+| `ART_ERR` | Article incorrect | | X | X | |
+| `MODPAI_ERR` | Modalités paiement incorrectes | | X | X | |
+| `QUALITE_ERR` | Qualité incorrecte | | X | X | |
+| `LIVR_INCOMP` | Problème de livraison | | X | X | |
+| `JUSTIF_ABS` | Justificatif absent | | | | X |
+| `AUTRE` | Autre motif | X | X | | |
+
+### Codes spéciaux
+
+| Code | Libellé | Statut applicable | Commentaire |
+|------|---------|-------------------|-------------|
+| `NON_TRANSMISE` | Destinataire non connecté | DÉPOSÉE (200) | Statut spécial : facture déposée mais pas transmissible |
+| `ROUTAGE_ERR` | Erreur de routage | ERREUR_ROUTAGE (221) | Erreur technique de routage |
 
 ## Pipelines émission et réception
 
