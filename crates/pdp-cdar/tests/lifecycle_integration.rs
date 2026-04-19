@@ -1043,12 +1043,14 @@ async fn test_reception_facture_valide_genere_cdv_202_recue() {
     // Émetteur = PDP (rôle WK)
     assert_eq!(cdv.sender.role_code, RoleCode::WK);
 
-    // Destinataires = Acheteur (BY) + PPF (DFH)
+    // Destinataires conformes AFNOR : Vendeur (SE) + Acheteur (BY), PAS de PPF
     assert_eq!(cdv.recipients.len(), 2);
+    let seller = cdv.recipients.iter().find(|r| r.role_code == RoleCode::SE).unwrap();
+    assert_eq!(seller.global_id.as_deref(), Some("456789012")); // SIREN vendeur
     let buyer = cdv.recipients.iter().find(|r| r.role_code == RoleCode::BY).unwrap();
-    assert_eq!(buyer.global_id.as_deref(), Some("321654987"));
-    let ppf = cdv.recipients.iter().find(|r| r.role_code == RoleCode::DFH).unwrap();
-    assert_eq!(ppf.global_id.as_deref(), Some("9998"));
+    assert_eq!(buyer.global_id.as_deref(), Some("321654987")); // SIREN acheteur
+    // Pas de PPF (DFH) dans le CDV 202
+    assert!(cdv.recipients.iter().all(|r| r.role_code != RoleCode::DFH));
 
     // Référence à la facture
     assert_eq!(cdv.referenced_documents.len(), 1);
@@ -1057,6 +1059,11 @@ async fn test_reception_facture_valide_genere_cdv_202_recue() {
     assert_eq!(ref_doc.process_condition_code, 202);
     assert_eq!(ref_doc.process_condition.as_deref(), Some("Reçue"));
     assert_eq!(ref_doc.status_code, Some(43)); // Transferred to next party
+
+    // Issuer du document référencé = le VENDEUR (SE), pas l'acheteur
+    let ref_issuer = ref_doc.issuer.as_ref().unwrap();
+    assert_eq!(ref_issuer.role_code, RoleCode::SE);
+    assert_eq!(ref_issuer.global_id.as_deref(), Some("456789012"));
 
     // Pas de motifs d'erreur
     assert!(ref_doc.statuses.is_empty());

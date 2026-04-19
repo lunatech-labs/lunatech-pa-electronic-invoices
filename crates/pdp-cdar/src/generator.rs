@@ -127,6 +127,10 @@ impl CdarGenerator {
 
     /// Génère un CDV de réception (statut 202 — Reçue, phase Transmission)
     /// Utilisé par la PDP réceptrice quand elle reçoit une facture d'une autre PDP.
+    ///
+    /// Conforme à la fixture AFNOR UC1_F202500003_02-CDV-202_Recue.xml :
+    /// - Recipients : Vendeur (SE) + Acheteur (BY), PAS de PPF
+    /// - Referenced Doc Issuer : Vendeur (SE) — c'est lui qui a émis la facture
     pub fn generate_recue(
         &self,
         invoice: &InvoiceData,
@@ -137,6 +141,10 @@ impl CdarGenerator {
         let issue_date_102 = invoice.issue_date.as_deref()
             .map(|d| Self::format_date_102(d))
             .unwrap_or_default();
+
+        let seller_siren = invoice.seller_siret.as_deref()
+            .map(|s| if s.len() >= 9 { &s[..9] } else { s })
+            .unwrap_or("000000000");
 
         let buyer_siren = invoice.buyer_siret.as_deref()
             .map(|s| if s.len() >= 9 { &s[..9] } else { s })
@@ -157,16 +165,25 @@ impl CdarGenerator {
                 global_id: None, global_id_scheme: None, name: None,
                 role_code: RoleCode::WK, endpoint_id: None, endpoint_scheme: None,
             }),
+            // Destinataires conformes AFNOR : Vendeur (SE) + Acheteur (BY)
+            // PAS de PPF — contrairement au CDV 200 (émission)
             recipients: vec![
+                TradeParty {
+                    global_id: Some(seller_siren.to_string()),
+                    global_id_scheme: Some("0002".to_string()),
+                    name: invoice.seller_name.clone(),
+                    role_code: RoleCode::SE,
+                    endpoint_id: Some(format!("{}_STATUTS", seller_siren)),
+                    endpoint_scheme: Some("0225".to_string()),
+                },
                 TradeParty {
                     global_id: Some(buyer_siren.to_string()),
                     global_id_scheme: Some("0002".to_string()),
                     name: invoice.buyer_name.clone(),
                     role_code: RoleCode::BY,
-                    endpoint_id: Some(format!("{}_STATUTS", buyer_siren)),
-                    endpoint_scheme: Some("0225".to_string()),
+                    endpoint_id: Some(buyer_siren.to_string()),
+                    endpoint_scheme: None,
                 },
-                Self::ppf_recipient(),
             ],
             multiple_references: false,
             type_code: CdvTypeCode::Transmission,
@@ -180,11 +197,12 @@ impl CdarGenerator {
                     issue_date: Some(issue_date_102),
                     process_condition_code: 202,
                     process_condition: Some("Reçue".to_string()),
+                    // Issuer = le VENDEUR (SE) — c'est lui qui a émis la facture
                     issuer: Some(TradeParty {
-                        global_id: Some(buyer_siren.to_string()),
+                        global_id: Some(seller_siren.to_string()),
                         global_id_scheme: Some("0002".to_string()),
                         name: None,
-                        role_code: RoleCode::BY,
+                        role_code: RoleCode::SE,
                         endpoint_id: None,
                         endpoint_scheme: None,
                     }),
