@@ -1,13 +1,13 @@
-# TODO — PDP Facture
+# TODO — Ferrite (PDP Facture)
 
 Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 
-**Dernière mise à jour** : 2026-04-12
-**Tests** : 882+ passent, 0 échec
+**Dernière mise à jour** : 2026-04-19
+**Tests** : 860+ passent, 0 échec
 
 ---
 
-## Fait (cette session)
+## Fait
 
 - [x] Multi-tenancy par SIREN (`TenantRegistry`, `TenantEntry`, auto-config)
 - [x] Routes auto-générées par tenant (`{siren}/in → pipeline → {siren}/out`)
@@ -17,18 +17,32 @@ Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 - [x] Webhook de notification pour alertes critiques
 - [x] Documentation Peppol étendue (protocole AS4, WS-Security, PKI, migration Oxalis)
 - [x] Documentation annuaire PPF (F14 complet/différentiel, F13 actualisation, copie locale)
+- [x] Import F14 streaming via channel mpsc (mémoire bornée ~5 Mo au lieu de ~7 Go)
+- [x] Recherche annuaire enrichie (adresses, B2G, codes routage, plateformes)
+- [x] Logo Ferrite (SVG responsive + PNG)
+
+### Séparation PDP émettrice / PDP réceptrice
+
+- [x] `PipelineMode` enum (Emission/Reception) dans la config des routes
+- [x] Pipeline émission : validation → Flux 1 PPF (TOUJOURS) → CDAR 200 → routage
+- [x] Pipeline réception : validation → PAS de Flux 1 → CDAR 202 "Reçue" → livraison
+- [x] `CdarProcessor::emission()` (CDV 200) et `::reception()` (CDV 202)
+- [x] Détection intra-PDP dans `RoutingResolverProcessor` (our_matricule)
+- [x] Canal mpsc intra-PDP (émission → réception locale sans réseau)
+- [x] CLI `--mode emitter|receiver|both` sur `start` et `run`
+- [x] Route HTTP inbound corrigée → pipeline réception (plus de Flux 1)
+- [x] Route `intra-pdp-reception` via `ChannelConsumer`
+- [x] Tests unitaires CDV 202, CliMode, PipelineMode, Destination::IntraPdp
 
 ## Haute priorité
 
-### 1. Réception inter-PDP
+### 1. Réception inter-PDP — affinage
 
-La PDP peut recevoir des factures d'une autre PDP (pas seulement de clients directs). Adapter l'architecture pour gérer ce flux entrant PDP→PDP.
+L'architecture émission/réception est en place. Reste à affiner :
 
-- [ ] Définir le flux de réception (AFNOR Flow Service entrant + SFTP entrant)
-- [ ] Consumer pour les factures reçues d'autres PDP
-- [ ] Routing vers le bon tenant (`{siren}/out/`)
-- [ ] CDV de réception (200 Déposée → 201 Recevable)
-- [ ] Détails à préciser avec Nicolas
+- [ ] Livraison au bon tenant en réception (`{siren}/out/` selon l'acheteur)
+- [ ] Notification de l'acheteur après réception (webhook, email, ou polling)
+- [ ] Gestion du CDV retour acheteur→vendeur (CDV 204, 210, etc. à relayer)
 
 ### 2. Annuaire PPF — Copie locale (Flux 14/13)
 

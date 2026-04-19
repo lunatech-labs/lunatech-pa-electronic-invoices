@@ -455,3 +455,55 @@ pub struct TenantConfig {
     /// Configuration AFNOR spécifique
     pub afnor: Option<AfnorConfig>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pipeline_mode_default_is_emission() {
+        let mode = PipelineMode::default();
+        assert_eq!(mode, PipelineMode::Emission);
+    }
+
+    #[test]
+    fn test_pipeline_mode_deserialize() {
+        let yaml = r#"
+            id: test-route
+            description: test
+            pipeline_mode: reception
+            source:
+              type: file
+              path: ./in
+            destination:
+              type: file
+              path: ./out
+        "#;
+        let route: RouteConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(route.pipeline_mode, PipelineMode::Reception);
+    }
+
+    #[test]
+    fn test_pipeline_mode_default_emission_when_omitted() {
+        let yaml = r#"
+            id: test-route
+            description: test
+            source:
+              type: file
+              path: ./in
+            destination:
+              type: file
+              path: ./out
+        "#;
+        let route: RouteConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(route.pipeline_mode, PipelineMode::Emission);
+    }
+
+    #[test]
+    fn test_endpoint_config_default_file() {
+        let ep = EndpointConfig::default_file("/tmp/test");
+        assert_eq!(ep.endpoint_type, "file");
+        assert_eq!(ep.path, "/tmp/test");
+        assert!(ep.host.is_none());
+    }
+}

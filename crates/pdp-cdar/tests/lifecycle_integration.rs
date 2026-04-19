@@ -1013,3 +1013,93 @@ async fn test_fixture_cdv_200_deposee() {
     assert_eq!(ref_doc.status_code, Some(10)); // Received
     assert_eq!(ref_doc.invoice_id, "F202500003");
 }
+
+// ============================================================
+// Tests PDP Réceptrice — CDV 202 "Reçue"
+// ============================================================
+
+#[tokio::test]
+async fn test_reception_facture_valide_genere_cdv_202_recue() {
+    // CdarProcessor en mode réception (PDP réceptrice)
+    let processor = CdarProcessor::reception("111222333", "PDP Réceptrice Test");
+    let exchange = make_exchange_with_invoice();
+
+    let result = processor.process(exchange).await.unwrap();
+
+    // CDV 202 Reçue généré
+    assert_eq!(result.get_header("cdv.generated").unwrap(), "true");
+    assert_eq!(result.get_property("cdv.status_code").unwrap(), "202");
+    assert_eq!(result.get_property("cdv.type_code").unwrap(), "305"); // Transmission
+
+    // Parser le CDV XML généré
+    let cdv_xml = result.get_property("cdv.xml").unwrap();
+    let parser = CdarParser::new();
+    let cdv = parser.parse(cdv_xml).unwrap();
+
+    // Vérifications structurelles
+    assert_eq!(cdv.business_process, "REGULATED");
+    assert_eq!(cdv.type_code, CdvTypeCode::Transmission);
+
+    // Émetteur = PDP (rôle WK)
+    assert_eq!(cdv.sender.role_code, RoleCode::WK);
+
+    // Destinataires = Acheteur (BY) + PPF (DFH)
+    assert_eq!(cdv.recipients.len(), 2);
+    let buyer = cdv.recipients.iter().find(|r| r.role_code == RoleCode::BY).unwrap();
+    assert_eq!(buyer.global_id.as_deref(), Some("321654987"));
+    let ppf = cdv.recipients.iter().find(|r| r.role_code == RoleCode::DFH).unwrap();
+    assert_eq!(ppf.global_id.as_deref(), Some("9998"));
+
+    // Référence à la facture
+    assert_eq!(cdv.referenced_documents.len(), 1);
+    let ref_doc = &cdv.referenced_documents[0];
+    assert_eq!(ref_doc.invoice_id, "FA-2025-00256");
+    assert_eq!(ref_doc.process_condition_code, 202);
+    assert_eq!(ref_doc.process_condition.as_deref(), Some("Reçue"));
+    assert_eq!(ref_doc.status_code, Some(43)); // Transferred to next party
+
+    // Pas de motifs d'erreur
+    assert!(ref_doc.statuses.is_empty());
+}
+
+#[tokio::test]
+async fn test_reception_facture_invalide_genere_cdv_213() {
+    // Même en mode réception, une facture invalide génère un CDV 213 (rejet)
+    let processor = CdarProcessor::reception("111222333", "PDP Réceptrice Test");
+
+    let mut exchange = make_exchange_with_invoice();
+    exchange.add_error(
+        "validation",
+        &PdpError::ValidationError("Format invalide".to_string()),
+    );
+
+    let result = processor.process(exchange).await.unwrap();
+
+    assert_eq!(result.get_property("cdv.status_code").unwrap(), "213");
+    assert_eq!(result.get_property("cdv.type_code").unwrap(), "305");
+}
+
+#[tokio::test]
+async fn test_emission_vs_reception_modes_differents() {
+    let exchange = make_exchange_with_invoice();
+
+    // Mode émission → CDV 200
+    let emission = CdarProcessor::emission("999888777", "PDP Émettrice");
+    let result_emission = emission.process(exchange.clone()).await.unwrap();
+    assert_eq!(result_emission.get_property("cdv.status_code").unwrap(), "200");
+
+    // Mode réception → CDV 202
+    let reception = CdarProcessor::reception("111222333", "PDP Réceptrice");
+    let result_reception = reception.process(exchange).await.unwrap();
+    assert_eq!(result_reception.get_property("cdv.status_code").unwrap(), "202");
+}
+
+#[tokio::test]
+async fn test_cdar_new_backward_compat() {
+    // CdarProcessor::new() doit se comporter comme ::emission()
+    let processor = CdarProcessor::new("999888777", "Ma PDP Test");
+    let exchange = make_exchange_with_invoice();
+
+    let result = processor.process(exchange).await.unwrap();
+    assert_eq!(result.get_property("cdv.status_code").unwrap(), "200");
+}

@@ -1504,3 +1504,32 @@ async fn cmd_annuaire(config_path: &std::path::Path, action: AnnuaireCommands) -
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_mode_from_str() {
+        assert_eq!(CliMode::from_str("emitter").unwrap(), CliMode::Emitter);
+        assert_eq!(CliMode::from_str("emission").unwrap(), CliMode::Emitter);
+        assert_eq!(CliMode::from_str("emettrice").unwrap(), CliMode::Emitter);
+        assert_eq!(CliMode::from_str("receiver").unwrap(), CliMode::Receiver);
+        assert_eq!(CliMode::from_str("reception").unwrap(), CliMode::Receiver);
+        assert_eq!(CliMode::from_str("receptrice").unwrap(), CliMode::Receiver);
+        assert_eq!(CliMode::from_str("both").unwrap(), CliMode::Both);
+        assert_eq!(CliMode::from_str("all").unwrap(), CliMode::Both);
+        assert_eq!(CliMode::from_str("").unwrap(), CliMode::Both);
+        assert!(CliMode::from_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_cli_mode_should_run() {
+        assert!(CliMode::Emitter.should_run_emission());
+        assert!(!CliMode::Emitter.should_run_reception());
+        assert!(!CliMode::Receiver.should_run_emission());
+        assert!(CliMode::Receiver.should_run_reception());
+        assert!(CliMode::Both.should_run_emission());
+        assert!(CliMode::Both.should_run_reception());
+    }
+}

@@ -625,5 +625,12 @@ mod tests {
             .to_string(),
             "PDP-1111"
         );
+        assert_eq!(Destination::IntraPdp.to_string(), "INTRA-PDP");
+    }
+
+    #[test]
+    fn test_destination_intra_pdp_display() {
+        let dest = Destination::IntraPdp;
+        assert_eq!(format!("{}", dest), "INTRA-PDP");
     }
 }
