@@ -40,7 +40,7 @@ services:
 
   # PostgreSQL — annuaire PPF local
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: pdp-postgres
     environment:
       - POSTGRES_USER=pdp
