@@ -3,7 +3,7 @@
 # Inclut Rust toolchain + SaxonC-HE (natif) + FOP + qpdf + libxml2
 # =============================================================================
 
-FROM rust:1.88-bookworm
+FROM rust:1.95-bookworm
 
 # Dépendances build + runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
