@@ -2,8 +2,8 @@
 
 Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 
-**Dernière mise à jour** : 2026-04-19
-**Tests** : 860+ passent, 0 échec
+**Dernière mise à jour** : 2026-04-26
+**Tests** : 170+ tests pdp-cdar, 0 échec sur le workspace
 
 ---
 
@@ -20,6 +20,7 @@ Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 - [x] Import F14 streaming via channel mpsc (mémoire bornée ~5 Mo au lieu de ~7 Go)
 - [x] Recherche annuaire enrichie (adresses, B2G, codes routage, plateformes)
 - [x] Logo Ferrite (SVG responsive + PNG)
+- [x] Diagrammes Mermaid dans docs/cdar.md (architecture, pipelines, séquence)
 
 ### Séparation PDP émettrice / PDP réceptrice
 
@@ -34,9 +35,59 @@ Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 - [x] Route `intra-pdp-reception` via `ChannelConsumer`
 - [x] Tests unitaires CDV 202, CliMode, PipelineMode, Destination::IntraPdp
 
+### Conformité AFNOR (Acteurs CDV + Motifs de STATUTS)
+
+- [x] CDV 213 émission : SE + PPF, Issuer=PA-E (conforme onglet Acteurs CDV)
+- [x] CDV 213 réception : SE + BY (PAS de PPF — PA-R n'envoie jamais au PPF)
+- [x] CDV 501 : Sender=PA-R, Issuer=PA-R, Recipients=PA-E (pas de PPF)
+- [x] CDV 202 : SE + BY (pas de PPF, conforme fixture UC1)
+- [x] Tableaux complets des 45 codes motifs (Annexe A V1.2) dans docs/cdar.md
+- [x] 14 tests `classify_error_reason` (REJ_*, IRR_*, codes métier)
+- [x] 23 tests pipeline erreur (XML mal formé, non-XML, PDF, validations BR-FR)
+
+### Service Annuaire + validation G1.63
+
+- [x] `AnnuaireService` (couche service au-dessus de `AnnuaireStore`)
+- [x] `AnnuaireValidationProcessor` : BR-FR-10 vendeur + BR-FR-11 acheteur
+- [x] `lookup_etablissement_by_siret()` ajouté à `AnnuaireStore`
+- [x] Codes erreur : vendeur absent → REJ_COH, acheteur absent → DEST_INC
+- [x] `classify_error_reason` : mapping pour les erreurs annuaire
+
+### Relais CDV → PPF (Flux 6)
+
+- [x] `CdvPpfRelayProcessor` : 210 (Refusée) et 212 (Encaissée) → FFE0654A → PPF
+- [x] Tous les autres CDV : pas de relais (testés explicitement)
+- [x] Non-bloquant si erreur PPF
+- [x] Intégré dans `add_common_processors` après `DocumentTypeRouter`
+- [x] 10 tests unitaires (relay 210/212, skip pour autres codes, erreur PPF)
+
 ## Haute priorité
 
-### 1. Réception inter-PDP — affinage
+### 1. Intégration `AnnuaireValidationProcessor` dans le pipeline
+
+Le processor est créé et testé, mais pas encore wiré dans `main.rs` :
+
+- [ ] Créer un `AnnuaireService` dans `build_router()` si `config.database` configuré
+- [ ] Passer `Option<Arc<AnnuaireService>>` aux helpers `add_emission/reception_processors`
+- [ ] Ajouter `AnnuaireValidationProcessor::new(svc, Emission)` dans le pipeline émission
+  (après validation, avant Flux 1)
+- [ ] Ajouter `AnnuaireValidationProcessor::new(svc, Reception)` dans le pipeline réception
+- [ ] Tests intégration avec PostgreSQL (vendeur/acheteur connu/inconnu/inactif)
+- [ ] Tests pipeline complet : facture avec vendeur inconnu → CDV 213 REJ_COH
+
+### 2. Workflows complets documentés
+
+Nicolas doit décrire les workflows précis (cas d'usage AFNOR XP Z12-014) :
+
+- [ ] Décrire le workflow émission classique (UC1)
+- [ ] Décrire le workflow émission avec rejet à la validation
+- [ ] Décrire le workflow réception classique
+- [ ] Décrire le workflow intra-PDP
+- [ ] Décrire le workflow CDV 210/212 avec relais PPF
+- [ ] Documenter dans `docs/workflows.md` (nouveau fichier)
+- [ ] Diagrammes de séquence Mermaid pour chaque cas
+
+### 3. Réception inter-PDP — affinage
 
 L'architecture émission/réception est en place. Reste à affiner :
 
@@ -44,7 +95,17 @@ L'architecture émission/réception est en place. Reste à affiner :
 - [ ] Notification de l'acheteur après réception (webhook, email, ou polling)
 - [ ] Gestion du CDV retour acheteur→vendeur (CDV 204, 210, etc. à relayer)
 
-### 2. Annuaire PPF — Copie locale (Flux 14/13)
+### 4. Codes IRR pièces jointes (CDV 501)
+
+4 codes IRR_* spec sont dans l'enum mais pas implémentés (pas de support PJ) :
+
+- [ ] `IRR_TAILLE_PJ` : contrôle de taille des PJ
+- [ ] `IRR_VID_PJ` : PJ non vide
+- [ ] `IRR_EXT_DOC` : extension des PJ
+- [ ] `IRR_ANTIVIRUS` : contrôle antivirus
+- [ ] Mise à jour `map_reception_to_irrecevabilite` avec les nouveaux codes REC-*
+
+### 5. Annuaire PPF — Copie locale (Flux 14/13)
 
 Maintenir une copie locale de l'annuaire PPF pour le routage offline et performant (voir `docs/annuaire.md`).
 
@@ -56,12 +117,23 @@ Maintenir une copie locale de l'annuaire PPF pour le routage offline et performa
 - [x] API Directory Service conforme AFNOR XP Z12-013 Annexe B
 - [x] PostgreSQL dans docker-compose, config `database` dans PdpConfig
 - [x] Tests unitaires (7) + test intégration fichier réel 10 Go
+- [x] AnnuaireService + AnnuaireValidationProcessor (G1.63)
 - [ ] Consumer SFTP F14 (récupération automatique tar.gz depuis le PPF)
 - [ ] Application du flux différentiel quotidien (24h)
 - [ ] Émetteur F13 (actualisation des lignes d'annuaire de nos clients)
 - [ ] Traitement CDV F6 annuaire (statuts 400 Acceptée / 401 Rejetée)
 
-### 3. Nettoyage du répertoire specs/
+### 6. CDV 221 (ERREUR_ROUTAGE)
+
+Quand le routage de la facture vers la PDP destinataire échoue (matricule inconnu,
+PDP injoignable…), il faut émettre un CDV 221.
+
+- [ ] Détection erreur routage dans `DynamicRoutingProducer`
+- [ ] Génération CDV 221 par PA-R (Sender=PA-R, Issuer=PA-R, Recipients=PA-E)
+- [ ] Code motif `ROUTAGE_ERR` dans le CDV
+- [ ] Tests unitaires
+
+### 7. Nettoyage du répertoire specs/
 
 Le répertoire `specs/` contient ~13 MB de duplication et des versions multiples inutilisées.
 
@@ -73,7 +145,7 @@ Le répertoire `specs/` contient ~13 MB de duplication et des versions multiples
 - [x] Mettre à jour tous les chemins dans le code (xsd.rs, schematron.rs)
 - [ ] Vérifier que tous les tests passent après nettoyage
 
-### 4. Document d'architecture globale
+### 8. Document d'architecture globale
 
 Créer un vrai document d'architecture système (pas juste la liste des crates).
 
@@ -85,7 +157,7 @@ Créer un vrai document d'architecture système (pas juste la liste des crates).
 
 ## Moyenne priorité
 
-### 5. Autorisation et déclaration des tenants
+### 9. Autorisation et déclaration des tenants
 
 Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffit). Il faudra vérifier qu'un tenant est autorisé à utiliser la PDP.
 
@@ -94,20 +166,20 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [ ] Enregistrement dans l'annuaire PPF (F13) lors de l'onboarding
 - [ ] Workflow de changement de PDP (clôture des lignes de l'ancienne PA)
 
-### 6. Rate limiting HTTP
+### 10. Rate limiting HTTP
 
 - [ ] Limiter le nombre de requêtes par tenant/token
 - [ ] Réponse 429 Too Many Requests avec Retry-After
 - [ ] Configuration par tenant ou globale
 
-### 7. E-reporting (Flux 10)
+### 11. E-reporting (Flux 10)
 
 - [ ] Modèle de données pour transactions et paiements
 - [ ] Sérialisation au format spécifique PPF
 - [ ] Règles BR-FR-MAP-23 (conversion dates UBL → CII)
 - [ ] Tests avec exemples officiels
 
-### 8. Abstraction object store
+### 12. Abstraction object store
 
 SFTP comme couche mince vers un object store (S3/MinIO).
 
@@ -117,7 +189,7 @@ SFTP comme couche mince vers un object store (S3/MinIO).
 - [ ] Le protocole SFTP sauvegarde dans l'object store au lieu du filesystem
 - [ ] Les répertoires tenant `{siren}/in/` et `{siren}/out/` deviennent des préfixes S3
 
-### 12. Convention de nommage fichiers CDAR et factures
+### 13. Convention de nommage fichiers CDAR et factures
 
 Revoir et formaliser la convention de nommage pour les fichiers CDAR et les factures (identifiants de documents, noms de fichiers retour, nommage SFTP). À discuter avec Nicolas.
 
@@ -128,7 +200,7 @@ Revoir et formaliser la convention de nommage pour les fichiers CDAR et les fact
 
 ## Basse priorité
 
-### 9. Réécriture Oxalis (Access Point Peppol en Rust)
+### 14. Réécriture Oxalis (Access Point Peppol en Rust)
 
 Remplacer le gateway Java Oxalis par une implémentation Rust intégrée (voir `docs/peppol.md`).
 
@@ -142,12 +214,12 @@ Remplacer le gateway Java Oxalis par une implémentation Rust intégrée (voir `
 - [ ] Migration progressive (shadow → canary → principal → décommissionnement Oxalis)
 - [ ] Tests d'interopérabilité avec Oxalis et phase4
 
-### 10. Factur-X BASIC WL → structuré
+### 15. Factur-X BASIC WL → structuré
 
 - [ ] Génération de lignes à partir de la ventilation TVA (toléré jusqu'au 01/09/2027)
 - [ ] Marquage du document comme converti
 
-### 11. Interface d'administration
+### 16. Interface d'administration
 
 - [ ] Dashboard de suivi des factures et statuts CDV
 - [ ] Consultation des logs et erreurs de validation
