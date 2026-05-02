@@ -22,6 +22,8 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::postgres::PgPool;
+use sqlx::Row;
 use uuid::Uuid;
 
 // ============================================================
@@ -138,24 +140,53 @@ pub struct WebhookListResponse {
 }
 
 // ============================================================
-// Store en mémoire
+// Store : in-memory ou PostgreSQL
 // ============================================================
 
-/// Store thread-safe pour les webhooks (in-memory).
+/// Store thread-safe pour les webhooks.
 ///
-/// À terme, à remplacer par PostgreSQL pour persistence.
-#[derive(Default)]
-pub struct WebhookStore {
-    inner: RwLock<HashMap<Uuid, Webhook>>,
+/// Deux backends supportés :
+/// - `Memory` : `HashMap` en RAM (utile pour tests et dev sans Postgres)
+/// - `Postgres` : table `webhooks` (persistance, multi-instance)
+pub enum WebhookStore {
+    Memory(RwLock<HashMap<Uuid, Webhook>>),
+    Postgres(PgPool),
+}
+
+impl Default for WebhookStore {
+    fn default() -> Self {
+        Self::Memory(RwLock::new(HashMap::new()))
+    }
 }
 
 impl WebhookStore {
+    /// Crée un store en mémoire (par défaut, pour les tests).
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Crée un store PostgreSQL.
+    pub fn new_postgres(pool: PgPool) -> Self {
+        Self::Postgres(pool)
+    }
+
+    /// Crée la table `webhooks` si elle n'existe pas (no-op pour `Memory`).
+    pub async fn migrate(&self) -> Result<(), sqlx::Error> {
+        if let Self::Postgres(pool) = self {
+            for stmt in WEBHOOK_SCHEMA_SQL.split(';') {
+                let s = stmt.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                sqlx::query(s).execute(pool).await?;
+            }
+            tracing::info!("Schéma webhooks initialisé");
+        }
+        Ok(())
+    }
+
     /// Crée un nouveau webhook et retourne son ID
-    pub fn create(&self, req: WebhookCreateRequest, owner: Option<String>) -> Webhook {
+    pub async fn create(&self, req: WebhookCreateRequest, owner: Option<String>) -> Webhook {
         let webhook_id = Uuid::new_v4();
         let webhook = Webhook {
             webhook_id,
@@ -163,88 +194,285 @@ impl WebhookStore {
             metadata: req.metadata,
             owner,
         };
-        self.inner
-            .write()
-            .unwrap()
-            .insert(webhook_id, webhook.clone());
+        match self {
+            Self::Memory(inner) => {
+                inner.write().unwrap().insert(webhook_id, webhook.clone());
+            }
+            Self::Postgres(pool) => {
+                let headers_json = webhook.callback.headers.as_ref().map(|h| {
+                    serde_json::to_value(h).unwrap_or(serde_json::Value::Null)
+                });
+                let auth_json = webhook.callback.authentication.as_ref().map(|a| {
+                    serde_json::to_value(a).unwrap_or(serde_json::Value::Null)
+                });
+                let sig_json = webhook.callback.signature.as_ref().map(|s| {
+                    serde_json::to_value(s).unwrap_or(serde_json::Value::Null)
+                });
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO webhooks (webhook_id, callback_url, callback_headers, \
+                     callback_auth, callback_signature, flow_type, flow_direction, \
+                     processing_rule, ack_status, owner) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                )
+                .bind(webhook.webhook_id)
+                .bind(&webhook.callback.url)
+                .bind(headers_json)
+                .bind(auth_json)
+                .bind(sig_json)
+                .bind(&webhook.metadata.flow_type)
+                .bind(&webhook.metadata.flow_direction)
+                .bind(webhook.metadata.processing_rule.as_deref())
+                .bind(webhook.metadata.ack_status.as_deref())
+                .bind(webhook.owner.as_deref())
+                .execute(pool)
+                .await
+                {
+                    tracing::error!(error = %e, "Insertion webhook PostgreSQL échouée");
+                }
+            }
+        }
         webhook
     }
 
     /// Récupère un webhook par son ID
-    pub fn get(&self, webhook_id: &Uuid) -> Option<Webhook> {
-        self.inner.read().unwrap().get(webhook_id).cloned()
+    pub async fn get(&self, webhook_id: &Uuid) -> Option<Webhook> {
+        match self {
+            Self::Memory(inner) => inner.read().unwrap().get(webhook_id).cloned(),
+            Self::Postgres(pool) => {
+                let row = sqlx::query(
+                    "SELECT webhook_id, callback_url, callback_headers, callback_auth, \
+                     callback_signature, flow_type, flow_direction, processing_rule, \
+                     ack_status, owner FROM webhooks WHERE webhook_id = $1",
+                )
+                .bind(webhook_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()?;
+                Some(row_to_webhook(&row))
+            }
+        }
     }
 
     /// Liste tous les webhooks (filtrés par owner si fourni)
-    pub fn list(&self, owner: Option<&str>) -> Vec<Webhook> {
-        self.inner
-            .read()
-            .unwrap()
-            .values()
-            .filter(|w| match (owner, &w.owner) {
-                (None, _) => true,
-                (Some(o), Some(wo)) => o == wo,
-                (Some(_), None) => true, // webhooks sans owner sont visibles par tous
-            })
-            .cloned()
-            .collect()
+    pub async fn list(&self, owner: Option<&str>) -> Vec<Webhook> {
+        match self {
+            Self::Memory(inner) => inner
+                .read()
+                .unwrap()
+                .values()
+                .filter(|w| match (owner, &w.owner) {
+                    (None, _) => true,
+                    (Some(o), Some(wo)) => o == wo,
+                    (Some(_), None) => true, // webhooks sans owner sont visibles par tous
+                })
+                .cloned()
+                .collect(),
+            Self::Postgres(pool) => {
+                let q = "SELECT webhook_id, callback_url, callback_headers, callback_auth, \
+                         callback_signature, flow_type, flow_direction, processing_rule, \
+                         ack_status, owner FROM webhooks \
+                         WHERE $1::TEXT IS NULL OR owner IS NULL OR owner = $1";
+                match sqlx::query(q)
+                    .bind(owner)
+                    .fetch_all(pool)
+                    .await
+                {
+                    Ok(rows) => rows.iter().map(row_to_webhook).collect(),
+                    Err(e) => {
+                        tracing::error!(error = %e, "Listing webhooks PostgreSQL échoué");
+                        Vec::new()
+                    }
+                }
+            }
+        }
     }
 
     /// Met à jour un webhook (PATCH partiel)
-    pub fn update(&self, webhook_id: &Uuid, patch: WebhookUpdateRequest) -> Option<Webhook> {
-        let mut store = self.inner.write().unwrap();
-        let webhook = store.get_mut(webhook_id)?;
-        if let Some(headers) = patch.headers {
-            webhook.callback.headers = Some(headers);
+    pub async fn update(&self, webhook_id: &Uuid, patch: WebhookUpdateRequest) -> Option<Webhook> {
+        match self {
+            Self::Memory(inner) => {
+                let mut store = inner.write().unwrap();
+                let webhook = store.get_mut(webhook_id)?;
+                if let Some(headers) = patch.headers {
+                    webhook.callback.headers = Some(headers);
+                }
+                if let Some(auth) = patch.authentication {
+                    webhook.callback.authentication = Some(auth);
+                }
+                if let Some(sig) = patch.signature {
+                    webhook.callback.signature = Some(sig);
+                }
+                Some(webhook.clone())
+            }
+            Self::Postgres(pool) => {
+                let mut current = self.get(webhook_id).await?;
+                if let Some(headers) = patch.headers {
+                    current.callback.headers = Some(headers);
+                }
+                if let Some(auth) = patch.authentication {
+                    current.callback.authentication = Some(auth);
+                }
+                if let Some(sig) = patch.signature {
+                    current.callback.signature = Some(sig);
+                }
+                let headers_json = current.callback.headers.as_ref().map(|h| {
+                    serde_json::to_value(h).unwrap_or(serde_json::Value::Null)
+                });
+                let auth_json = current.callback.authentication.as_ref().map(|a| {
+                    serde_json::to_value(a).unwrap_or(serde_json::Value::Null)
+                });
+                let sig_json = current.callback.signature.as_ref().map(|s| {
+                    serde_json::to_value(s).unwrap_or(serde_json::Value::Null)
+                });
+                if let Err(e) = sqlx::query(
+                    "UPDATE webhooks SET callback_headers = $2, callback_auth = $3, \
+                     callback_signature = $4, updated_at = NOW() WHERE webhook_id = $1",
+                )
+                .bind(webhook_id)
+                .bind(headers_json)
+                .bind(auth_json)
+                .bind(sig_json)
+                .execute(pool)
+                .await
+                {
+                    tracing::error!(error = %e, "Update webhook PostgreSQL échoué");
+                    return None;
+                }
+                Some(current)
+            }
         }
-        if let Some(auth) = patch.authentication {
-            webhook.callback.authentication = Some(auth);
-        }
-        if let Some(sig) = patch.signature {
-            webhook.callback.signature = Some(sig);
-        }
-        Some(webhook.clone())
     }
 
     /// Supprime un webhook. Retourne `true` si le webhook existait.
-    pub fn delete(&self, webhook_id: &Uuid) -> bool {
-        self.inner.write().unwrap().remove(webhook_id).is_some()
+    pub async fn delete(&self, webhook_id: &Uuid) -> bool {
+        match self {
+            Self::Memory(inner) => inner.write().unwrap().remove(webhook_id).is_some(),
+            Self::Postgres(pool) => {
+                match sqlx::query("DELETE FROM webhooks WHERE webhook_id = $1")
+                    .bind(webhook_id)
+                    .execute(pool)
+                    .await
+                {
+                    Ok(r) => r.rows_affected() > 0,
+                    Err(e) => {
+                        tracing::error!(error = %e, "Suppression webhook PostgreSQL échouée");
+                        false
+                    }
+                }
+            }
+        }
     }
 
     /// Filtre les webhooks correspondant à un événement.
     /// Utilisé par le `WebhookDispatcher` pour trouver les abonnements à notifier.
-    pub fn matching(
+    pub async fn matching(
         &self,
         flow_type: &str,
         flow_direction: &str,
         ack_status: Option<&str>,
     ) -> Vec<Webhook> {
-        self.inner
-            .read()
-            .unwrap()
-            .values()
-            .filter(|w| {
-                w.metadata.flow_type == flow_type
-                    && w.metadata.flow_direction == flow_direction
-                    && match (&w.metadata.ack_status, ack_status) {
-                        (None, _) => true, // pas de filtre sur ackStatus → matche tout
-                        (Some(_), None) => false,
-                        (Some(a), Some(b)) => a == b,
+        match self {
+            Self::Memory(inner) => inner
+                .read()
+                .unwrap()
+                .values()
+                .filter(|w| {
+                    w.metadata.flow_type == flow_type
+                        && w.metadata.flow_direction == flow_direction
+                        && match (&w.metadata.ack_status, ack_status) {
+                            (None, _) => true, // pas de filtre sur ackStatus → matche tout
+                            (Some(_), None) => false,
+                            (Some(a), Some(b)) => a == b,
+                        }
+                })
+                .cloned()
+                .collect(),
+            Self::Postgres(pool) => {
+                // ack_status filter sémantique :
+                //   - webhook.ack_status IS NULL  → matche tout
+                //   - webhook.ack_status = X      → matche si event ack_status = X
+                let q = "SELECT webhook_id, callback_url, callback_headers, callback_auth, \
+                         callback_signature, flow_type, flow_direction, processing_rule, \
+                         ack_status, owner FROM webhooks \
+                         WHERE flow_type = $1 AND flow_direction = $2 \
+                         AND (ack_status IS NULL OR ack_status = $3)";
+                match sqlx::query(q)
+                    .bind(flow_type)
+                    .bind(flow_direction)
+                    .bind(ack_status)
+                    .fetch_all(pool)
+                    .await
+                {
+                    Ok(rows) => rows.iter().map(row_to_webhook).collect(),
+                    Err(e) => {
+                        tracing::error!(error = %e, "Matching webhooks PostgreSQL échoué");
+                        Vec::new()
                     }
-            })
-            .cloned()
-            .collect()
+                }
+            }
+        }
     }
 
     /// Nombre de webhooks enregistrés
-    pub fn len(&self) -> usize {
-        self.inner.read().unwrap().len()
+    pub async fn len(&self) -> usize {
+        match self {
+            Self::Memory(inner) => inner.read().unwrap().len(),
+            Self::Postgres(pool) => sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM webhooks")
+                .fetch_one(pool)
+                .await
+                .map(|n| n as usize)
+                .unwrap_or(0),
+        }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.inner.read().unwrap().is_empty()
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
     }
 }
+
+/// Convertit une ligne PostgreSQL en `Webhook`.
+fn row_to_webhook(row: &sqlx::postgres::PgRow) -> Webhook {
+    let headers: Option<serde_json::Value> = row.try_get("callback_headers").ok();
+    let auth: Option<serde_json::Value> = row.try_get("callback_auth").ok();
+    let sig: Option<serde_json::Value> = row.try_get("callback_signature").ok();
+    Webhook {
+        webhook_id: row.try_get("webhook_id").unwrap_or_else(|_| Uuid::nil()),
+        callback: CallbackParameters {
+            url: row.try_get("callback_url").unwrap_or_default(),
+            headers: headers.and_then(|v| serde_json::from_value(v).ok()),
+            authentication: auth.and_then(|v| serde_json::from_value(v).ok()),
+            signature: sig.and_then(|v| serde_json::from_value(v).ok()),
+        },
+        metadata: WebhookMetadata {
+            flow_type: row.try_get("flow_type").unwrap_or_default(),
+            flow_direction: row.try_get("flow_direction").unwrap_or_default(),
+            processing_rule: row.try_get::<Option<String>, _>("processing_rule").ok().flatten(),
+            ack_status: row.try_get::<Option<String>, _>("ack_status").ok().flatten(),
+        },
+        owner: row.try_get::<Option<String>, _>("owner").ok().flatten(),
+    }
+}
+
+const WEBHOOK_SCHEMA_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS webhooks (
+    webhook_id          UUID PRIMARY KEY,
+    callback_url        TEXT NOT NULL,
+    callback_headers    JSONB,
+    callback_auth       JSONB,
+    callback_signature  JSONB,
+    flow_type           TEXT NOT NULL,
+    flow_direction      TEXT NOT NULL,
+    processing_rule     TEXT,
+    ack_status          TEXT,
+    owner               TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhooks_match ON webhooks(flow_type, flow_direction);
+CREATE INDEX IF NOT EXISTS idx_webhooks_owner ON webhooks(owner);
+"#;
 
 // ============================================================
 // Handlers HTTP
@@ -286,7 +514,7 @@ pub async fn handle_create_webhook(
             .into_response();
     }
 
-    let webhook = state.webhook_store.create(req, None);
+    let webhook = state.webhook_store.create(req, None).await;
 
     tracing::info!(
         webhook_id = %webhook.webhook_id,
@@ -309,7 +537,7 @@ pub async fn handle_create_webhook(
 pub async fn handle_list_webhooks(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let webhooks = state.webhook_store.list(None);
+    let webhooks = state.webhook_store.list(None).await;
     let response = WebhookListResponse {
         webhook_ids: webhooks.iter().map(|w| w.webhook_id).collect(),
     };
@@ -321,7 +549,7 @@ pub async fn handle_get_webhook(
     State(state): State<Arc<AppState>>,
     Path(webhook_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    match state.webhook_store.get(&webhook_id) {
+    match state.webhook_store.get(&webhook_id).await {
         Some(webhook) => (StatusCode::OK, Json(webhook)).into_response(),
         None => (
             StatusCode::NOT_FOUND,
@@ -339,7 +567,7 @@ pub async fn handle_update_webhook(
     Path(webhook_id): Path<Uuid>,
     Json(patch): Json<WebhookUpdateRequest>,
 ) -> impl IntoResponse {
-    match state.webhook_store.update(&webhook_id, patch) {
+    match state.webhook_store.update(&webhook_id, patch).await {
         Some(_) => StatusCode::NO_CONTENT.into_response(),
         None => (
             StatusCode::NOT_FOUND,
@@ -356,7 +584,7 @@ pub async fn handle_delete_webhook(
     State(state): State<Arc<AppState>>,
     Path(webhook_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    if state.webhook_store.delete(&webhook_id) {
+    if state.webhook_store.delete(&webhook_id).await {
         tracing::info!(webhook_id = %webhook_id, "Webhook supprimé");
         StatusCode::NO_CONTENT.into_response()
     } else {
@@ -466,7 +694,8 @@ impl WebhookDispatcher {
     ) {
         let webhooks = self
             .store
-            .matching(flow_type, flow_direction, ack_status);
+            .matching(flow_type, flow_direction, ack_status)
+            .await;
 
         if webhooks.is_empty() {
             tracing::debug!(
@@ -743,29 +972,29 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_store_create_and_get() {
+    #[tokio::test]
+    async fn test_store_create_and_get() {
         let store = WebhookStore::new();
-        let webhook = store.create(sample_request("CustomerInvoice", "In"), None);
-        assert_eq!(store.len(), 1);
+        let webhook = store.create(sample_request("CustomerInvoice", "In"), None).await;
+        assert_eq!(store.len().await, 1);
 
-        let fetched = store.get(&webhook.webhook_id).unwrap();
+        let fetched = store.get(&webhook.webhook_id).await.unwrap();
         assert_eq!(fetched.webhook_id, webhook.webhook_id);
         assert_eq!(fetched.metadata.flow_type, "CustomerInvoice");
     }
 
-    #[test]
-    fn test_store_list() {
+    #[tokio::test]
+    async fn test_store_list() {
         let store = WebhookStore::new();
-        store.create(sample_request("CustomerInvoice", "In"), None);
-        store.create(sample_request("SupplierInvoice", "Out"), None);
-        assert_eq!(store.list(None).len(), 2);
+        store.create(sample_request("CustomerInvoice", "In"), None).await;
+        store.create(sample_request("SupplierInvoice", "Out"), None).await;
+        assert_eq!(store.list(None).await.len(), 2);
     }
 
-    #[test]
-    fn test_store_update_partial() {
+    #[tokio::test]
+    async fn test_store_update_partial() {
         let store = WebhookStore::new();
-        let w = store.create(sample_request("CustomerInvoice", "In"), None);
+        let w = store.create(sample_request("CustomerInvoice", "In"), None).await;
         assert!(w.callback.headers.is_none());
 
         let patch = WebhookUpdateRequest {
@@ -776,55 +1005,237 @@ mod tests {
             authentication: None,
             signature: None,
         };
-        let updated = store.update(&w.webhook_id, patch).unwrap();
+        let updated = store.update(&w.webhook_id, patch).await.unwrap();
         assert_eq!(updated.callback.headers.unwrap().len(), 1);
     }
 
-    #[test]
-    fn test_store_delete() {
+    #[tokio::test]
+    async fn test_store_delete() {
         let store = WebhookStore::new();
-        let w = store.create(sample_request("CustomerInvoice", "In"), None);
-        assert!(store.delete(&w.webhook_id));
-        assert!(!store.delete(&w.webhook_id)); // déjà supprimé
-        assert_eq!(store.len(), 0);
+        let w = store.create(sample_request("CustomerInvoice", "In"), None).await;
+        assert!(store.delete(&w.webhook_id).await);
+        assert!(!store.delete(&w.webhook_id).await); // déjà supprimé
+        assert_eq!(store.len().await, 0);
     }
 
-    #[test]
-    fn test_store_get_not_found() {
+    #[tokio::test]
+    async fn test_store_get_not_found() {
         let store = WebhookStore::new();
-        assert!(store.get(&Uuid::new_v4()).is_none());
+        assert!(store.get(&Uuid::new_v4()).await.is_none());
     }
 
-    #[test]
-    fn test_matching_filters() {
+    #[tokio::test]
+    async fn test_matching_filters() {
         let store = WebhookStore::new();
-        store.create(sample_request("CustomerInvoice", "In"), None);
-        store.create(sample_request("CustomerInvoice", "Out"), None);
-        store.create(sample_request("SupplierInvoice", "In"), None);
+        store.create(sample_request("CustomerInvoice", "In"), None).await;
+        store.create(sample_request("CustomerInvoice", "Out"), None).await;
+        store.create(sample_request("SupplierInvoice", "In"), None).await;
 
-        let matches = store.matching("CustomerInvoice", "In", None);
+        let matches = store.matching("CustomerInvoice", "In", None).await;
         assert_eq!(matches.len(), 1);
 
-        let matches = store.matching("Cdar", "In", None);
+        let matches = store.matching("Cdar", "In", None).await;
         assert_eq!(matches.len(), 0);
     }
 
-    #[test]
-    fn test_matching_with_ack_status() {
+    #[tokio::test]
+    async fn test_matching_with_ack_status() {
         let store = WebhookStore::new();
         let mut req = sample_request("CustomerInvoice", "In");
         req.metadata.ack_status = Some("Ok".to_string());
-        store.create(req, None);
+        store.create(req, None).await;
 
         // Webhook filtré sur ackStatus=Ok ne matche que les events Ok
-        assert_eq!(store.matching("CustomerInvoice", "In", Some("Ok")).len(), 1);
-        assert_eq!(store.matching("CustomerInvoice", "In", Some("Error")).len(), 0);
-        assert_eq!(store.matching("CustomerInvoice", "In", None).len(), 0);
+        assert_eq!(store.matching("CustomerInvoice", "In", Some("Ok")).await.len(), 1);
+        assert_eq!(store.matching("CustomerInvoice", "In", Some("Error")).await.len(), 0);
+        assert_eq!(store.matching("CustomerInvoice", "In", None).await.len(), 0);
     }
 
     #[test]
     fn test_event_type_str() {
         assert_eq!(WebhookEventType::FlowReceived.as_str(), "flow.received");
         assert_eq!(WebhookEventType::FlowAckUpdated.as_str(), "flow.ack.updated");
+    }
+}
+
+// ============================================================
+// Tests d'intégration PostgreSQL (testcontainers, requiert Docker)
+// ============================================================
+
+#[cfg(test)]
+mod pg_tests {
+    use super::*;
+    use sqlx::postgres::PgPoolOptions;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers::ContainerAsync;
+    use testcontainers_modules::postgres::Postgres;
+
+    async fn setup() -> (ContainerAsync<Postgres>, WebhookStore) {
+        let container = Postgres::default().start().await.expect("démarrage Postgres");
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(5432).await.unwrap();
+        let url = format!("postgres://postgres:postgres@{}:{}/postgres", host, port);
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .unwrap();
+        let store = WebhookStore::new_postgres(pool);
+        store.migrate().await.unwrap();
+        (container, store)
+    }
+
+    fn sample_request(flow_type: &str, direction: &str) -> WebhookCreateRequest {
+        WebhookCreateRequest {
+            callback: CallbackParameters {
+                url: "https://example.com/webhook".to_string(),
+                headers: None,
+                authentication: None,
+                signature: None,
+            },
+            metadata: WebhookMetadata {
+                flow_type: flow_type.to_string(),
+                flow_direction: direction.to_string(),
+                processing_rule: None,
+                ack_status: None,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pg_create_and_get() {
+        let (_c, store) = setup().await;
+        let webhook = store.create(sample_request("CustomerInvoice", "In"), None).await;
+        let fetched = store.get(&webhook.webhook_id).await.expect("get");
+        assert_eq!(fetched.webhook_id, webhook.webhook_id);
+        assert_eq!(fetched.metadata.flow_type, "CustomerInvoice");
+        assert_eq!(fetched.callback.url, "https://example.com/webhook");
+        assert_eq!(store.len().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_pg_get_not_found() {
+        let (_c, store) = setup().await;
+        assert!(store.get(&Uuid::new_v4()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_pg_list_filters_by_owner() {
+        let (_c, store) = setup().await;
+        store
+            .create(sample_request("CustomerInvoice", "In"), Some("tenant-a".to_string()))
+            .await;
+        store
+            .create(sample_request("SupplierInvoice", "Out"), Some("tenant-b".to_string()))
+            .await;
+        store.create(sample_request("Cdar", "In"), None).await;
+
+        assert_eq!(store.list(None).await.len(), 3);
+        // tenant-a voit son webhook + ceux sans owner (visibles par tous)
+        assert_eq!(store.list(Some("tenant-a")).await.len(), 2);
+        assert_eq!(store.list(Some("tenant-b")).await.len(), 2);
+        assert_eq!(store.list(Some("tenant-c")).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_pg_update_partial_persists() {
+        let (_c, store) = setup().await;
+        let w = store.create(sample_request("CustomerInvoice", "In"), None).await;
+
+        let patch = WebhookUpdateRequest {
+            headers: Some(vec![CallbackHeader {
+                header_name: "X-Custom".to_string(),
+                header_value: "value".to_string(),
+            }]),
+            authentication: None,
+            signature: None,
+        };
+        store.update(&w.webhook_id, patch).await.expect("update");
+
+        // Re-lecture : la modification est bien persistée
+        let reread = store.get(&w.webhook_id).await.expect("reread");
+        let h = reread.callback.headers.expect("headers");
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].header_name, "X-Custom");
+        assert_eq!(h[0].header_value, "value");
+    }
+
+    #[tokio::test]
+    async fn test_pg_delete_removes_persisted() {
+        let (_c, store) = setup().await;
+        let w = store.create(sample_request("CustomerInvoice", "In"), None).await;
+        assert!(store.delete(&w.webhook_id).await);
+        assert!(!store.delete(&w.webhook_id).await);
+        assert!(store.get(&w.webhook_id).await.is_none());
+        assert_eq!(store.len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_pg_matching_filters() {
+        let (_c, store) = setup().await;
+        store.create(sample_request("CustomerInvoice", "In"), None).await;
+        store.create(sample_request("CustomerInvoice", "Out"), None).await;
+        store.create(sample_request("SupplierInvoice", "In"), None).await;
+
+        let m = store.matching("CustomerInvoice", "In", None).await;
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].metadata.flow_direction, "In");
+
+        let m = store.matching("Cdar", "In", None).await;
+        assert_eq!(m.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_pg_matching_ack_status() {
+        let (_c, store) = setup().await;
+        let mut req = sample_request("CustomerInvoice", "In");
+        req.metadata.ack_status = Some("Ok".to_string());
+        store.create(req, None).await;
+
+        assert_eq!(store.matching("CustomerInvoice", "In", Some("Ok")).await.len(), 1);
+        assert_eq!(store.matching("CustomerInvoice", "In", Some("Error")).await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_pg_roundtrip_complex_payload() {
+        // Webhook avec auth BASIC + headers + processing_rule + ack_status + owner
+        let (_c, store) = setup().await;
+
+        let req = WebhookCreateRequest {
+            callback: CallbackParameters {
+                url: "https://hook.example.com/x".to_string(),
+                headers: Some(vec![CallbackHeader {
+                    header_name: "Authorization".to_string(),
+                    header_value: "Bearer xyz".to_string(),
+                }]),
+                authentication: Some(CallbackAuthentication {
+                    auth_type: "BASIC".to_string(),
+                    user_id: Some("alice".to_string()),
+                    user_password: Some("secret".to_string()),
+                    token_url: None,
+                    client_id: None,
+                    client_secret: None,
+                }),
+                signature: None,
+            },
+            metadata: WebhookMetadata {
+                flow_type: "Cdar".to_string(),
+                flow_direction: "In".to_string(),
+                processing_rule: Some("default".to_string()),
+                ack_status: Some("Error".to_string()),
+            },
+        };
+
+        let created = store.create(req, Some("tenant-x".to_string())).await;
+        let fetched = store.get(&created.webhook_id).await.expect("get");
+
+        assert_eq!(fetched.callback.url, "https://hook.example.com/x");
+        assert_eq!(fetched.callback.headers.as_ref().unwrap().len(), 1);
+        let auth = fetched.callback.authentication.as_ref().expect("auth");
+        assert_eq!(auth.auth_type, "BASIC");
+        assert_eq!(auth.user_id.as_deref(), Some("alice"));
+        assert_eq!(fetched.metadata.processing_rule.as_deref(), Some("default"));
+        assert_eq!(fetched.metadata.ack_status.as_deref(), Some("Error"));
+        assert_eq!(fetched.owner.as_deref(), Some("tenant-x"));
     }
 }

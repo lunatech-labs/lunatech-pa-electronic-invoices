@@ -157,8 +157,37 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
     // Répertoire de base pour la découverte des tenants
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
 
-    // Webhook store partagé entre le pipeline (WebhookAckProcessor) et le serveur HTTP
-    let webhook_store = std::sync::Arc::new(webhooks::WebhookStore::new());
+    // Connexion PostgreSQL globale (optionnelle) — partagée par annuaire et webhooks
+    let pg_pool: Option<sqlx::postgres::PgPool> = if let Some(ref db_config) = config.database {
+        match sqlx::postgres::PgPoolOptions::new()
+            .max_connections(db_config.max_connections)
+            .connect(&db_config.url)
+            .await
+        {
+            Ok(pool) => {
+                tracing::info!("PostgreSQL connecté");
+                Some(pool)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Impossible de connecter PostgreSQL");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Webhook store : Postgres si pool disponible, sinon in-memory
+    let webhook_store = std::sync::Arc::new(match &pg_pool {
+        Some(pool) => {
+            let store = webhooks::WebhookStore::new_postgres(pool.clone());
+            if let Err(e) = store.migrate().await {
+                tracing::warn!(error = %e, "Migration webhooks échouée");
+            }
+            store
+        }
+        None => webhooks::WebhookStore::new(),
+    });
 
     // Construire le router avec la route HTTP inbound
     let router = build_router(
@@ -183,26 +212,14 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             }
         };
 
-        // Connexion PostgreSQL pour l'annuaire PPF (optionnelle)
-        let annuaire_store = if let Some(ref db_config) = config.database {
-            match sqlx::postgres::PgPoolOptions::new()
-                .max_connections(db_config.max_connections)
-                .connect(&db_config.url)
-                .await
-            {
-                Ok(pool) => {
-                    let store = pdp_annuaire::AnnuaireStore::new(pool);
-                    if let Err(e) = store.migrate().await {
-                        tracing::warn!(error = %e, "Migration annuaire échouée");
-                    }
-                    tracing::info!("Annuaire PPF connecté (PostgreSQL)");
-                    Some(store)
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Impossible de connecter PostgreSQL pour l'annuaire");
-                    None
-                }
+        // Annuaire PPF : utilise le pool PostgreSQL global
+        let annuaire_store = if let Some(ref pool) = pg_pool {
+            let store = pdp_annuaire::AnnuaireStore::new(pool.clone());
+            if let Err(e) = store.migrate().await {
+                tracing::warn!(error = %e, "Migration annuaire échouée");
             }
+            tracing::info!("Annuaire PPF connecté (PostgreSQL)");
+            Some(store)
         } else {
             None
         };
