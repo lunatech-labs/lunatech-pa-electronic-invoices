@@ -113,6 +113,14 @@ enum DemoCommands {
         /// Bearer token (si l'auth est activée sur le serveur)
         #[arg(long)]
         token: Option<String>,
+        /// Si `true`, supprime les indices Elasticsearch `pdp-*` avant de
+        /// soumettre — garantit des factures sans erreur de doublon
+        /// (BR-FR-12/13). À utiliser en démo pour repartir d'un état propre.
+        #[arg(long)]
+        reset: bool,
+        /// URL Elasticsearch pour le reset (défaut: http://localhost:9200)
+        #[arg(long, default_value = "http://localhost:9200")]
+        elasticsearch_url: String,
     },
 }
 
@@ -2111,7 +2119,18 @@ async fn cmd_demo(action: DemoCommands) -> Result<()> {
             server_url,
             fixtures_dir,
             token,
-        } => cmd_demo_populate(&server_url, &fixtures_dir, token.as_deref()).await,
+            reset,
+            elasticsearch_url,
+        } => {
+            cmd_demo_populate(
+                &server_url,
+                &fixtures_dir,
+                token.as_deref(),
+                reset,
+                &elasticsearch_url,
+            )
+            .await
+        }
     }
 }
 
@@ -2119,13 +2138,35 @@ async fn cmd_demo_populate(
     server_url: &str,
     fixtures_dir: &std::path::Path,
     token: Option<&str>,
+    reset: bool,
+    elasticsearch_url: &str,
 ) -> Result<()> {
     use sha2::{Digest, Sha256};
 
-    // 1. Vérifier que le serveur est joignable
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
+
+    // 0. Reset optionnel des indices ES avant de soumettre
+    if reset {
+        let url = format!("{}/pdp-*", elasticsearch_url.trim_end_matches('/'));
+        match client.delete(&url).send().await {
+            Ok(r) if r.status().is_success() => {
+                println!("🗑️  Indices Elasticsearch pdp-* supprimés (reset)");
+            }
+            Ok(r) => {
+                eprintln!(
+                    "⚠️  Reset partiel ({}) — l'indexation suivante recréera les indices",
+                    r.status()
+                );
+            }
+            Err(e) => {
+                eprintln!("⚠️  Impossible de contacter Elasticsearch pour reset : {}", e);
+            }
+        }
+    }
+
+    // 1. Vérifier que le serveur est joignable
     let health_url = format!("{}/v1/healthcheck", server_url.trim_end_matches('/'));
     match client.get(&health_url).send().await {
         Ok(r) if r.status().is_success() => {
