@@ -112,6 +112,67 @@ L'architecture émission/réception est en place. Reste à affiner :
 - [ ] Notification de l'acheteur après réception (webhook, email, ou polling)
 - [ ] Gestion du CDV retour acheteur→vendeur (CDV 204, 210, etc. à relayer)
 
+### 3bis. Interface web de suivi des factures
+
+Application web permettant aux clients (vendeurs et acheteurs) et à
+l'administrateur PDP de suivre les factures émises et reçues, leur cycle
+de vie (CDV), et les éventuelles erreurs/rejets.
+
+#### Écrans utilisateur (par tenant)
+
+- [ ] **Dashboard** : KPIs (total factures émises/reçues, en attente, en erreur,
+      en litige, encaissées) sur la période sélectionnée
+- [ ] **Liste factures émises** : filtres (date, statut CDV, acheteur, montant),
+      tri, pagination, recherche full-text
+- [ ] **Liste factures reçues** : idem côté acheteur
+- [ ] **Détail facture** : metadata (BT-1, BT-2, montants, parties), historique
+      CDV (200 → 202 → 204 → 205/210 → 212), pièces jointes, lien vers le XML
+      brut et le PDF readable
+- [ ] **Timeline CDV** : visualisation chronologique des statuts (timeline UI)
+- [ ] **Téléchargement** : XML facture, PDF Factur-X, CDV individuels
+- [ ] **Soumission de factures** : upload UBL/CII/Factur-X via formulaire web
+      (pour fournisseurs sans intégration API)
+- [ ] **Émission de CDV manuels** : pour acheteurs (CDV 204/205/207/210, etc.)
+- [ ] **Notifications** : alertes en cas de rejet, refus, ou changement de statut
+
+#### Écrans administrateur PDP
+
+- [ ] **Dashboard global** : volumétrie multi-tenant, performances pipeline,
+      taux de rejet par étape (réception, validation, annuaire, distribution)
+- [ ] **Tracking flux** : recherche par flowId / trackingId, état dans le pipeline
+- [ ] **Logs et erreurs** : par tenant, par flux, par étape
+- [ ] **Alertes** : liste des alertes Critical/Warning/Info avec filtre temporel
+- [ ] **Annuaire PPF** : interface de recherche déjà existante (`/annuaire`),
+      enrichir avec stats et requêtes par SIREN/SIRET
+
+#### Architecture technique
+
+- [ ] Choix du stack frontend (React/Vue/Svelte ou autre)
+- [ ] API REST dédiée pour le frontend (ou GraphQL ?) — au-dessus de l'API AFNOR
+- [ ] Authentification (Bearer token réutilisé ou OAuth2/OIDC dédié)
+- [ ] Multi-tenancy : un utilisateur ne voit que ses propres factures (par SIREN)
+- [ ] Endpoints `/v1/admin/*` pour les fonctions PDP-admin (séparés)
+- [ ] WebSocket ou Server-Sent Events pour les notifications live ?
+- [ ] Servir le frontend statique depuis pdp-app (style `/annuaire`) ou app séparée
+
+#### Sources de données
+
+L'interface s'appuie sur :
+
+- **Elasticsearch** (`pdp-trace`) : événements pipeline, recherche full-text XML
+- **PostgreSQL annuaire** : résolution SIREN/SIRET
+- **Filesystem tenant** : `{siren}/in/`, `{siren}/out/`, archives
+- **In-memory webhooks** (à terme PostgreSQL) : abonnements
+
+Pas besoin d'une nouvelle base : tout existe déjà dans `pdp-trace`.
+
+#### Phases de livraison
+
+- [ ] Phase 1 : écrans lecture seule (dashboard + liste + détail)
+- [ ] Phase 2 : actions (soumission factures, émission CDV manuels)
+- [ ] Phase 3 : admin PDP (multi-tenant, alertes, métriques)
+- [ ] Phase 4 : notifications live (WebSocket/SSE)
+
 ### 4. Codes IRR pièces jointes (CDV 501)
 
 4 codes IRR_* spec sont dans l'enum mais pas implémentés (pas de support PJ) :
@@ -236,9 +297,14 @@ Remplacer le gateway Java Oxalis par une implémentation Rust intégrée (voir `
 - [ ] Génération de lignes à partir de la ventilation TVA (toléré jusqu'au 01/09/2027)
 - [ ] Marquage du document comme converti
 
-### 16. Interface d'administration
+### 16. Interface d'administration (succinct — voir aussi §3bis)
 
-- [ ] Dashboard de suivi des factures et statuts CDV
-- [ ] Consultation des logs et erreurs de validation
+Voir section "3bis. Interface web de suivi des factures" (haute priorité)
+pour les écrans détaillés. Cette section couvre uniquement les besoins
+admin/exploitation au-delà du suivi facture.
+
 - [ ] Gestion des tenants (ajout, suppression, configuration)
+- [ ] Consultation des logs système (par tenant)
 - [ ] Suivi des alertes critiques
+- [ ] Métriques Prometheus visualisées (Grafana ou intégré)
+- [ ] Configuration runtime (sans redémarrage de la PDP)
