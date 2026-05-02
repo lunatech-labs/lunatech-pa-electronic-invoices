@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+    <cbc:ID>BULK-EMI-0195</cbc:ID>
+    <cbc:IssueDate>2026-03-27</cbc:IssueDate>
+    <cbc:DueDate>2026-03-28</cbc:DueDate>
+    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+    <cbc:Note>Réparation matériel électronique</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>BC-BULK-EMI-0195</cbc:BuyerReference>
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:EndpointID schemeID="0009">12345678900001</cac:EndpointID>
+            <cac:PartyName><cbc:Name>TechConseil SAS</cbc:Name></cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>10 rue de la Paix</cbc:StreetName>
+                <cbc:CityName>Paris</cbc:CityName>
+                <cbc:PostalZone>75001</cbc:PostalZone>
+                <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR12123456789</cbc:CompanyID>
+                <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>TechConseil SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">123456789</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:EndpointID schemeID="0009">12935202200002</cac:EndpointID>
+            <cac:PartyName><cbc:Name>DéveloppementTechnologie EURL</cbc:Name></cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
+                <cbc:CityName>Lyon</cbc:CityName>
+                <cbc:PostalZone>69001</cbc:PostalZone>
+                <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR12129352022</cbc:CompanyID>
+                <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>DéveloppementTechnologie EURL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">129352022</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cbc:PaymentID>BULK-EMI-0195</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7630001007941234567890185</cbc:ID>
+            <cbc:Name>TechConseil SAS</cbc:Name>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">84.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">420.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">84.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">420.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">420.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">504.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">504.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">420.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Réparation matériel électronique</cbc:Description>
+            <cbc:Name>Réparation matériel électronique</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">420.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

@@ -227,11 +227,48 @@ de vie (CDV), et les éventuelles erreurs/rejets.
 - [x] `TraceStore::list_exchanges()` + `get_stats_for_siren()`
 - [x] 15 tests (HTTP routes UI + helpers PJ extraction/render/escape)
 
+#### Phase 1.5 — Enhancements identifiés sur l'UI lecture seule
+
+- [ ] **Sémantique des statuts à revoir** — le pipeline expose 14 valeurs
+      (`REÇU` → `PARSING` → `PARSÉ` → `VALIDATION` → `VALIDÉ` →
+      `TRANSFORMATION` → `TRANSFORMÉ` → `DISTRIBUTION` → `DISTRIBUÉ` →
+      `ATTENTE_ACK` → `ACQUITTÉ` + `REJETÉ`/`ANNULÉ`/`ERREUR`). Mais :
+      - les statuts intermédiaires (`PARSING`, `VALIDATION`,
+        `TRANSFORMATION`, `DISTRIBUTION`) ne sont **jamais persistés** car
+        leur durée est trop courte (le processor d'après écrase l'état avec
+        son statut terminal) → bruit dans l'enum
+      - le pipeline ne **s'arrête pas sur erreur** : un flux avec
+        `error_count > 0` peut atteindre `DISTRIBUÉ` puis être rejeté en
+        aval par le `CdarProcessor` (CDV 213). L'UI palie en remplaçant le
+        badge par "ERREUR" mais le `status` brut reste trompeur.
+      - manque les statuts métier de l'AFNOR XP Z12-013 §6.4 (états du
+        cycle de vie facture côté acheteur : `Reçue`, `Approuvée`, `Refusée`,
+        `Suspendue`, `Litigieuse`, `Comptabilisée`, `Mise en paiement`,
+        `Encaissée` — actuellement gérés via les codes CDV 200-212 mais
+        pas exposés comme statut de flux dans la trace)
+      - **Action** : trier les statuts en deux groupes orthogonaux —
+        (a) état du **traitement pipeline** (en cours, terminé, en erreur)
+        et (b) état du **cycle de vie métier** (CDV reçue, approuvée,
+        refusée, payée…). Modéliser comme deux champs distincts dans
+        `ExchangeDocument` plutôt qu'un seul `status` confus.
+- [ ] **Visibilité des envois vers le PPF** — les Flux 1 (déclaration TVA)
+      et Flux 2/4 (e-reporting transactions / paiements) sont émis par
+      `PpfFlux1Processor` / `PpfSftpProducer` mais **n'apparaissent pas
+      dans l'UI**. L'utilisateur ne voit pas qu'une facture a été
+      doublement traitée (vers le destinataire ET vers le PPF).
+      - tracer chaque envoi PPF comme un événement de la timeline
+        (`status = ENVOYÉ_PPF`, route_id distinct, message contenant le
+        nom du fichier `FFE0654A...` et la date)
+      - section dédiée sur la page détail "Reporting PPF" listant les
+        envois (date, type FFE, status retour PPF si CDV 213 reçu)
+      - filtre / KPI dashboard "Envoyés au PPF" pour vérifier d'un coup
+        d'œil la couverture e-reporting du tenant
+
 #### Écrans utilisateur (par tenant) — phases suivantes
 
-- [ ] **Liste factures reçues** vs émises : actuellement liste mixte, ajouter filtre direction
-- [ ] **Téléchargement** : XML facture, PDF Factur-X, CDV individuels (les PJ
-      sont déjà parseables — il reste à exposer un endpoint de download)
+- [x] ~~**Liste factures reçues** vs émises~~ — filtre `direction` livré (Phase 1)
+- [x] ~~**Téléchargement** : XML facture, PDF Factur-X, PJ~~ — endpoints
+      `/ui/flows/{id}/download/{xml|pdf|attachment}` livrés (Phase 1)
 - [ ] **Soumission de factures** : upload UBL/CII/Factur-X via formulaire web
       (pour fournisseurs sans intégration API)
 - [ ] **Émission de CDV manuels** : pour acheteurs (CDV 204/205/207/210, etc.)

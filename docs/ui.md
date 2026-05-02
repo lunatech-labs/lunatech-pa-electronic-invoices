@@ -45,8 +45,11 @@ fourni à la racine du repo (sans Postgres ni routes complexes).
 ## Peupler le dashboard
 
 ```bash
-# Toutes les fixtures (~23 factures sur 8 tenants distincts)
+# Toutes les fixtures (manuelles + bulk générées) — ~280 factures
 pdp demo populate
+
+# Reset des indices ES avant soumission (état propre)
+pdp demo populate --reset
 
 # Avec serveur distant
 pdp demo populate --server-url https://pdp.example.com
@@ -58,9 +61,24 @@ pdp demo populate --token mon-token
 pdp demo populate --fixtures-dir ./mes-fixtures
 ```
 
-Les fixtures couvrent plusieurs SIREN (123456789, 222333444, 444555666,
-111222333, 333444555, 512345678, 456789012, 333444555) — un index ES par
-tenant. Naviguer entre tenants via `?siren=...` dans l'URL.
+**Génération de fixtures** :
+
+```bash
+# Fixtures manuelles ciblées (~12 factures dont 3 en erreur, mix émises/reçues, avec/sans PJ)
+python3 tools/gen-fixtures-recues.py
+
+# Fixtures bulk pour tester la pagination (240 factures par défaut)
+python3 tools/gen-fixtures-bulk.py
+python3 tools/gen-fixtures-bulk.py --count 1000
+```
+
+Le bulk génère des factures réparties sur ~24 partenaires de l'annuaire
+F14_demo, ~10% avec PJ, ~3% avec un partenaire absent de l'annuaire
+(déclenche EMMET_INC en réception). Les dates sont étalées sur 12 mois
+(juin 2025 → mai 2026) pour pouvoir tester le filtre par plage.
+
+Tenant principal de la démo : **123456789** (TechConseil SAS), à la fois
+émetteur et destinataire dans les fixtures.
 
 ## Multi-tenant
 
@@ -77,37 +95,59 @@ Sans paramètre, un sélecteur SIREN s'affiche pour choisir le tenant à charger
 
 ### Dashboard `/ui?siren={SIREN}`
 
-KPIs calculés à partir de l'index Elasticsearch `pdp-{SIREN}` :
-- **Total flux** — `count(*)` de tous les exchanges
-- **Distribués** — exchanges avec `status = DISTRIBUÉ` (succès)
-- **En attente** — exchanges ni distribués ni en erreur
-- **En erreur** — exchanges avec `error_count > 0`
+Le tenant est identifié comme **vendeur OU acheteur** d'un flux (un même
+SIREN voit donc ses émissions et ses réceptions, même si l'index ES est
+keyé sur le seller_siren).
 
-Plus une section "Actions" avec liens rapides vers la liste, les erreurs,
-le healthcheck et les métriques Prometheus.
+KPIs :
+- **Total flux** — toutes les factures dont le tenant est partie
+- **Distribués** — `error_count = 0` ET status terminal réussi (`VALIDÉ`,
+  `TRANSFORMÉ`, `DISTRIBUTION`, `DISTRIBUÉ`, `ATTENTE_ACK`, `ACQUITTÉ`)
+- **En erreur** — `error_count > 0` OU status terminal d'échec
+  (`REJETÉ`, `ANNULÉ`, `ERREUR`)
+- **En attente** — ni terminés ni en erreur (encore en pipeline)
+
+> Les KPIs sont alignés avec les filtres de la liste : un dashboard
+> "Distribués: 14" correspond exactement à `?status=OK` qui retourne 14.
 
 ### Liste `/ui/flows?siren={SIREN}`
 
-Tableau paginé (50 par page) avec colonnes :
+Tableau paginé avec colonnes :
 N° facture · Vendeur · Acheteur · Statut (badge coloré) · **PJ** (badge 📎 N) · Erreurs · Date.
 
 La colonne **PJ** affiche `📎 N` quand la facture a N pièces jointes
-(`attachment_count` indexé en ES) ou `—` sinon. Cliquer la facture pour
-voir le détail des PJ (extraction à la volée du `raw_xml` / `raw_pdf`).
+(`attachment_count` indexé en ES) ou `—` sinon.
+
+Le **statut affiché est dérivé** de `error_count` : si `error_count > 0`,
+le badge montre **ERREUR** (rouge) quel que soit le statut brut du
+pipeline — celui-ci continue après une erreur non bloquante mais l'UI
+ne doit pas laisser croire qu'une facture rejetable est "DISTRIBUÉE".
 
 Filtres :
 - **Direction** — `Émises (vendeur)` / `Reçues (acheteur)` / toutes. Émises = le
   tenant est `seller_siren`, Reçues = le tenant est `buyer_siren`.
-- **Statut** — `DISTRIBUÉ` / `ERREUR` / `EN_ATTENTE` / tous
+- **Statut** — `OK` / `ERREUR` / `EN_ATTENTE` / tous (correspond aux KPIs
+  du dashboard, cf. ci-dessus)
 - **Du / Au** — bornes sur `issue_date` (format `YYYY-MM-DD`)
 
-Pagination : navigation Précédent / Suivant en bas de page.
+Les champs vides du formulaire (`?status=&from=...`) sont normalisés en
+**`None`** côté handler — sans cela ES voit `term: { "status": "" }` et
+ne renvoie rien.
+
+**Pagination** :
+- Sélecteur **Factures par page** dans le formulaire de filtres : **25 / 50 / 100 / 200**.
+  Toute autre valeur (ex. `?page_size=10000`) retombe sur 50 (sécurité).
+- Bandeau bas de tableau : `1–50 sur 257 factures · page 1/6` + boutons
+  Précédent / Suivant. Le total respecte les filtres actifs.
+- Le `page_size` choisi est préservé dans les liens Précédent / Suivant.
 
 Exemples d'URLs :
 ```
 /ui/flows?siren=123456789&status=ERREUR
 /ui/flows?siren=123456789&from=2025-11-01&to=2025-11-30
-/ui/flows?siren=123456789&page=2
+/ui/flows?siren=123456789&page=2&page_size=100
+/ui/flows?siren=123456789&direction=recues
+/ui/flows?siren=123456789&show_duplicates=true   # désactive la dedup par invoice_number
 ```
 
 ### Détail `/ui/flows/{flowId}?siren={SIREN}`
@@ -126,18 +166,55 @@ Cinq sections :
    `GET /ui/flows/{flowId}/download/attachment?siren=...&idx=N`.
    **Les PJ ne sont pas stockées en base** — l'extraction est faite par les
    parsers UBL/CII/Factur-X au moment de l'affichage.
-5. **Timeline du pipeline** — événements horodatés par route et statut
+5. **Timeline du pipeline** — événements horodatés par route et statut.
+   Les `events` (REÇU / PARSÉ / VALIDÉ / DISTRIBUÉ…) sont **fusionnés
+   chronologiquement** avec les `errors`, et la timeline est **tronquée à la
+   première erreur** (les statuts pipeline qui suivent — DISTRIBUÉ après
+   un EMMET_INC par ex. — ne reflètent pas l'issue métier de la facture).
+   Les entrées d'erreur s'affichent en rouge avec ❌ + le step (`annuaire-validation`,
+   `validation`, etc.) et le message.
 
 Le `flow_id` est accepté ou son alias `exchange_id`.
+
+### Statuts du pipeline
+
+Les statuts (`crates/pdp-core/src/model.rs::FlowStatus`) :
+
+| Statut | Étape | Sens |
+|---|---|---|
+| `REÇU` | Réception | Fichier reçu (HTTP/SFTP), avant tout traitement |
+| `PARSING` → `PARSÉ` | Parsing | Extraction XML → `InvoiceData` |
+| `VALIDATION` → `VALIDÉ` | Validation | XSD + EN16931 + BR-FR + annuaire passés |
+| `TRANSFORMATION` → `TRANSFORMÉ` | Transformation | Conversion UBL ↔ CII si demandée |
+| `DISTRIBUTION` → `DISTRIBUÉ` | Routage sortie | Délivré au destinataire (PDP / SFTP / mailbox) |
+| `ATTENTE_ACK` → `ACQUITTÉ` | Acquittement | Le destinataire a renvoyé un OK |
+| `REJETÉ` / `ANNULÉ` | Échec terminal | CDAR 501 irrecevabilité, ou annulation |
+| `ERREUR` | Échec interne | Exception non récupérable |
+
+Le champ `status` du document est **le dernier statut atteint**. Le tableau
+`events` contient la **séquence complète horodatée** (timeline). Le
+pipeline ne s'arrête pas sur les erreurs non bloquantes — c'est le
+`CdarProcessor` en aval qui émet une CDV 213 de rejet pour les flux dont
+`error_count > 0`.
 
 ## Architecture technique
 
 ```
-crates/pdp-app/src/ui.rs       — handlers HTML (3 fonctions)
-crates/pdp-app/src/server.rs   — wiring routes /ui* dans build_api_router
-crates/pdp-trace/src/store.rs  — list_exchanges() + get_stats_for_siren()
-                                 (méthodes ajoutées pour l'UI)
+crates/pdp-app/src/ui.rs        — handlers HTML (dashboard, liste, détail, downloads)
+crates/pdp-app/src/server.rs    — AppState + wiring routes /ui* dans build_api_router
+crates/pdp-app/tests/ui_test.rs — tests d'intégration (mock InMemoryTraceBackend)
+crates/pdp-trace/src/backend.rs — trait `TraceBackend` (lecture, dyn-compatible)
+crates/pdp-trace/src/store.rs   — `TraceStore` (impl ES) + filtre tenant
+                                  (seller_siren OR buyer_siren) + count_exchanges
+crates/pdp-trace/src/processor.rs — TraceProcessor (record_exchange + record_event,
+                                  ordre fixé pour l'upsert d'events)
 ```
+
+**Indirection lecture par trait** : l'UI ne dépend pas du `TraceStore`
+concret mais d'un `Arc<dyn TraceBackend>`. En production c'est le store
+Elasticsearch ; les tests d'intégration utilisent un `InMemoryTraceBackend`
+qui ré-implémente la même sémantique de filtrage en Rust pur — zéro
+dépendance externe.
 
 **Stack** :
 - HTML server-rendered (cohérent avec `/annuaire`)
@@ -153,33 +230,73 @@ crates/pdp-trace/src/store.rs  — list_exchanges() + get_stats_for_siren()
 
 ## Sources de données
 
+Toutes les requêtes UI passent par le wildcard `pdp-*` filtré sur
+`seller_siren OR buyer_siren = X`. C'est nécessaire pour qu'un tenant voie
+ses **factures reçues** (qui sont indexées sous `pdp-{seller_siren}`, pas
+sous `pdp-{tenant_siren}`).
+
 | Source | Usage |
 |--------|-------|
-| Elasticsearch `pdp-{siren}` | KPIs (count), liste paginée, détail (raw_xml + events + errors) |
-| `TraceStore::get_stats_for_siren()` | Dashboard counters |
-| `TraceStore::list_exchanges()` | Liste paginée avec filtres |
-| `TraceStore::get_exchange()` | Détail facture (ExchangeDocument complet) |
+| `TraceBackend::get_stats_for_siren()` | Dashboard KPIs (total / distribués / erreur / attente) |
+| `TraceBackend::list_exchanges()` | Liste paginée avec filtres status / dates / direction / page_size |
+| `TraceBackend::count_exchanges()` | Total avec filtres pour `1–50 sur 257 · page 1/6` |
+| `TraceBackend::get_exchange()` | Détail facture (ExchangeDocument complet) — wildcard inconditionnel |
+| `TraceBackend::get_tenant_name()` | Raison sociale (seller_name si tenant=vendeur, sinon buyer_name) |
 | `parse_attachments_from_doc()` (ui.rs) | PJ extraites à la volée — `UblParser` / `CiiParser` / `FacturXParser` selon `source_format`. Pas de stockage des PJ en base. |
 
 ## Captures (référence)
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ Ferrite — Suivi des factures                             │
-│ Dashboard  Factures  Annuaire                            │
-├──────────────────────────────────────────────────────────┤
-│  Tenant : 123456789                                      │
-│                                                          │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────┐│
-│  │ Total flux │ │ Distribués │ │ En attente │ │ Erreur ││
-│  │   1247     │ │   1198     │ │     13     │ │   36   ││
-│  └────────────┘ └────────────┘ └────────────┘ └────────┘│
-│                                                          │
-│  Actions                                                 │
-│  → Voir toutes les factures                              │
-│  → Voir uniquement les erreurs                           │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Ferrite — Suivi des factures                                 │
+│ Dashboard  Factures  Annuaire                                │
+├──────────────────────────────────────────────────────────────┤
+│  TechConseil SAS — SIREN 123456789                           │
+│                                                              │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐│
+│  │ Total flux │ │ Distribués │ │ En attente │ │ En erreur  ││
+│  │    257     │ │    251     │ │     0      │ │     6      ││
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘│
+│                                                              │
+│  Actions                                                     │
+│  → Voir toutes les factures                                  │
+│  → Voir uniquement les erreurs                               │
+└──────────────────────────────────────────────────────────────┘
+
+Liste (extrait) :
+┌─────────────────────────────────────────────────────────────────┐
+│ [— Toutes directions —] [— Tous —] [Du] [Au] [50/page▾] Filtrer │
+├─────────────────────────────────────────────────────────────────┤
+│ ↑ INV-001         TechConseil    IndustrieFrance   DISTRIBUÉ    │
+│ ↑ FA-2025-PJ-005  TechConseil    IndustrieFrance   📎 4         │
+│ ↓ REC-PLO-2026    Plomberie D.   TechConseil       DISTRIBUÉ    │
+│ ↓ REC-INCONNU     Inconnu SARL   TechConseil       ERREUR ⚠️    │
+├─────────────────────────────────────────────────────────────────┤
+│ ← Précédent     1–50 sur 257 · page 1/6        Suivant →        │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+## Tests
+
+Les handlers UI sont couverts par 22 tests d'intégration dans
+[`crates/pdp-app/tests/ui_test.rs`](../crates/pdp-app/tests/ui_test.rs)
+qui s'exécutent **sans Elasticsearch** :
+
+```bash
+cargo test -p pdp-app --test ui_test
+```
+
+Couverture :
+- Dashboard avec données + cohérence KPIs ↔ filtres
+- Liste : tous, OK, ERREUR, EN_ATTENTE, plage de dates, direction émises/reçues
+- Filtre paramètres vides (`?direction=&status=&from=&to=`) → traités comme None
+- Pagination : `page_size` 25/50/100/200, valeurs hors plage rejetées,
+  total + plage `1–25 sur 30 · page 1/2`, total respecte les filtres
+- Dedup par invoice_number par défaut + bypass `?show_duplicates=true`
+- Détail : métadonnées, pièces jointes, factures reçues
+- Timeline : tronquée à la première erreur
+- Statut : `error_count > 0` → badge ERREUR (rouge) même si status brut DISTRIBUÉ
+- Routes favicon / logo
 
 ## Phases suivantes (todo §3bis)
 
