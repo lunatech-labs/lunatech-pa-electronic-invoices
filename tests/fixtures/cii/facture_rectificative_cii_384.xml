@@ -68,10 +68,10 @@
         <ram:ApplicableHeaderTradeAgreement>
             <ram:BuyerReference>REF-ACHAT-2025-042</ram:BuyerReference>
             <ram:SellerTradeParty>
-                <ram:GlobalID schemeID="0002">12345678901234</ram:GlobalID>
+                <ram:GlobalID schemeID="0002">41526374891011</ram:GlobalID>
                 <ram:Name>Conseil Expert SAS</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">12345678901234</ram:ID>
+                    <ram:ID schemeID="0002">41526374891011</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:PostcodeCode>75008</ram:PostcodeCode>
@@ -87,10 +87,10 @@
                 </ram:SpecifiedTaxRegistration>
             </ram:SellerTradeParty>
             <ram:BuyerTradeParty>
-                <ram:GlobalID schemeID="0002">98765432109876</ram:GlobalID>
+                <ram:GlobalID schemeID="0002">84920175304862</ram:GlobalID>
                 <ram:Name>Industries Modernes SA</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">98765432109876</ram:ID>
+                    <ram:ID schemeID="0002">84920175304862</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:PostcodeCode>69003</ram:PostcodeCode>

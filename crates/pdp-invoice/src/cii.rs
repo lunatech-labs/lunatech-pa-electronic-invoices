@@ -851,8 +851,9 @@ mod tests {
         // Acheteur = client
         assert_eq!(invoice.buyer_name.as_deref(), Some("Électronique Distribution SARL"));
         // Mandataire de facturation (SalesAgentTradeParty)
+        // SIRET unique post-correction des doublons
         assert_eq!(invoice.billing_mandate_name.as_deref(), Some("MarketPlace Pro SAS"));
-        assert_eq!(invoice.billing_mandate_id.as_deref(), Some("11122233344455"));
+        assert_eq!(invoice.billing_mandate_id.as_deref(), Some("60718293041566"));
         // Déjà payée
         assert_eq!(invoice.prepaid_amount, Some(8334.90));
         assert_eq!(invoice.payable_amount, Some(0.00));
@@ -955,14 +956,14 @@ mod tests {
         // Référence facture antérieure (BT-25/BT-26)
         assert_eq!(invoice.preceding_invoice_reference.as_deref(), Some("FA-2025-00100"));
         assert_eq!(invoice.preceding_invoice_date.as_deref(), Some("2025-07-01"));
-        // Vendeur
+        // Vendeur (SIRET unique post-correction des doublons)
         assert_eq!(invoice.seller_name.as_deref(), Some("Conseil Expert SAS"));
-        assert_eq!(invoice.seller_siret.as_deref(), Some("12345678901234"));
+        assert_eq!(invoice.seller_siret.as_deref(), Some("41526374891011"));
         assert_eq!(invoice.seller_vat_id.as_deref(), Some("FR12123456789"));
         assert_eq!(invoice.seller_endpoint_id.as_deref(), Some("123456789_STATUTS"));
         // Acheteur
         assert_eq!(invoice.buyer_name.as_deref(), Some("Industries Modernes SA"));
-        assert_eq!(invoice.buyer_siret.as_deref(), Some("98765432109876"));
+        assert_eq!(invoice.buyer_siret.as_deref(), Some("84920175304862"));
         assert_eq!(invoice.buyer_endpoint_id.as_deref(), Some("987654321_FACTURES"));
         // Paiement
         assert_eq!(invoice.payment_means_code.as_deref(), Some("30"));

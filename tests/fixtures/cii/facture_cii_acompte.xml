@@ -56,10 +56,10 @@
     <ram:ApplicableHeaderTradeAgreement>
       <ram:BuyerReference>DEVIS-2025-100</ram:BuyerReference>
       <ram:SellerTradeParty>
-        <ram:GlobalID schemeID="0009">44455566677788</ram:GlobalID>
+        <ram:GlobalID schemeID="0009">91827364550617</ram:GlobalID>
         <ram:Name>Rénovation Habitat Plus SARL</ram:Name>
         <ram:SpecifiedLegalOrganization>
-          <ram:ID schemeID="0002">44455566677788</ram:ID>
+          <ram:ID schemeID="0002">91827364550617</ram:ID>
         </ram:SpecifiedLegalOrganization>
         <ram:PostalTradeAddress>
           <ram:PostcodeCode>44000</ram:PostcodeCode>
@@ -68,7 +68,7 @@
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
         <ram:URIUniversalCommunication>
-          <ram:URIID schemeID="0225">44455566677788</ram:URIID>
+          <ram:URIID schemeID="0225">91827364550617</ram:URIID>
         </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR44555666777</ram:ID>

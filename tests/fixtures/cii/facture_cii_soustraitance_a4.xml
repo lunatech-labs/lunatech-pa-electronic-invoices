@@ -86,10 +86,10 @@
       <ram:BuyerReference>CMD-ERABLES-2025-LOT3</ram:BuyerReference>
       <!-- Vendeur = sous-traitant -->
       <ram:SellerTradeParty>
-        <ram:GlobalID schemeID="0009">12345678901234</ram:GlobalID>
+        <ram:GlobalID schemeID="0009">73849201234567</ram:GlobalID>
         <ram:Name>Plomberie Durand SARL</ram:Name>
         <ram:SpecifiedLegalOrganization>
-          <ram:ID schemeID="0002">12345678901234</ram:ID>
+          <ram:ID schemeID="0002">73849201234567</ram:ID>
         </ram:SpecifiedLegalOrganization>
         <ram:PostalTradeAddress>
           <ram:PostcodeCode>69003</ram:PostcodeCode>
@@ -98,7 +98,7 @@
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
         <ram:URIUniversalCommunication>
-          <ram:URIID schemeID="0225">12345678901234</ram:URIID>
+          <ram:URIID schemeID="0225">73849201234567</ram:URIID>
         </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR11123456789</ram:ID>
@@ -106,10 +106,10 @@
       </ram:SellerTradeParty>
       <!-- Acheteur = entrepreneur principal / titulaire du marché -->
       <ram:BuyerTradeParty>
-        <ram:GlobalID schemeID="0009">98765432109876</ram:GlobalID>
+        <ram:GlobalID schemeID="0009">50312746829011</ram:GlobalID>
         <ram:Name>Construction Générale Martin SA</ram:Name>
         <ram:SpecifiedLegalOrganization>
-          <ram:ID schemeID="0002">98765432109876</ram:ID>
+          <ram:ID schemeID="0002">50312746829011</ram:ID>
         </ram:SpecifiedLegalOrganization>
         <ram:PostalTradeAddress>
           <ram:PostcodeCode>69006</ram:PostcodeCode>
@@ -118,7 +118,7 @@
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
         <ram:URIUniversalCommunication>
-          <ram:URIID schemeID="0225">98765432109876</ram:URIID>
+          <ram:URIID schemeID="0225">50312746829011</ram:URIID>
         </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR22987654321</ram:ID>

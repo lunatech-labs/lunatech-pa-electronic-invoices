@@ -88,10 +88,10 @@
       <ram:BuyerReference>ACHAT-MKP-2025-456</ram:BuyerReference>
       <!-- Vendeur = fournisseur réel -->
       <ram:SellerTradeParty>
-        <ram:GlobalID schemeID="0009">33344455566677</ram:GlobalID>
+        <ram:GlobalID schemeID="0009">82736451920304</ram:GlobalID>
         <ram:Name>AudioTech France SAS</ram:Name>
         <ram:SpecifiedLegalOrganization>
-          <ram:ID schemeID="0002">33344455566677</ram:ID>
+          <ram:ID schemeID="0002">82736451920304</ram:ID>
         </ram:SpecifiedLegalOrganization>
         <ram:PostalTradeAddress>
           <ram:PostcodeCode>31000</ram:PostcodeCode>
@@ -100,7 +100,7 @@
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
         <ram:URIUniversalCommunication>
-          <ram:URIID schemeID="0225">33344455566677</ram:URIID>
+          <ram:URIID schemeID="0225">82736451920304</ram:URIID>
         </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR33444555666</ram:ID>
@@ -108,10 +108,10 @@
       </ram:SellerTradeParty>
       <!-- Acheteur = client professionnel -->
       <ram:BuyerTradeParty>
-        <ram:GlobalID schemeID="0009">77788899900011</ram:GlobalID>
+        <ram:GlobalID schemeID="0009">53698721045382</ram:GlobalID>
         <ram:Name>Électronique Distribution SARL</ram:Name>
         <ram:SpecifiedLegalOrganization>
-          <ram:ID schemeID="0002">77788899900011</ram:ID>
+          <ram:ID schemeID="0002">53698721045382</ram:ID>
         </ram:SpecifiedLegalOrganization>
         <ram:PostalTradeAddress>
           <ram:PostcodeCode>33000</ram:PostcodeCode>
@@ -120,7 +120,7 @@
           <ram:CountryID>FR</ram:CountryID>
         </ram:PostalTradeAddress>
         <ram:URIUniversalCommunication>
-          <ram:URIID schemeID="0225">77788899900011</ram:URIID>
+          <ram:URIID schemeID="0225">53698721045382</ram:URIID>
         </ram:URIUniversalCommunication>
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">FR77888999000</ram:ID>
@@ -128,10 +128,10 @@
       </ram:BuyerTradeParty>
       <!-- Agent du vendeur = mandataire de facturation (marketplace) -->
       <ram:SalesAgentTradeParty>
-        <ram:GlobalID schemeID="0009">11122233344455</ram:GlobalID>
+        <ram:GlobalID schemeID="0009">60718293041566</ram:GlobalID>
         <ram:Name>MarketPlace Pro SAS</ram:Name>
         <ram:SpecifiedLegalOrganization>
-          <ram:ID schemeID="0002">11122233344455</ram:ID>
+          <ram:ID schemeID="0002">60718293041566</ram:ID>
         </ram:SpecifiedLegalOrganization>
       </ram:SalesAgentTradeParty>
     </ram:ApplicableHeaderTradeAgreement>

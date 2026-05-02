@@ -19,9 +19,9 @@
   <!-- Vendeur = sous-traitant -->
   <cac:AccountingSupplierParty>
     <cac:Party>
-      <cbc:EndpointID schemeID="0225">12345678901234</cbc:EndpointID>
+      <cbc:EndpointID schemeID="0225">73849201234567</cbc:EndpointID>
       <cac:PartyIdentification>
-        <cbc:ID schemeID="0009">12345678901234</cbc:ID>
+        <cbc:ID schemeID="0009">73849201234567</cbc:ID>
       </cac:PartyIdentification>
       <cac:PartyName>
         <cbc:Name>Plomberie Durand SARL</cbc:Name>
@@ -36,7 +36,7 @@
       </cac:PostalAddress>
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>Plomberie Durand SARL</cbc:RegistrationName>
-        <cbc:CompanyID schemeID="0002">12345678901234</cbc:CompanyID>
+        <cbc:CompanyID schemeID="0002">73849201234567</cbc:CompanyID>
       </cac:PartyLegalEntity>
       <cac:PartyTaxScheme>
         <cbc:CompanyID>FR11123456789</cbc:CompanyID>
@@ -50,9 +50,9 @@
   <!-- Acheteur = entrepreneur principal -->
   <cac:AccountingCustomerParty>
     <cac:Party>
-      <cbc:EndpointID schemeID="0225">98765432109876</cbc:EndpointID>
+      <cbc:EndpointID schemeID="0225">50312746829011</cbc:EndpointID>
       <cac:PartyIdentification>
-        <cbc:ID schemeID="0009">98765432109876</cbc:ID>
+        <cbc:ID schemeID="0009">50312746829011</cbc:ID>
       </cac:PartyIdentification>
       <cac:PartyName>
         <cbc:Name>Construction Générale Martin SA</cbc:Name>
@@ -67,7 +67,7 @@
       </cac:PostalAddress>
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>Construction Générale Martin SA</cbc:RegistrationName>
-        <cbc:CompanyID schemeID="0002">98765432109876</cbc:CompanyID>
+        <cbc:CompanyID schemeID="0002">50312746829011</cbc:CompanyID>
       </cac:PartyLegalEntity>
       <cac:PartyTaxScheme>
         <cbc:CompanyID>FR22987654321</cbc:CompanyID>

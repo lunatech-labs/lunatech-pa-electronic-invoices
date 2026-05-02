@@ -875,9 +875,9 @@ mod tests {
         // Référence facture antérieure (BT-25/BT-26)
         assert_eq!(invoice.preceding_invoice_reference.as_deref(), Some("FA-2025-00200"));
         assert_eq!(invoice.preceding_invoice_date.as_deref(), Some("2025-07-05"));
-        // Vendeur
+        // Vendeur (SIRET unique post-correction des doublons)
         assert_eq!(invoice.seller_name.as_deref(), Some("Services Numériques SARL"));
-        assert_eq!(invoice.seller_siret.as_deref(), Some("11122233344455"));
+        assert_eq!(invoice.seller_siret.as_deref(), Some("49382716050912"));
         assert_eq!(invoice.seller_vat_id.as_deref(), Some("FR11111222333"));
         // Acheteur
         assert_eq!(invoice.buyer_name.as_deref(), Some("Distribution Express SA"));
