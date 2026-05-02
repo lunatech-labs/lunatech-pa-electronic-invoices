@@ -91,6 +91,29 @@ enum Commands {
         #[command(subcommand)]
         action: EreportingCommands,
     },
+
+    /// Outils de démo (peuplement de l'UI avec des factures fixtures)
+    Demo {
+        #[command(subcommand)]
+        action: DemoCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DemoCommands {
+    /// Soumet toutes les factures fixtures (UBL + CII) au serveur HTTP local
+    /// pour peupler le dashboard. Le serveur doit être en cours d'exécution.
+    Populate {
+        /// URL du serveur Ferrite (défaut: http://localhost:8080)
+        #[arg(long, default_value = "http://localhost:8080")]
+        server_url: String,
+        /// Répertoire contenant les fixtures (cherche dans `ubl/` et `cii/`)
+        #[arg(long, default_value = "tests/fixtures")]
+        fixtures_dir: PathBuf,
+        /// Bearer token (si l'auth est activée sur le serveur)
+        #[arg(long)]
+        token: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -197,6 +220,7 @@ async fn main() -> Result<()> {
         Commands::FlowEvents { flow_id } => cmd_flow_events(&cli.config, &flow_id).await,
         Commands::Annuaire { action } => cmd_annuaire(&cli.config, action).await,
         Commands::Ereporting { action } => cmd_ereporting(&cli.config, action).await,
+        Commands::Demo { action } => cmd_demo(action).await,
     }
 }
 
@@ -2075,6 +2099,150 @@ async fn cmd_ereporting(
             Ok(())
         }
     }
+}
+
+// ============================================================
+// Démo : peuplement automatique du dashboard via POST /v1/flows
+// ============================================================
+
+async fn cmd_demo(action: DemoCommands) -> Result<()> {
+    match action {
+        DemoCommands::Populate {
+            server_url,
+            fixtures_dir,
+            token,
+        } => cmd_demo_populate(&server_url, &fixtures_dir, token.as_deref()).await,
+    }
+}
+
+async fn cmd_demo_populate(
+    server_url: &str,
+    fixtures_dir: &std::path::Path,
+    token: Option<&str>,
+) -> Result<()> {
+    use sha2::{Digest, Sha256};
+
+    // 1. Vérifier que le serveur est joignable
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+    let health_url = format!("{}/v1/healthcheck", server_url.trim_end_matches('/'));
+    match client.get(&health_url).send().await {
+        Ok(r) if r.status().is_success() => {
+            println!("✅ Serveur joignable : {}", server_url);
+        }
+        Ok(r) => {
+            anyhow::bail!(
+                "Serveur a répondu {} (attendu 200) — le démarrer avec `pdp start --mode receiver`",
+                r.status()
+            );
+        }
+        Err(e) => {
+            anyhow::bail!(
+                "Impossible de contacter {} : {}\n→ Démarrer le serveur : `pdp start --mode receiver`",
+                health_url,
+                e
+            );
+        }
+    }
+
+    // 2. Collecter les fixtures (UBL + CII)
+    let mut files: Vec<(std::path::PathBuf, &'static str)> = Vec::new();
+    for (sub, syntax) in [("ubl", "UBL"), ("cii", "CII")] {
+        let dir = fixtures_dir.join(sub);
+        if !dir.is_dir() {
+            eprintln!("⚠️  {} introuvable, sauté", dir.display());
+            continue;
+        }
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("xml") {
+                files.push((path, syntax));
+            }
+        }
+    }
+    files.sort_by_key(|(p, _)| p.clone());
+
+    if files.is_empty() {
+        anyhow::bail!(
+            "Aucune fixture XML trouvée dans {}/ubl ou {}/cii",
+            fixtures_dir.display(),
+            fixtures_dir.display()
+        );
+    }
+    println!("📦 {} fixtures à soumettre", files.len());
+
+    // 3. Soumettre chacune via POST /v1/flows
+    let flows_url = format!("{}/v1/flows", server_url.trim_end_matches('/'));
+    let mut ok = 0usize;
+    let mut errors = 0usize;
+    for (path, syntax) in &files {
+        let bytes = std::fs::read(path)?;
+        let sha = format!("{:x}", Sha256::digest(&bytes));
+        let filename = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("facture.xml")
+            .to_string();
+        let tracking_id = format!("DEMO-{}", filename.trim_end_matches(".xml"));
+        let flow_info = serde_json::json!({
+            "trackingId": tracking_id,
+            "name": filename,
+            "flowType": "CustomerInvoice",
+            "flowSyntax": syntax,
+            "flowProfile": "EN16931",
+            "sha256": sha,
+        });
+
+        let part_info = reqwest::multipart::Part::text(flow_info.to_string())
+            .mime_str("application/json")
+            .map_err(|e| anyhow::anyhow!("MIME flowInfo: {}", e))?;
+        let part_file = reqwest::multipart::Part::bytes(bytes)
+            .file_name(filename.clone())
+            .mime_str("application/xml")
+            .map_err(|e| anyhow::anyhow!("MIME file: {}", e))?;
+        let form = reqwest::multipart::Form::new()
+            .part("flowInfo", part_info)
+            .part("file", part_file);
+
+        let mut req = client.post(&flows_url).multipart(form);
+        if let Some(t) = token {
+            req = req.bearer_auth(t);
+        }
+        match req.send().await {
+            Ok(resp) if resp.status().as_u16() == 202 => {
+                ok += 1;
+                println!("  ✅ {} ({})", filename, syntax);
+            }
+            Ok(resp) => {
+                errors += 1;
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                eprintln!("  ❌ {} → {} {}", filename, status, body);
+            }
+            Err(e) => {
+                errors += 1;
+                eprintln!("  ❌ {} → erreur réseau : {}", filename, e);
+            }
+        }
+    }
+
+    println!();
+    println!(
+        "📊 Soumis : {}/{} ({} erreurs)",
+        ok,
+        files.len(),
+        errors
+    );
+    println!("⏳ Le pipeline traite les flux toutes les 60s — recharger l'UI dans ~1 minute");
+    println!("🌐 Dashboard : {}/ui?siren=123456789", server_url);
+    println!("🌐 Liste     : {}/ui/flows?siren=123456789", server_url);
+
+    if errors > 0 {
+        anyhow::bail!("{} fixtures ont échoué", errors);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

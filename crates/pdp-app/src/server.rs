@@ -282,6 +282,7 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/annuaire", get(handle_annuaire_page))
         .route("/v1/annuaire/search", get(handle_annuaire_search))
         // Interface web de suivi des factures (phase 1 — lecture seule)
+        .route("/ui/static/ferrite-icon.png", get(crate::ui::handle_logo))
         .route("/ui", get(crate::ui::handle_dashboard))
         .route("/ui/flows", get(crate::ui::handle_flows_list))
         .route("/ui/flows/{flow_id}", get(crate::ui::handle_flow_detail))

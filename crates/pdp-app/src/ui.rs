@@ -39,10 +39,41 @@ body {
 header {
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
     color: white;
-    padding: 1.5rem 2rem;
+    padding: 1rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
-header h1 { font-size: 1.4rem; font-weight: 600; }
-header nav { margin-top: 0.5rem; }
+header .logo {
+    height: 48px;
+    width: 48px;
+    flex-shrink: 0;
+    border-radius: 8px;
+}
+header .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    margin-right: 1.5rem;
+}
+header .brand .name {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+header .brand .tagline {
+    font-size: 0.8rem;
+    opacity: 0.6;
+    line-height: 1;
+}
+header h1 {
+    font-size: 1.05rem;
+    font-weight: 500;
+    opacity: 0.85;
+    margin: 0;
+}
+header nav { margin-left: auto; }
 header nav a {
     color: rgba(255,255,255,0.85);
     text-decoration: none;
@@ -192,7 +223,12 @@ fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> Str
 </head>
 <body>
     <header>
-        <h1>Ferrite — Suivi des factures</h1>
+        <img src="/ui/static/ferrite-icon.png" alt="" class="logo">
+        <div class="brand">
+            <span class="name">Ferrite</span>
+            <span class="tagline">Plateforme Agréée</span>
+        </div>
+        <h1>Suivi des factures</h1>
         <nav>
             {dashboard_link}
             {flows_link}
@@ -965,6 +1001,21 @@ pub async fn handle_download_attachment(
         headers.insert("content-disposition", v);
     }
     (StatusCode::OK, headers, content).into_response()
+}
+
+// ============================================================
+// Static asset : icône Ferrite (PNG inliné dans le binaire)
+// ============================================================
+
+const FERRITE_ICON_PNG: &[u8] = include_bytes!("../../../assets/ferrite_icon_dark_512.png");
+
+/// GET /ui/static/ferrite-logo.svg
+/// (route nommée `.svg` pour rétrocompatibilité, le contenu est PNG)
+pub async fn handle_logo() -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "image/png".parse().unwrap());
+    headers.insert("cache-control", "public, max-age=86400".parse().unwrap());
+    (StatusCode::OK, headers, FERRITE_ICON_PNG).into_response()
 }
 
 // ============================================================

@@ -19,27 +19,48 @@ l'API HTTP directement. Phase 1 = lecture seule (dashboard + liste + détail).
 ## Démarrage rapide
 
 ```bash
-# 1. Démarrer Elasticsearch (ou OpenSearch — API compatible)
+# 1. Démarrer Elasticsearch (ou OpenSearch — API compatible, ARM-friendly)
 docker run -d --name pdp-es -p 9200:9200 \
   -e "discovery.type=single-node" -e "DISABLE_SECURITY_PLUGIN=true" \
   opensearchproject/opensearch:2
 
-# 2. Démarrer Ferrite (mode receiver)
+# 2. Démarrer Ferrite (mode receiver, config minimale fournie)
 cargo run --bin pdp -- --config config-ui-demo.yaml start --mode receiver
 
-# 3. Soumettre une facture pour avoir des données dans l'UI
-SHA=$(shasum -a 256 tests/fixtures/ubl/facture_ubl_001.xml | cut -d' ' -f1)
-echo '{"trackingId":"DEMO-001","name":"facture.xml","flowType":"CustomerInvoice","flowSyntax":"UBL","sha256":"'$SHA'"}' > /tmp/flow.json
-curl -X POST http://localhost:8080/v1/flows \
-  -F "flowInfo=@/tmp/flow.json;type=application/json" \
-  -F "file=@tests/fixtures/ubl/facture_ubl_001.xml;type=application/xml"
+# 3. Peupler le dashboard avec toutes les fixtures (UBL + CII)
+cargo run --bin pdp -- demo populate
+# 📦 23 fixtures à soumettre
+#   ✅ autofacture_cii_389.xml (CII)
+#   ✅ avoir_cii_381.xml (CII)
+#   ...
+# 📊 Soumis : 23/23 (0 erreurs)
 
-# 4. Ouvrir un navigateur (quand le polling a indexé — délai ~1 minute)
+# 4. Ouvrir un navigateur (attendre ~60s pour le polling)
 open http://localhost:8080/ui?siren=123456789
 ```
 
 **Config minimale `config-ui-demo.yaml`** : un fichier prêt à l'emploi est
-fourni à la racine du repo (sans Postgres ni routes — démo pure).
+fourni à la racine du repo (sans Postgres ni routes complexes).
+
+## Peupler le dashboard
+
+```bash
+# Toutes les fixtures (~23 factures sur 8 tenants distincts)
+pdp demo populate
+
+# Avec serveur distant
+pdp demo populate --server-url https://pdp.example.com
+
+# Avec Bearer token si auth activée
+pdp demo populate --token mon-token
+
+# Avec un répertoire personnalisé (cherche dans ./mes-fixtures/ubl/ et ./mes-fixtures/cii/)
+pdp demo populate --fixtures-dir ./mes-fixtures
+```
+
+Les fixtures couvrent plusieurs SIREN (123456789, 222333444, 444555666,
+111222333, 333444555, 512345678, 456789012, 333444555) — un index ES par
+tenant. Naviguer entre tenants via `?siren=...` dans l'URL.
 
 ## Multi-tenant
 
