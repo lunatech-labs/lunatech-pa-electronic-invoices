@@ -88,7 +88,7 @@ Les pièces jointes (BG-24) sont préservées dans toutes les conversions : XML 
 
 ## Interface web
 
-Trois écrans server-rendered (HTML, sans framework JS, accessibles sans Bearer token) :
+Quatre écrans server-rendered (HTML, sans framework JS, accessibles sans Bearer token) :
 
 ### Dashboard `/ui?siren={SIREN}`
 
@@ -107,6 +107,23 @@ le nombre de pièces jointes, le badge rouge ERREUR remplace le statut
 brut quand la facture a `error_count > 0`.
 
 <p align="center"><img src="assets/screenshots/factures.png" alt="Liste des factures" width="900"></p>
+
+### Détail facture `/ui/flows/{flowId}?siren={SIREN}`
+
+Métadonnées complètes (vendeur/acheteur + SIREN, format, totaux HT/TVA/TTC,
+date d'émission, statut), pièces jointes téléchargeables (extraites à la
+volée du XML/PDF, jamais stockées en base), liens de téléchargement
+XML brut / PDF Factur-X, et **timeline du pipeline** horodatée.
+
+<p align="center"><img src="assets/screenshots/facture-detail.png" alt="Détail d'une facture avec PJ" width="900"></p>
+
+Sur une facture en erreur, le badge `ERREUR` remplace le statut brut, une
+section "Erreurs" liste les règles violées (ici BR-FR-10, vendeur absent
+de l'annuaire PPF) et la timeline est **tronquée à la première erreur** —
+les statuts pipeline qui suivent (DISTRIBUÉ après une validation KO) ne
+reflètent pas l'issue métier de la facture et ne sont pas affichés :
+
+<p align="center"><img src="assets/screenshots/facture-detail-erreur.png" alt="Détail d'une facture en erreur" width="900"></p>
 
 ### Annuaire PPF `/annuaire`
 
