@@ -118,8 +118,9 @@ pub struct AppState {
     pub flow_sender: tokio::sync::mpsc::Sender<InboundFlow>,
     /// Secret HMAC pour la vérification des signatures webhook
     pub webhook_secret: Option<String>,
-    /// Store pour la traçabilité
-    pub trace_store: Option<Arc<pdp_trace::TraceStore>>,
+    /// Store pour la traçabilité (lecture). Indirection via `dyn TraceBackend`
+    /// pour permettre de tester l'UI/API avec un mock 100% mémoire.
+    pub trace_store: Option<Arc<dyn pdp_trace::TraceBackend>>,
     /// Tokens Bearer autorisés pour l'authentification API (si None ou vide, pas d'auth)
     pub bearer_tokens: Option<Vec<String>>,
     /// Métriques Prometheus

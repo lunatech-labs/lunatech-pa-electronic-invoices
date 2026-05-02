@@ -1,6 +1,10 @@
-mod server;
-mod ui;
-mod webhooks;
+// Les modules `server`, `ui`, `webhooks` sont exposés par `pdp_app` (lib.rs)
+// pour que les tests d'intégration y accèdent. On les ré-importe ici en local
+// pour conserver les chemins `crate::server::...` utilisés par le binaire.
+// (Le module `ui` est utilisé indirectement par server.rs, mais on l'importe
+// quand même pour assurer le linking quand ce binaire est compilé seul.)
+#[allow(unused_imports)]
+use pdp_app::{server, ui, webhooks};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -304,13 +308,14 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
         if !cli_mode.should_run_reception() {
             tracing::info!("Serveur HTTP non démarré (mode emitter uniquement)");
         } else {
-        let trace_store = match pdp_trace::TraceStore::new(&config.elasticsearch.url).await {
-            Ok(store) => Some(std::sync::Arc::new(store)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Impossible de connecter le TraceStore au serveur HTTP");
-                None
-            }
-        };
+        let trace_store: Option<std::sync::Arc<dyn pdp_trace::TraceBackend>> =
+            match pdp_trace::TraceStore::new(&config.elasticsearch.url).await {
+                Ok(store) => Some(std::sync::Arc::new(store)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Impossible de connecter le TraceStore au serveur HTTP");
+                    None
+                }
+            };
 
         // Annuaire PPF : utilise le pool PostgreSQL global
         let annuaire_store = if let Some(ref pool) = pg_pool {

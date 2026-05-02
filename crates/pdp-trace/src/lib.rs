@@ -36,11 +36,13 @@
 //! # }
 //! ```
 
+pub mod backend;
 pub mod store;
 pub mod processor;
 pub mod dedup;
 pub mod init;
 
+pub use backend::TraceBackend;
 pub use store::TraceStore;
 pub use processor::TraceProcessor;
 pub use dedup::DuplicateCheckProcessor;

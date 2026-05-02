@@ -177,6 +177,9 @@ a:hover { text-decoration: underline; }
 .timeline-item .ts { color: #888; font-size: 0.8rem; }
 .timeline-item .label { font-weight: 600; }
 .timeline-item .msg { color: #555; font-size: 0.9rem; margin-top: 0.2rem; }
+.timeline-item.timeline-error::before { background: #d32f2f; box-shadow: 0 0 0 2px #d32f2f; }
+.timeline-item.timeline-error .label { color: #d32f2f; }
+.timeline-item.timeline-error .msg { color: #b71c1c; }
 dl.kv { display: grid; grid-template-columns: 200px 1fr; gap: 0.6rem 1rem; }
 dl.kv dt { color: #666; font-weight: 500; }
 dl.kv dd { color: #1a1a2e; }
@@ -298,6 +301,15 @@ fn no_siren_banner() -> String {
     </div>"#.to_string()
 }
 
+/// Convertit une option de paramètre de query en `Option<&str>` en éliminant
+/// la chaîne vide. Le formulaire HTML envoie `?status=&from=&to=...` quand
+/// l'utilisateur n'a rien sélectionné — sans cette normalisation, ces champs
+/// arrivent en `Some("")` au handler et ES retourne 0 résultat sur un
+/// `term: { "status": "" }`.
+fn non_empty(opt: &Option<String>) -> Option<&str> {
+    opt.as_deref().filter(|s| !s.is_empty())
+}
+
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -308,11 +320,24 @@ fn html_escape(s: &str) -> String {
 
 fn status_badge(status: &str) -> &'static str {
     match status.to_uppercase().as_str() {
-        "DISTRIBUÉ" | "DISTRIBUE" | "ACKNOWLEDGED" => "badge-success",
-        "ERREUR" | "ERROR" | "REJECTED" | "REJETÉ" | "REJETE" => "badge-error",
-        "EN_ATTENTE" | "PENDING" | "WAITINGACK" | "WAITING" => "badge-warning",
-        "VALIDATED" | "VALIDÉ" | "VALIDE" | "RECEIVED" => "badge-info",
+        "DISTRIBUÉ" | "DISTRIBUE" | "ACKNOWLEDGED" | "ACQUITTÉ" | "ACQUITTE" => "badge-success",
+        "ERREUR" | "ERROR" | "REJECTED" | "REJETÉ" | "REJETE" | "ANNULÉ" | "ANNULE" => "badge-error",
+        "EN_ATTENTE" | "PENDING" | "WAITINGACK" | "WAITING" | "ATTENTE_ACK" => "badge-warning",
+        "VALIDATED" | "VALIDÉ" | "VALIDE" | "RECEIVED" | "REÇU" | "RECU" | "TRANSFORMÉ" | "TRANSFORME" => "badge-info",
         _ => "badge-default",
+    }
+}
+
+/// Statut "métier" affiché à l'utilisateur. Si la facture a des erreurs
+/// (`error_count > 0`), on affiche **ERREUR** quel que soit l'état brut du
+/// pipeline (le pipeline continue après une erreur non bloquante mais on ne
+/// veut pas afficher "DISTRIBUÉ" sur une facture rejetable). Sinon on rend
+/// le statut tel quel.
+fn effective_status<'a>(raw_status: &'a str, error_count: i32) -> (&'a str, &'static str) {
+    if error_count > 0 {
+        ("ERREUR", "badge-error")
+    } else {
+        (raw_status, status_badge(raw_status))
     }
 }
 
@@ -329,7 +354,8 @@ pub async fn handle_dashboard(
     State(state): State<Arc<AppState>>,
     Query(q): Query<DashboardQuery>,
 ) -> impl IntoResponse {
-    let siren = q.siren.as_deref();
+    // `Some("")` (formulaire vide) → traité comme `None`.
+    let siren = non_empty(&q.siren);
 
     let body = match siren {
         None => format!("{}{}", no_siren_banner(), siren_picker_form()),
@@ -421,6 +447,9 @@ pub struct FlowsListQuery {
     pub from: Option<String>,
     pub to: Option<String>,
     pub page: Option<usize>,
+    /// Nombre de factures par page (défaut 50, max 500). Filtré aux valeurs
+    /// du sélecteur côté UI : 25, 50, 100, 200.
+    pub page_size: Option<usize>,
     /// `emises` (le tenant est vendeur) / `recues` (le tenant est acheteur) / vide = toutes
     pub direction: Option<String>,
     /// Si "true", inclut tous les exchanges (toutes les soumissions, même les doublons).
@@ -428,11 +457,28 @@ pub struct FlowsListQuery {
     pub show_duplicates: Option<String>,
 }
 
+/// Tailles de page proposées dans le sélecteur de pagination.
+const PAGE_SIZE_OPTIONS: &[usize] = &[25, 50, 100, 200];
+
+/// Borne `page_size` aux valeurs du sélecteur (sécurité + UX cohérente).
+/// Toute autre valeur retombe sur le défaut (50). Empêche aussi qu'un user
+/// passe `?page_size=10000` et fasse exploser la mémoire.
+fn clamp_page_size(raw: Option<usize>) -> usize {
+    raw.filter(|n| PAGE_SIZE_OPTIONS.contains(n)).unwrap_or(50)
+}
+
 pub async fn handle_flows_list(
     State(state): State<Arc<AppState>>,
     Query(q): Query<FlowsListQuery>,
 ) -> impl IntoResponse {
-    let siren = q.siren.as_deref();
+    // Le formulaire HTML soumet les champs vides comme `?status=&from=&to=...`,
+    // qui se désérialisent en `Some("")` (et non `None`). On les normalise ici
+    // sinon ES voit `term: { "status": "" }` et ne renvoie rien.
+    let siren = non_empty(&q.siren);
+    let status = non_empty(&q.status);
+    let from = non_empty(&q.from);
+    let to = non_empty(&q.to);
+    let direction = non_empty(&q.direction);
 
     let body = match siren {
         None => format!("{}{}", no_siren_banner(), siren_picker_form()),
@@ -442,35 +488,26 @@ pub async fn handle_flows_list(
                 None => return html_response("TraceStore non configuré (Elasticsearch)"),
             };
             let page = q.page.unwrap_or(0);
-            let page_size = 50;
+            let page_size = clamp_page_size(q.page_size);
+            let total = store
+                .count_exchanges(s, status, from, to)
+                .await
+                .unwrap_or(0);
             let mut exchanges = store
-                .list_exchanges(
-                    s,
-                    q.status.as_deref(),
-                    q.from.as_deref(),
-                    q.to.as_deref(),
-                    page,
-                    page_size,
-                )
+                .list_exchanges(s, status, from, to, page, page_size)
                 .await
                 .unwrap_or_default();
 
-            // Filtre direction (côté serveur, après ES — sur seller_siren / buyer_siren)
-            // emises = le tenant est vendeur ; recues = le tenant est acheteur
-            if let Some(dir) = q.direction.as_deref() {
-                let mut filtered = Vec::with_capacity(exchanges.len());
-                for ex in exchanges.into_iter() {
-                    let doc = store.get_exchange(&ex.exchange_id, Some(s)).await.ok().flatten();
-                    let keep = match (dir, doc.as_ref()) {
-                        ("emises", Some(d)) => d.seller_siren.as_deref() == Some(s),
-                        ("recues", Some(d)) => d.buyer_siren.as_deref() == Some(s),
-                        _ => true,
-                    };
-                    if keep {
-                        filtered.push(ex);
-                    }
-                }
-                exchanges = filtered;
+            // Filtre direction sur seller_siren / buyer_siren — déjà présents
+            // dans `ExchangeSummary`, pas besoin de re-fetcher le document.
+            //  - `emises` : tenant est le vendeur
+            //  - `recues` : tenant est l'acheteur
+            if let Some(dir) = direction {
+                exchanges.retain(|ex| match dir {
+                    "emises" => ex.seller_siren.as_deref() == Some(s),
+                    "recues" => ex.buyer_siren.as_deref() == Some(s),
+                    _ => true,
+                });
             }
 
             // Déduplication par invoice_number (par défaut activée).
@@ -509,6 +546,13 @@ pub async fn handle_flows_list(
                 None => format!("Factures du tenant {}", html_escape(s)),
             };
 
+            let page_size_opts = PAGE_SIZE_OPTIONS
+                .iter()
+                .map(|n| {
+                    let sel = if *n == page_size { " selected" } else { "" };
+                    format!(r#"<option value="{n}"{sel}>{n} / page</option>"#)
+                })
+                .collect::<String>();
             let filters_form = format!(
                 r#"<form method="get" action="/ui/flows" class="filters">
     <input type="hidden" name="siren" value="{siren}">
@@ -525,6 +569,9 @@ pub async fn handle_flows_list(
     </select>
     <input type="date" name="from" value="{from}" placeholder="Du">
     <input type="date" name="to" value="{to}" placeholder="Au">
+    <select name="page_size" title="Factures par page">
+        {page_size_opts}
+    </select>
     <button type="submit">Filtrer</button>
 </form>"#,
                 siren = html_escape(s),
@@ -536,6 +583,7 @@ pub async fn handle_flows_list(
                 sel_pending = if q.status.as_deref() == Some("EN_ATTENTE") { "selected" } else { "" },
                 from = q.from.as_deref().unwrap_or(""),
                 to = q.to.as_deref().unwrap_or(""),
+                page_size_opts = page_size_opts,
             );
 
             let rows = if exchanges.is_empty() {
@@ -595,8 +643,14 @@ pub async fn handle_flows_list(
                             invoice = html_escape(e.invoice_number.as_deref().unwrap_or("—")),
                             seller = seller_cell,
                             buyer = buyer_cell,
-                            badge = status_badge(&e.status),
-                            status = html_escape(&e.status),
+                            badge = {
+                                let (_, b) = effective_status(&e.status, e.error_count);
+                                b
+                            },
+                            status = {
+                                let (s, _) = effective_status(&e.status, e.error_count);
+                                html_escape(s)
+                            },
                             pj = pj_cell,
                             errors = errors_cell,
                             date = html_escape(&e.created_at[..e.created_at.len().min(10)]),
@@ -606,7 +660,7 @@ pub async fn handle_flows_list(
                     .join("\n")
             };
 
-            let pagination = build_pagination(s, q.status.as_deref(), q.from.as_deref(), q.to.as_deref(), q.direction.as_deref(), page, exchanges.len(), page_size);
+            let pagination = build_pagination(s, status, from, to, direction, page, exchanges.len(), page_size, total);
 
             format!(
                 r#"<div class="card">
@@ -650,36 +704,129 @@ fn build_pagination(
     page: usize,
     page_count: usize,
     page_size: usize,
+    total: i64,
 ) -> String {
     let qs = |p: usize| -> String {
-        let mut s = format!("?siren={}&page={}", siren, p);
+        let mut s = format!("?siren={}&page={}&page_size={}", siren, p, page_size);
         if let Some(st) = status { s.push_str(&format!("&status={}", st)); }
         if let Some(f) = from { s.push_str(&format!("&from={}", f)); }
         if let Some(t) = to { s.push_str(&format!("&to={}", t)); }
         if let Some(d) = direction { if !d.is_empty() { s.push_str(&format!("&direction={}", d)); } }
         s
     };
+    // Nombre total de pages (au moins 1 si vide, pour ne pas afficher "Page 1/0").
+    let total_pages = if total <= 0 {
+        1
+    } else {
+        ((total as usize).saturating_sub(1) / page_size) + 1
+    };
+    let has_next = page + 1 < total_pages;
     let prev = if page > 0 {
         format!(r#"<a href="/ui/flows{}">← Précédent</a>"#, qs(page - 1))
     } else {
         r#"<span style="color:#aaa">← Précédent</span>"#.to_string()
     };
-    let next = if page_count >= page_size {
+    let next = if has_next {
         format!(r#"<a href="/ui/flows{}">Suivant →</a>"#, qs(page + 1))
     } else {
         r#"<span style="color:#aaa">Suivant →</span>"#.to_string()
     };
+    // Plage de résultats visibles : ex "1–50 / 257"
+    let range_start = if total > 0 { page * page_size + 1 } else { 0 };
+    let range_end = page * page_size + page_count;
     format!(
-        r#"<div style="margin-top:1rem; display:flex; justify-content:space-between; color:#666; font-size:0.9rem;">
+        r#"<div style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center; color:#666; font-size:0.9rem;">
         {prev}
-        <span>Page {page_display} — {count} résultats</span>
+        <span><strong>{range_start}–{range_end}</strong> sur <strong>{total}</strong> factures · page {page_display}/{total_pages}</span>
         {next}
     </div>"#,
         prev = prev,
         next = next,
+        range_start = range_start,
+        range_end = range_end,
+        total = total,
         page_display = page + 1,
-        count = page_count,
+        total_pages = total_pages,
     )
+}
+
+// ============================================================
+// Timeline du pipeline (events + errors fusionnés chronologiquement)
+// ============================================================
+
+/// Construit la timeline affichée sur la page détail.
+///
+/// Les `events` (REÇU, PARSÉ, VALIDÉ, DISTRIBUÉ…) racontent ce que les
+/// processors ont **fait**, tandis que les `errors` racontent ce qui a **mal
+/// tourné** au passage. Le pipeline ne s'arrête pas sur une erreur non
+/// bloquante (la responsabilité de générer un CDV de rejet incombe au
+/// `CdarProcessor` en aval), donc une facture peut très bien aller jusqu'à
+/// `DISTRIBUÉ` tout en ayant des erreurs collectées en route.
+///
+/// Pour ne pas induire l'utilisateur en erreur, on **fusionne** events et
+/// errors dans une seule liste triée par timestamp, et on tronque la
+/// progression `events` après la première erreur — les statuts ultérieurs
+/// (DISTRIBUÉ, ACQUITTÉ…) ne sont pas affichés car ils ne reflètent pas
+/// l'issue réelle de la facture.
+fn render_timeline(
+    events: &[pdp_trace::store::EventEntry],
+    errors: &[pdp_trace::store::ErrorEntry],
+) -> String {
+    if events.is_empty() && errors.is_empty() {
+        return r#"<p style="color:#888">Aucun événement enregistré.</p>"#.to_string();
+    }
+    enum Item<'a> {
+        Event(&'a pdp_trace::store::EventEntry),
+        Error(&'a pdp_trace::store::ErrorEntry),
+    }
+    let mut items: Vec<Item> = events.iter().map(Item::Event).chain(errors.iter().map(Item::Error)).collect();
+    items.sort_by(|a, b| {
+        let ta = match a {
+            Item::Event(e) => &e.timestamp,
+            Item::Error(e) => &e.timestamp,
+        };
+        let tb = match b {
+            Item::Event(e) => &e.timestamp,
+            Item::Error(e) => &e.timestamp,
+        };
+        ta.cmp(tb)
+    });
+
+    // Tronque après la première erreur : les statuts pipeline qui suivent
+    // (ex. DISTRIBUÉ alors qu'on a une erreur annuaire-validation) sont
+    // trompeurs et ne reflètent pas le rejet métier qui arrive en aval.
+    let first_err_pos = items.iter().position(|it| matches!(it, Item::Error(_)));
+    if let Some(idx) = first_err_pos {
+        items.truncate(idx + 1);
+    }
+
+    let html: Vec<String> = items
+        .iter()
+        .map(|it| match it {
+            Item::Event(ev) => format!(
+                r#"<div class="timeline-item">
+    <div class="ts">{ts} — route <code>{route}</code></div>
+    <div class="label">{status}</div>
+    <div class="msg">{msg}</div>
+</div>"#,
+                ts = html_escape(&ev.timestamp),
+                route = html_escape(&ev.route_id),
+                status = html_escape(&ev.status),
+                msg = html_escape(&ev.message),
+            ),
+            Item::Error(er) => format!(
+                r#"<div class="timeline-item timeline-error">
+    <div class="ts">{ts} — étape <code>{step}</code></div>
+    <div class="label">❌ ERREUR</div>
+    <div class="msg">{msg}</div>
+</div>"#,
+                ts = html_escape(&er.timestamp),
+                step = html_escape(&er.step),
+                msg = html_escape(&er.message),
+            ),
+        })
+        .collect();
+    format!(r#"<div class="timeline">{}</div>"#, html.join(""))
 }
 
 // ============================================================
@@ -833,7 +980,7 @@ pub async fn handle_flow_detail(
     Path(flow_id): Path<String>,
     Query(q): Query<FlowDetailQuery>,
 ) -> impl IntoResponse {
-    let siren = q.siren.as_deref();
+    let siren = non_empty(&q.siren);
     let body = match (siren, &state.trace_store) {
         (None, _) => format!("{}{}", no_siren_banner(), siren_picker_form()),
         (_, None) => "TraceStore non configuré (Elasticsearch)".to_string(),
@@ -895,37 +1042,20 @@ fn render_flow_detail(
         total_ttc = full.and_then(|f| f.total_ttc).map(|v| format!("{:.2}", v)).unwrap_or_else(|| "—".into()),
         currency = html_escape(full.and_then(|f| f.currency.as_deref()).unwrap_or("—")),
         issue_date = html_escape(full.and_then(|f| f.issue_date.as_deref()).unwrap_or("—")),
-        badge = status_badge(&sum.status),
-        status = html_escape(&sum.status),
+        badge = {
+            let (_, b) = effective_status(&sum.status, sum.error_count);
+            b
+        },
+        status = {
+            let (s, _) = effective_status(&sum.status, sum.error_count);
+            html_escape(s)
+        },
         created_at = html_escape(&sum.created_at),
     );
 
     let timeline = match full {
         None => String::new(),
-        Some(doc) => {
-            if doc.events.is_empty() {
-                r#"<p style="color:#888">Aucun événement enregistré.</p>"#.to_string()
-            } else {
-                let items: Vec<String> = doc
-                    .events
-                    .iter()
-                    .map(|ev| {
-                        format!(
-                            r#"<div class="timeline-item">
-    <div class="ts">{ts} — route <code>{route}</code></div>
-    <div class="label">{status}</div>
-    <div class="msg">{msg}</div>
-</div>"#,
-                            ts = html_escape(&ev.timestamp),
-                            route = html_escape(&ev.route_id),
-                            status = html_escape(&ev.status),
-                            msg = html_escape(&ev.message),
-                        )
-                    })
-                    .collect();
-                format!(r#"<div class="timeline">{}</div>"#, items.join(""))
-            }
-        }
+        Some(doc) => render_timeline(&doc.events, &doc.errors),
     };
 
     let errors = match full {
@@ -1039,7 +1169,7 @@ pub async fn handle_download_xml(
     Path(flow_id): Path<String>,
     Query(q): Query<FlowDetailQuery>,
 ) -> impl IntoResponse {
-    let siren = match q.siren.as_deref() {
+    let siren = match non_empty(&q.siren) {
         Some(s) => s,
         None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
     };
@@ -1067,7 +1197,7 @@ pub async fn handle_download_pdf(
     Path(flow_id): Path<String>,
     Query(q): Query<FlowDetailQuery>,
 ) -> impl IntoResponse {
-    let siren = match q.siren.as_deref() {
+    let siren = match non_empty(&q.siren) {
         Some(s) => s,
         None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
     };
@@ -1107,7 +1237,7 @@ pub async fn handle_download_attachment(
     Path(flow_id): Path<String>,
     Query(q): Query<AttachmentDownloadQuery>,
 ) -> impl IntoResponse {
-    let siren = match q.siren.as_deref() {
+    let siren = match non_empty(&q.siren) {
         Some(s) => s,
         None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
     };

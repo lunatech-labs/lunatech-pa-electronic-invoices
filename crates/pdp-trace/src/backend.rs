@@ -1,0 +1,116 @@
+//! Trait `TraceBackend` : surface de lecture utilisée par l'UI et l'API HTTP.
+//!
+//! Permet aux handlers de dépendre d'une abstraction plutôt que du
+//! [`TraceStore`] concret (qui parle Elasticsearch). Les tests d'intégration
+//! UI fournissent une implémentation 100 % en mémoire ([`InMemoryTraceBackend`]).
+//!
+//! Le pipeline d'ingestion (`TraceProcessor`, `DuplicateCheckProcessor`)
+//! continue de dépendre de `TraceStore` concret car il a besoin des écritures
+//! et des recherches avancées (full-text XML, agrégations) — non incluses ici.
+
+use async_trait::async_trait;
+
+use pdp_core::error::PdpResult;
+
+use crate::store::{ExchangeDocument, ExchangeSummary, TraceStats};
+
+/// Méthodes de lecture du store de traçabilité utilisées par les handlers
+/// HTTP et UI. Tout est `async` (le store ES répond via HTTP).
+#[async_trait]
+pub trait TraceBackend: Send + Sync {
+    /// Statistiques globales (tous tenants confondus).
+    async fn get_stats(&self) -> PdpResult<TraceStats>;
+
+    /// Statistiques pour un tenant donné (par SIREN).
+    async fn get_stats_for_siren(&self, siren: &str) -> PdpResult<TraceStats>;
+
+    /// Raison sociale lue depuis le premier document du tenant — pour
+    /// afficher "TechConseil SAS — SIREN 123456789" dans l'UI.
+    async fn get_tenant_name(&self, siren: &str) -> Option<String>;
+
+    /// Liste paginée des exchanges d'un tenant avec filtres optionnels.
+    async fn list_exchanges(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        page: usize,
+        page_size: usize,
+    ) -> PdpResult<Vec<ExchangeSummary>>;
+
+    /// Compte le nombre total d'exchanges pour un tenant (avec les mêmes
+    /// filtres que `list_exchanges`, mais sans pagination ni limite). Utilisé
+    /// par l'UI pour afficher le nombre total de factures et le nombre de pages.
+    async fn count_exchanges(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+    ) -> PdpResult<i64>;
+
+    /// Document complet (avec XML/PDF/événements) par ID. Si `siren` est `None`,
+    /// le document est cherché à travers tous les tenants.
+    async fn get_exchange(
+        &self,
+        exchange_id: &str,
+        siren: Option<&str>,
+    ) -> PdpResult<Option<ExchangeDocument>>;
+
+    /// Tous les flux en erreur, tous tenants confondus (utilisé par l'API
+    /// `/v1/flows` quand on demande `?status=error`).
+    async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>>;
+}
+
+#[async_trait]
+impl TraceBackend for crate::store::TraceStore {
+    async fn get_stats(&self) -> PdpResult<TraceStats> {
+        crate::store::TraceStore::get_stats(self).await
+    }
+
+    async fn get_stats_for_siren(&self, siren: &str) -> PdpResult<TraceStats> {
+        crate::store::TraceStore::get_stats_for_siren(self, siren).await
+    }
+
+    async fn get_tenant_name(&self, siren: &str) -> Option<String> {
+        crate::store::TraceStore::get_tenant_name(self, siren).await
+    }
+
+    async fn list_exchanges(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        page: usize,
+        page_size: usize,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        crate::store::TraceStore::list_exchanges(
+            self, siren, status, from_date, to_date, page, page_size,
+        )
+        .await
+    }
+
+    async fn count_exchanges(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+    ) -> PdpResult<i64> {
+        crate::store::TraceStore::count_exchanges(self, siren, status, from_date, to_date).await
+    }
+
+    async fn get_exchange(
+        &self,
+        exchange_id: &str,
+        siren: Option<&str>,
+    ) -> PdpResult<Option<ExchangeDocument>> {
+        crate::store::TraceStore::get_exchange(self, exchange_id, siren).await
+    }
+
+    async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>> {
+        crate::store::TraceStore::get_error_flows(self).await
+    }
+}
