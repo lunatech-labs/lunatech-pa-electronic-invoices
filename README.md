@@ -221,6 +221,7 @@ token_tenant_map:
 | [docs/api.md](docs/api.md) | API Rust de conversion, exemples par format, pièces jointes BG-24 |
 | [docs/webhooks.md](docs/webhooks.md) | Webhooks AFNOR XP Z12-013 §5.4 : événements, sécurité HMAC, retry, OAUTH2 |
 | [docs/ereporting.md](docs/ereporting.md) | E-reporting Flux 10.1/10.2/10.3/10.4, BR-FR-MAP, CLI `pdp ereporting` |
+| [docs/workflows.md](docs/workflows.md) | **Workflows métier** : 5 cas d'usage AFNOR XP Z12-014 (émission, rejet, réception, intra-PDP, relais 210/212) avec diagrammes Mermaid |
 | [docs/performance.md](docs/performance.md) | Benchmarks Criterion (parsing, validation, transformation, pipeline) |
 | [docs/facturx.md](docs/facturx.md) | Pipeline Factur-X PDF/A-3a, validation |
 | [docs/tracabilite.md](docs/tracabilite.md) | Traçabilité Elasticsearch : architecture, index par SIREN, API |

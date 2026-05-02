@@ -2,12 +2,47 @@
 
 Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 
-**Dernière mise à jour** : 2026-04-26
-**Tests** : 170+ tests pdp-cdar, 0 échec sur le workspace
+**Dernière mise à jour** : 2026-05-02
+**Tests** : 1091 tests workspace, 0 échec, 9 ignorés
 
 ---
 
-## Fait
+## Livré entre 2026-04-26 et 2026-05-02
+
+### XP Z12-013 — APIs Flow / Directory (55% → 95%)
+- [x] Webhooks AFNOR : 5 endpoints (POST/GET/PATCH/DELETE /v1/webhooks)
+- [x] Webhooks : retry exponentiel (3 tentatives, backoff 500ms × 2)
+- [x] Webhooks : OAUTH2 client_credentials avec bearer_auth automatique
+- [x] Webhooks : trigger `flow.received` et `flow.ack.updated`
+- [x] Webhooks : persistance PostgreSQL (table `webhooks` JSONB) + 8 tests testcontainers
+- [x] POST /v1/flows : headers `Request-Id`, `Organization-Id`, FullFlowInfo en réponse
+- [x] Codes HTTP fins : 408 (TimeoutLayer), 413 (max_flow_size_bytes), 429 (RateLimiter Bearer/IP avec Retry-After), 501 (NotImplemented)
+- [x] Directory Service complet : GET /v1/routing-code/siret:{siret}/code:{id}
+
+### DSE AIFE — E-reporting + Annuaire (85% → 96%)
+- [x] BR-FR-MAP-23 : `normalize_date_yyyymmdd()` appliqué partout (factures, paiements, périodes)
+- [x] CLI : `pdp ereporting generate101 / generate103` avec autodétection UBL/CII/Factur-X
+- [x] Helpers `payment_invoice` / `payment_transaction` pour Flux 10.2/10.4
+- [x] F13 generator : `generate_f13_xml()` + `build_ligne_for_f13()` (Création/Modification/Suppression)
+- [x] F14 auto-import : `AnnuaireImportProcessor` détecte `FFE1435A` et déclenche `ingest_f14`
+- [x] CDV F6 annuaire : `AnnuaireStatusCode { Acceptee=400, Rejetee=401 }` + détection dans `DocumentTypeRouter`
+
+### XP Z12-012 — Acteurs CDV (97% conservé)
+- [x] CDV 221 ERREUR_ROUTAGE : `RoutingValidationProcessor` détecte les PDP injoignables, `CdarProcessor` génère 221 (ROUTAGE_ERR / CODE_ROUTAGE_ERR)
+
+### Pipeline
+- [x] Wiring : RoutingResolver → RoutingValidator → CdarProcessor (pour permettre 221)
+- [x] Wiring : `AnnuaireImportProcessor` dans la route `ppf-sftp-return`
+
+### Documentation
+- [x] `docs/http-api.md` : référence REST exhaustive avec curl, codes HTTP, diagrammes Mermaid (émission/réception/webhook/429), observabilité (Request-Id, Kibana, Prometheus), multi-tenant, conformité AFNOR (mapping endpoint→spec)
+- [x] `docs/openapi.yaml` : OpenAPI 3.1 (16 paths, schémas Webhook/Flow/Error), importable Swagger UI / openapi-generator
+- [x] `docs/bruno-collection/` : collection file-based (14 requêtes, 4 dossiers Health/Flow/Webhooks/Directory/Errors)
+- [x] `docs/ereporting.md` : référence Flux 10.1-10.4, BR-FR-MAP, exemples CLI + Rust
+- [x] `docs/annuaire.md` : sections F13 generator + F14 auto-import + CDV F6 annuaire
+- [x] `rapport-conformite-pdp.md` : scores mis à jour (XP Z12-013 95%, DSE AIFE 96%)
+
+## Fait (antérieur)
 
 - [x] Multi-tenancy par SIREN (`TenantRegistry`, `TenantEntry`, auto-config)
 - [x] Routes auto-générées par tenant (`{siren}/in → pipeline → {siren}/out`)
@@ -105,17 +140,11 @@ toutes les routes émission/réception, tenants, http-inbound, intra-pdp).
 > Ces 15 tests d'intégration tournent à chaque `cargo test` — prérequis :
 > Docker ou Podman démarré sur la machine.
 
-### 2. Workflows complets documentés
+### 2. Workflows complets documentés ✅
 
-Nicolas doit décrire les workflows précis (cas d'usage AFNOR XP Z12-014) :
-
-- [ ] Décrire le workflow émission classique (UC1)
-- [ ] Décrire le workflow émission avec rejet à la validation
-- [ ] Décrire le workflow réception classique
-- [ ] Décrire le workflow intra-PDP
-- [ ] Décrire le workflow CDV 210/212 avec relais PPF
-- [ ] Documenter dans `docs/workflows.md` (nouveau fichier)
-- [ ] Diagrammes de séquence Mermaid pour chaque cas
+Voir [docs/workflows.md](workflows.md) — 5 workflows AFNOR XP Z12-014 avec
+diagrammes Mermaid (émission classique, rejet à l'émission, réception
+classique, intra-PDP, CDV 210/212 avec relais PPF).
 
 ### 3. Réception inter-PDP — affinage
 
@@ -209,20 +238,20 @@ Maintenir une copie locale de l'annuaire PPF pour le routage offline et performa
 - [x] PostgreSQL dans docker-compose, config `database` dans PdpConfig
 - [x] Tests unitaires (7) + test intégration fichier réel 10 Go
 - [x] AnnuaireService + AnnuaireValidationProcessor (G1.63)
-- [ ] Consumer SFTP F14 (récupération automatique tar.gz depuis le PPF)
+- [x] Auto-import F14 quand reçu sur SAS retrait PPF (`AnnuaireImportProcessor`)
+- [x] Émetteur F13 — generator XML (`generate_f13_xml` + `build_ligne_for_f13`)
+- [x] Traitement CDV F6 annuaire (statuts 400 Acceptée / 401 Rejetée) dans `DocumentTypeRouter`
+- [ ] Configuration SAS retrait F14 dédié dans `PpfReturnConsumerConfig.paths`
+- [ ] Cron / déclencheur métier qui appelle le F13 generator (onboarding tenant, changement de PA)
 - [ ] Application du flux différentiel quotidien (24h)
-- [ ] Émetteur F13 (actualisation des lignes d'annuaire de nos clients)
-- [ ] Traitement CDV F6 annuaire (statuts 400 Acceptée / 401 Rejetée)
 
-### 6. CDV 221 (ERREUR_ROUTAGE)
+### 6. CDV 221 (ERREUR_ROUTAGE) ✅
 
-Quand le routage de la facture vers la PDP destinataire échoue (matricule inconnu,
-PDP injoignable…), il faut émettre un CDV 221.
-
-- [ ] Détection erreur routage dans `DynamicRoutingProducer`
-- [ ] Génération CDV 221 par PA-R (Sender=PA-R, Issuer=PA-R, Recipients=PA-E)
-- [ ] Code motif `ROUTAGE_ERR` dans le CDV
-- [ ] Tests unitaires
+- [x] `RoutingValidationProcessor` détecte `PDP-{matricule}` non configurée
+- [x] `CdarProcessor` génère CDV 221 (au lieu de 213) si une erreur step="routage" est présente
+- [x] Codes motifs `ROUTAGE_ERR` et `CODE_ROUTAGE_ERR` (Acteurs CDV V1.2)
+- [x] Wiring : RoutingResolver → RoutingValidator → CdarProcessor (ordre inversé)
+- [x] 10 tests unitaires (RoutingValidator + CdarProcessor + classify)
 
 ### 7. Nettoyage du répertoire specs/
 
@@ -257,18 +286,23 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [ ] Enregistrement dans l'annuaire PPF (F13) lors de l'onboarding
 - [ ] Workflow de changement de PDP (clôture des lignes de l'ancienne PA)
 
-### 10. Rate limiting HTTP
+### 10. Rate limiting HTTP ✅
 
-- [ ] Limiter le nombre de requêtes par tenant/token
-- [ ] Réponse 429 Too Many Requests avec Retry-After
-- [ ] Configuration par tenant ou globale
+- [x] Limiter le nombre de requêtes par tenant/token (clé Bearer / IP)
+- [x] Réponse 429 Too Many Requests avec Retry-After
+- [x] Configuration globale via `HttpServerConfig.rate_limit_per_minute`
+- [ ] Configuration par tenant (actuellement globale)
 
-### 11. E-reporting (Flux 10)
+### 11. E-reporting (Flux 10) ✅
 
-- [ ] Modèle de données pour transactions et paiements
-- [ ] Sérialisation au format spécifique PPF
-- [ ] Règles BR-FR-MAP-23 (conversion dates UBL → CII)
-- [ ] Tests avec exemples officiels
+- [x] Modèle de données pour transactions et paiements (TransactionInvoice, PaymentInvoice, AggregatedTransaction)
+- [x] Sérialisation au format XSD PPF V1.0 (10.1, 10.2, 10.3, 10.4)
+- [x] Règles BR-FR-MAP (01, 04, 06, 08, 10, 12, 14, 15, 16, 17, 18, 19, 23)
+- [x] Tests générateur (22 tests) + 6 tests CLI E2E
+- [ ] Source automatique des factures (pull depuis Elasticsearch `pdp-{siren}`)
+- [ ] CLI 10.2/10.4 (paiements — nécessite source de paiements depuis DB métier)
+- [ ] Cron / scheduler pour génération mensuelle automatique
+- [ ] Envoi SFTP via `PpfSftpProducer` avec `FFE1025A`
 
 ### 12. Abstraction object store
 
