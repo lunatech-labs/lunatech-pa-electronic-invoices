@@ -213,22 +213,26 @@ Application web permettant aux clients (vendeurs et acheteurs) et à
 l'administrateur PDP de suivre les factures émises et reçues, leur cycle
 de vie (CDV), et les éventuelles erreurs/rejets.
 
-#### Écrans utilisateur (par tenant)
+**Phase 1 — Lecture seule ✅** (voir [docs/ui.md](ui.md))
+- [x] Module `ui.rs` : 3 handlers HTML server-rendered (cohérent avec `/annuaire`)
+- [x] `GET /ui` — Dashboard avec 4 KPIs (total / distribués / en attente / en erreur)
+- [x] `GET /ui/flows` — Liste paginée avec filtres (statut, dates) + 50/page
+- [x] `GET /ui/flows/{flowId}` — Détail facture (métadonnées, totaux) + timeline pipeline
+- [x] Style CSS inline cohérent avec `/annuaire`, badges colorés par statut
+- [x] Multi-tenant via `?siren=` (sélecteur SIREN si paramètre absent)
+- [x] `TraceStore::list_exchanges()` + `get_stats_for_siren()`
+- [x] 6 tests HTTP (no-siren, no-trace-store, html-skeleton, public-routes)
 
-- [ ] **Dashboard** : KPIs (total factures émises/reçues, en attente, en erreur,
-      en litige, encaissées) sur la période sélectionnée
-- [ ] **Liste factures émises** : filtres (date, statut CDV, acheteur, montant),
-      tri, pagination, recherche full-text
-- [ ] **Liste factures reçues** : idem côté acheteur
-- [ ] **Détail facture** : metadata (BT-1, BT-2, montants, parties), historique
-      CDV (200 → 202 → 204 → 205/210 → 212), pièces jointes, lien vers le XML
-      brut et le PDF readable
-- [ ] **Timeline CDV** : visualisation chronologique des statuts (timeline UI)
+#### Écrans utilisateur (par tenant) — phases suivantes
+
+- [ ] **Liste factures reçues** vs émises : actuellement liste mixte, ajouter filtre direction
+- [ ] **Pièces jointes** : afficher dans le détail (`attachment_filenames`)
 - [ ] **Téléchargement** : XML facture, PDF Factur-X, CDV individuels
 - [ ] **Soumission de factures** : upload UBL/CII/Factur-X via formulaire web
       (pour fournisseurs sans intégration API)
 - [ ] **Émission de CDV manuels** : pour acheteurs (CDV 204/205/207/210, etc.)
 - [ ] **Notifications** : alertes en cas de rejet, refus, ou changement de statut
+- [ ] **Recherche full-text** dans `raw_xml` (déjà supporté par `TraceStore::search_xml`)
 
 #### Écrans administrateur PDP
 
@@ -263,7 +267,7 @@ Pas besoin d'une nouvelle base : tout existe déjà dans `pdp-trace`.
 
 #### Phases de livraison
 
-- [ ] Phase 1 : écrans lecture seule (dashboard + liste + détail)
+- [x] Phase 1 : écrans lecture seule (dashboard + liste + détail) — voir [docs/ui.md](ui.md)
 - [ ] Phase 2 : actions (soumission factures, émission CDV manuels)
 - [ ] Phase 3 : admin PDP (multi-tenant, alertes, métriques)
 - [ ] Phase 4 : notifications live (WebSocket/SSE)

@@ -275,12 +275,16 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         ))
         .with_state(state.clone());
 
-    // Endpoints publics (healthcheck, métriques Prometheus, interface annuaire)
+    // Endpoints publics (healthcheck, métriques Prometheus, UI)
     let public_routes = Router::new()
         .route("/v1/healthcheck", get(handle_healthcheck))
         .route("/metrics", get(handle_metrics))
         .route("/annuaire", get(handle_annuaire_page))
         .route("/v1/annuaire/search", get(handle_annuaire_search))
+        // Interface web de suivi des factures (phase 1 — lecture seule)
+        .route("/ui", get(crate::ui::handle_dashboard))
+        .route("/ui/flows", get(crate::ui::handle_flows_list))
+        .route("/ui/flows/{flow_id}", get(crate::ui::handle_flow_detail))
         .with_state(state);
 
     Router::new()
@@ -3433,5 +3437,116 @@ mod tests {
         assert!(limiter.check("bearer:tokenA").await.is_err()); // quota épuisé pour A
         // tokenB n'est pas affecté
         assert!(limiter.check("bearer:tokenB").await.is_ok());
+    }
+
+    // ============================================================
+    // UI — Interface web de suivi des factures (phase 1)
+    // ============================================================
+
+    async fn body_string(resp: axum::response::Response) -> String {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    #[tokio::test]
+    async fn test_ui_dashboard_no_siren_shows_picker() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder().uri("/ui").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = body_string(resp).await;
+        assert!(body.contains("Aucun SIREN sélectionné"));
+        assert!(body.contains("Choisir un tenant"));
+        assert!(body.contains("<form"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_dashboard_with_siren_no_trace_store() {
+        // test_app_state() n'a pas de TraceStore → message d'erreur affiché
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/ui?siren=123456789")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = body_string(resp).await;
+        assert!(body.contains("TraceStore non configuré"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_flows_list_no_siren() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/ui/flows")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = body_string(resp).await;
+        assert!(body.contains("Aucun SIREN sélectionné"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_flow_detail_not_found() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/ui/flows/inexistant?siren=123456789")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        // Le handler répond 200 avec un message HTML (pas 404 — c'est de l'UI)
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = body_string(resp).await;
+        // Soit "Flux introuvable" si TraceStore branché, soit message d'erreur store
+        assert!(body.contains("TraceStore") || body.contains("Flux introuvable"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_dashboard_html_skeleton() {
+        // Vérifie que les pages produisent du HTML bien formé avec nav
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder().uri("/ui").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let body = body_string(resp).await;
+
+        assert!(body.starts_with("<!DOCTYPE html>"));
+        assert!(body.contains("<title>Dashboard — Ferrite</title>"));
+        assert!(body.contains(r#"<a href="/ui""#));
+        assert!(body.contains(r#"<a href="/ui/flows""#));
+        assert!(body.contains(r#"<a href="/annuaire""#));
+        assert!(body.ends_with("</html>"));
+    }
+
+    #[tokio::test]
+    async fn test_ui_routes_are_public() {
+        // Les pages UI ne doivent pas demander de Bearer token
+        let state = test_app_state_with_auth(); // bearer_tokens configurés
+        let app = build_api_router(state);
+
+        for path in &["/ui", "/ui/flows", "/ui/flows/abc?siren=123456789"] {
+            let req = Request::builder().uri(*path).body(Body::empty()).unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "UI path {} doit être accessible sans Bearer token",
+                path
+            );
+        }
     }
 }

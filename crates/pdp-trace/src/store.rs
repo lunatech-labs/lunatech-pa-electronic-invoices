@@ -703,6 +703,82 @@ impl TraceStore {
         Ok(None)
     }
 
+    /// Liste paginée d'exchanges pour un tenant, avec filtres optionnels.
+    ///
+    /// Filtres :
+    /// - `status` : valeur exacte du champ `status` (`DISTRIBUÉ`, `ERREUR`, `REJETE`, ...)
+    /// - `from_date` / `to_date` : bornes sur `issue_date` (format `YYYY-MM-DD`)
+    ///
+    /// Pagination :
+    /// - `page` (0-indexed) × `page_size` → offset ES
+    pub async fn list_exchanges(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        page: usize,
+        page_size: usize,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        let index = Self::index_name(siren);
+        let mut must: Vec<serde_json::Value> = Vec::new();
+        if let Some(s) = status {
+            must.push(serde_json::json!({ "term": { "status": s } }));
+        }
+        let mut range = serde_json::Map::new();
+        if let Some(f) = from_date { range.insert("gte".into(), serde_json::Value::String(f.into())); }
+        if let Some(t) = to_date { range.insert("lte".into(), serde_json::Value::String(t.into())); }
+        if !range.is_empty() {
+            must.push(serde_json::json!({ "range": { "issue_date": range } }));
+        }
+        let query = if must.is_empty() {
+            serde_json::json!({ "match_all": {} })
+        } else {
+            serde_json::json!({ "bool": { "must": must } })
+        };
+
+        let from = page * page_size;
+        let body = serde_json::json!({
+            "query": query,
+            "from": from,
+            "size": page_size,
+            "sort": [{ "created_at": "desc" }],
+            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number",
+                        "seller_name", "buyer_name", "status", "error_count", "created_at"]
+        });
+
+        let resp = self.client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Liste exchanges échouée: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Ok(Vec::new());
+        }
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+        Ok(Self::parse_summaries(&body))
+    }
+
+    /// Stats par tenant (un index pdp-{siren}).
+    pub async fn get_stats_for_siren(&self, siren: &str) -> PdpResult<TraceStats> {
+        let index = Self::index_name(siren);
+        let total = self.count_query(&index, serde_json::json!({ "match_all": {} })).await?;
+        let errors = self.count_query(&index, serde_json::json!({
+            "range": { "error_count": { "gt": 0 } }
+        })).await?;
+        let distributed = self.count_query(&index, serde_json::json!({
+            "term": { "status": "DISTRIBUÉ" }
+        })).await?;
+        Ok(TraceStats {
+            total_exchanges: total,
+            total_errors: errors,
+            total_distributed: distributed,
+        })
+    }
+
     /// Récupère toutes les factures émises (status DISTRIBUÉ) d'un tenant
     /// sur une période donnée. Utilisé par l'e-reporting Flux 10.
     ///

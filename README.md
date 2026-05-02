@@ -216,6 +216,7 @@ token_tenant_map:
 | Document | Contenu |
 |----------|---------|
 | [docs/http-api.md](docs/http-api.md) | **API HTTP REST** : endpoints AFNOR Flow/Directory + webhooks, exemples curl, codes HTTP, diagrammes séquence, observabilité, multi-tenant, conformité |
+| [docs/ui.md](docs/ui.md) | **Interface web** de suivi des factures (Phase 1 — dashboard, liste, détail) |
 | [docs/openapi.yaml](docs/openapi.yaml) | Spec OpenAPI 3.1 (importable Swagger UI / codegen) |
 | [docs/bruno-collection/](docs/bruno-collection/) | Collection Bruno (testable depuis l'UI ou CLI `bru run`) |
 | [docs/api.md](docs/api.md) | API Rust de conversion, exemples par format, pièces jointes BG-24 |

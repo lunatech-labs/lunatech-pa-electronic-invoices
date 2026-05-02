@@ -1,4 +1,5 @@
 mod server;
+mod ui;
 mod webhooks;
 
 use anyhow::Result;
