@@ -9,17 +9,39 @@ use uuid::Uuid;
 /// Préfixe des index Elasticsearch (un index par SIREN)
 const INDEX_PREFIX: &str = "pdp";
 
-/// Index par défaut pour les flux sans SIREN identifié
-const DEFAULT_INDEX: &str = "pdp-unknown";
+/// Suffixe de l'index par défaut pour les flux sans SIREN identifié
+const UNKNOWN_SUFFIX: &str = "unknown";
+
+/// Statuts considérés comme **terminaux réussis** : un flux qui les atteint
+/// avec `error_count = 0` est considéré "OK" pour le dashboard et le filtre UI.
+/// Les flux démo ne dépassent souvent pas `VALIDÉ` (pas de PDP destinataire
+/// qui acquitte), il serait donc trompeur de ne compter que `DISTRIBUÉ`.
+pub const TERMINAL_OK_STATUSES: &[&str] = &[
+    "VALIDÉ",
+    "TRANSFORMÉ",
+    "DISTRIBUTION",
+    "DISTRIBUÉ",
+    "ATTENTE_ACK",
+    "ACQUITTÉ",
+];
+
+/// Statuts considérés comme **terminaux d'échec** : combinés avec
+/// `error_count > 0` pour la catégorie "Erreur" du dashboard et de la liste.
+pub const TERMINAL_FAIL_STATUSES: &[&str] = &["REJETÉ", "ANNULÉ", "ERREUR"];
 
 /// Store de traçabilité : persiste les factures, PDF et événements dans Elasticsearch.
 ///
 /// Architecture : un index par numéro SIREN (endpoint = client = SIREN).
-/// - Index `pdp-{siren}` contient tous les documents de ce client
+/// - Index `{prefix}-{siren}` contient tous les documents de ce client
 /// - Chaque document contient : métadonnées facture + XML brut + PDF base64 + événements
+///
+/// Le préfixe est `pdp` en production. Les tests peuvent utiliser un préfixe
+/// distinct (via [`TraceStore::for_test`]) pour ne pas polluer / wiper les
+/// indices de la démo qui partagent le même Elasticsearch.
 pub struct TraceStore {
     client: Client,
     base_url: String,
+    index_prefix: String,
 }
 
 /// Document Elasticsearch pour un exchange (facture traitée)
@@ -133,6 +155,12 @@ pub struct ExchangeSummary {
 impl TraceStore {
     /// Crée un nouveau store connecté à Elasticsearch
     pub async fn new(elasticsearch_url: &str) -> PdpResult<Self> {
+        Self::new_with_prefix(elasticsearch_url, INDEX_PREFIX).await
+    }
+
+    /// Crée un store avec un préfixe d'index personnalisé.
+    /// Utilisé par les tests pour s'isoler des indices de production.
+    pub async fn new_with_prefix(elasticsearch_url: &str, prefix: &str) -> PdpResult<Self> {
         let client = Client::new();
         let base_url = elasticsearch_url.trim_end_matches('/').to_string();
 
@@ -140,7 +168,7 @@ impl TraceStore {
         client.get(&base_url).send().await
             .map_err(|e| PdpError::TraceError(format!("Ping Elasticsearch échoué: {}", e)))?;
 
-        Ok(Self { client, base_url })
+        Ok(Self { client, base_url, index_prefix: prefix.to_string() })
     }
 
     /// Crée un store no-op (Elasticsearch indisponible).
@@ -149,6 +177,7 @@ impl TraceStore {
         Self {
             client: Client::new(),
             base_url: String::new(),
+            index_prefix: INDEX_PREFIX.to_string(),
         }
     }
 
@@ -157,23 +186,40 @@ impl TraceStore {
         !self.base_url.is_empty()
     }
 
-    /// Crée un store pour les tests
+    /// Crée un store pour les tests, avec un préfixe d'index unique
+    /// (`pdp-itest-{uuid}-`) pour ne JAMAIS interférer avec les indices
+    /// de la démo (`pdp-{siren}`) qui partagent souvent le même cluster ES.
+    ///
+    /// Le préfixe `PDP_TEST_INDEX_PREFIX` peut être défini dans l'environnement
+    /// pour réutiliser un préfixe stable entre runs (utile pour debug).
     pub async fn for_test() -> PdpResult<Self> {
         let url = std::env::var("ELASTICSEARCH_URL")
             .unwrap_or_else(|_| "http://localhost:9200".to_string());
-        Self::new(&url).await
+        let prefix = std::env::var("PDP_TEST_INDEX_PREFIX")
+            .unwrap_or_else(|_| format!("pdp-itest-{}", &Uuid::new_v4().to_string()[..8]));
+        Self::new_with_prefix(&url, &prefix).await
     }
 
     /// Retourne le nom d'index pour un SIREN donné
-    pub fn index_name(siren: &str) -> String {
+    pub fn index_name(&self, siren: &str) -> String {
         let clean = siren.chars().filter(|c| c.is_ascii_digit()).collect::<String>();
         if clean.len() >= 9 {
-            format!("{}-{}", INDEX_PREFIX, &clean[..9])
+            format!("{}-{}", self.index_prefix, &clean[..9])
         } else if !clean.is_empty() {
-            format!("{}-{}", INDEX_PREFIX, clean)
+            format!("{}-{}", self.index_prefix, clean)
         } else {
-            DEFAULT_INDEX.to_string()
+            self.default_index()
         }
+    }
+
+    /// Index "fourre-tout" pour les flux sans SIREN identifié.
+    fn default_index(&self) -> String {
+        format!("{}-{}", self.index_prefix, UNKNOWN_SUFFIX)
+    }
+
+    /// Wildcard couvrant tous les index de ce store (`{prefix}-*`).
+    fn index_pattern(&self) -> String {
+        format!("{}-*", self.index_prefix)
     }
 
     /// Extrait le SIREN depuis un SIRET (9 premiers chiffres)
@@ -187,12 +233,12 @@ impl TraceStore {
     }
 
     /// Détermine l'index cible pour un exchange (basé sur le SIREN vendeur)
-    fn index_for_exchange(exchange: &Exchange) -> String {
+    fn index_for_exchange(&self, exchange: &Exchange) -> String {
         exchange.invoice.as_ref()
             .and_then(|i| i.seller_siret.as_deref())
             .and_then(Self::siren_from_siret)
-            .map(|s| Self::index_name(&s))
-            .unwrap_or_else(|| DEFAULT_INDEX.to_string())
+            .map(|s| self.index_name(&s))
+            .unwrap_or_else(|| self.default_index())
     }
 
     /// Crée l'index avec le mapping si nécessaire
@@ -397,17 +443,152 @@ impl TraceStore {
         }
     }
 
-    /// Enregistre un exchange complet (facture + XML + PDF + métadonnées)
+    /// Enregistre un exchange complet (facture + XML + PDF + métadonnées).
+    ///
+    /// Deux subtilités importantes :
+    ///
+    /// **1. Cohérence multi-index** — un même `exchange_id` traverse plusieurs
+    /// `record_exchange` dans le pipeline. La première (TraceProcessor::received)
+    /// arrive avant le parsing — `seller_siret` est inconnu et le doc est rangé
+    /// dans `pdp-unknown`. La seconde (TraceProcessor::parsed) connaît le
+    /// vendeur et écrit dans `pdp-{seller_siren}`. Sans nettoyage, on garderait
+    /// **deux copies** du même exchange. On supprime donc les copies stale
+    /// dans les autres index avant l'upsert (en récupérant d'abord leurs
+    /// events/errors pour ne pas perdre la timeline déjà commencée).
+    ///
+    /// **2. Préservation des arrays `events` / `errors` / `validation_warnings`** —
+    /// un PUT complet écraserait les events ajoutés par `record_event`. On
+    /// passe donc en `_update` avec `doc_as_upsert` : à la première création,
+    /// `upsert` initialise les arrays ; aux mises à jour, `doc` ne contient
+    /// que les métadonnées (les arrays restent intactes).
     pub async fn record_exchange(&self, exchange: &Exchange) -> PdpResult<()> {
-        let index = Self::index_for_exchange(exchange);
+        let index = self.index_for_exchange(exchange);
         self.ensure_index(&index).await?;
 
         let doc = Self::build_document(exchange);
         let doc_id = doc.exchange_id.clone();
 
+        // Récupère les events/errors/warnings d'éventuelles copies stale dans
+        // d'autres index, puis les supprime. Les arrays récupérées sont
+        // injectées dans l'upsert pour conserver la timeline.
+        let mut carried_events: Vec<EventEntry> = Vec::new();
+        let mut carried_errors: Vec<ErrorEntry> = Vec::new();
+        let mut carried_warnings: Vec<WarningEntry> = Vec::new();
+        if let Ok(resp) = self
+            .client
+            .post(&format!(
+                "{}/{}/_search",
+                self.base_url,
+                self.index_pattern()
+            ))
+            .json(&serde_json::json!({
+                "query": {
+                    "bool": {
+                        "must": [{ "term": { "exchange_id": &doc_id } }],
+                        "must_not": [{ "term": { "_index": &index } }]
+                    }
+                },
+                "size": 5,
+                "_source": ["events", "errors", "validation_warnings"]
+            }))
+            .send()
+            .await
+        {
+            if let Ok(body) = resp.json::<serde_json::Value>().await {
+                if let Some(hits) = body["hits"]["hits"].as_array() {
+                    for hit in hits {
+                        if let Some(src) = hit.get("_source") {
+                            if let Some(arr) = src.get("events").and_then(|v| v.as_array()) {
+                                for e in arr {
+                                    if let Ok(ev) = serde_json::from_value::<EventEntry>(e.clone()) {
+                                        carried_events.push(ev);
+                                    }
+                                }
+                            }
+                            if let Some(arr) = src.get("errors").and_then(|v| v.as_array()) {
+                                for e in arr {
+                                    if let Ok(er) = serde_json::from_value::<ErrorEntry>(e.clone()) {
+                                        carried_errors.push(er);
+                                    }
+                                }
+                            }
+                            if let Some(arr) = src
+                                .get("validation_warnings")
+                                .and_then(|v| v.as_array())
+                            {
+                                for w in arr {
+                                    if let Ok(wn) = serde_json::from_value::<WarningEntry>(w.clone())
+                                    {
+                                        carried_warnings.push(wn);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Supprime les copies stale (autres index)
+        let _ = self
+            .client
+            .post(&format!(
+                "{}/{}/_delete_by_query?refresh=true",
+                self.base_url,
+                self.index_pattern()
+            ))
+            .json(&serde_json::json!({
+                "query": {
+                    "bool": {
+                        "must": [{ "term": { "exchange_id": &doc_id } }],
+                        "must_not": [{ "term": { "_index": &index } }]
+                    }
+                }
+            }))
+            .send()
+            .await;
+
+        // `doc` (mises à jour) — on retire SEULEMENT `events`, géré par
+        // `record_event` via append scripted. `errors` et
+        // `validation_warnings` sont alimentés par les processors (via
+        // `Exchange::add_error` et la property `validation.xml.issues`)
+        // et doivent donc être mis à jour à chaque `record_exchange`,
+        // sinon une erreur ajoutée après le premier upsert (ex.
+        // AnnuaireValidationProcessor en aval) ne serait jamais reflétée.
+        let mut update_doc = serde_json::to_value(&doc)
+            .map_err(|e| PdpError::TraceError(format!("Sérialisation doc échouée: {}", e)))?;
+        if let Some(obj) = update_doc.as_object_mut() {
+            obj.remove("events");
+        }
+        // `upsert` (première création) avec les arrays initialisées et les
+        // events/errors recueillis depuis l'ancien index si applicable.
+        let mut upsert_doc = serde_json::to_value(&doc)
+            .map_err(|e| PdpError::TraceError(format!("Sérialisation upsert échouée: {}", e)))?;
+        if let Some(obj) = upsert_doc.as_object_mut() {
+            obj.insert(
+                "events".into(),
+                serde_json::to_value(&carried_events).unwrap_or_else(|_| serde_json::json!([])),
+            );
+            obj.insert(
+                "errors".into(),
+                serde_json::to_value(&carried_errors).unwrap_or_else(|_| serde_json::json!([])),
+            );
+            obj.insert(
+                "validation_warnings".into(),
+                serde_json::to_value(&carried_warnings).unwrap_or_else(|_| serde_json::json!([])),
+            );
+        }
+        let body = serde_json::json!({
+            "doc": update_doc,
+            "upsert": upsert_doc,
+        });
+
+        // `refresh=true` : le document est immédiatement searchable, indispensable
+        // car `record_event` (appelé juste après dans le pipeline) le recherche
+        // par `flow_id` pour append l'événement à `events`. Sans refresh, ES ne
+        // le trouve pas pendant ~1s et `record_event` crée un fallback orphelin.
         let resp = self.client
-            .put(&format!("{}/{}/_doc/{}", self.base_url, index, doc_id))
-            .json(&doc)
+            .post(&format!("{}/{}/_update/{}?refresh=true", self.base_url, index, doc_id))
+            .json(&body)
             .send()
             .await
             .map_err(|e| PdpError::TraceError(format!("Indexation exchange échouée: {}", e)))?;
@@ -444,8 +625,10 @@ impl TraceStore {
             "_source": false
         });
 
+        let pattern = self.index_pattern();
+        let default_idx = self.default_index();
         let search_resp = self.client
-            .post(&format!("{}/{}-*/_search", self.base_url, INDEX_PREFIX))
+            .post(&format!("{}/{}/_search", self.base_url, pattern))
             .json(&search_body)
             .send()
             .await;
@@ -453,7 +636,7 @@ impl TraceStore {
         if let Ok(resp) = search_resp {
             if let Ok(body) = resp.json::<serde_json::Value>().await {
                 if let Some(hit) = body["hits"]["hits"].as_array().and_then(|a| a.first()) {
-                    let index = hit["_index"].as_str().unwrap_or(DEFAULT_INDEX);
+                    let index = hit["_index"].as_str().unwrap_or(&default_idx);
                     let doc_id = hit["_id"].as_str().unwrap_or("");
 
                     if !doc_id.is_empty() {
@@ -469,7 +652,7 @@ impl TraceStore {
                         });
 
                         self.client
-                            .post(&format!("{}/{}/_update/{}", self.base_url, index, doc_id))
+                            .post(&format!("{}/{}/_update/{}?refresh=true", self.base_url, index, doc_id))
                             .json(&update_body)
                             .send()
                             .await
@@ -484,7 +667,7 @@ impl TraceStore {
         }
 
         // Si pas de document trouvé, créer un document minimal dans l'index par défaut
-        self.ensure_index(DEFAULT_INDEX).await?;
+        self.ensure_index(&default_idx).await?;
         let doc = serde_json::json!({
             "exchange_id": Uuid::new_v4().to_string(),
             "flow_id": event.flow_id.to_string(),
@@ -499,7 +682,7 @@ impl TraceStore {
         });
 
         self.client
-            .post(&format!("{}/{}/_doc", self.base_url, DEFAULT_INDEX))
+            .post(&format!("{}/{}/_doc", self.base_url, default_idx))
             .json(&doc)
             .send()
             .await
@@ -516,7 +699,7 @@ impl TraceStore {
         });
 
         let resp = self.client
-            .post(&format!("{}/{}-*/_search", self.base_url, INDEX_PREFIX))
+            .post(&format!("{}/{}/_search", self.base_url, self.index_pattern()))
             .json(&search_body)
             .send()
             .await
@@ -572,7 +755,7 @@ impl TraceStore {
         });
 
         let resp = self.client
-            .post(&format!("{}/{}-*/_search", self.base_url, INDEX_PREFIX))
+            .post(&format!("{}/{}/_search", self.base_url, self.index_pattern()))
             .json(&search_body)
             .send()
             .await
@@ -584,9 +767,9 @@ impl TraceStore {
         Ok(Self::parse_summaries(&body))
     }
 
-    /// Statistiques globales (tous les index pdp-*)
+    /// Statistiques globales (tous les index `{prefix}-*`)
     pub async fn get_stats(&self) -> PdpResult<TraceStats> {
-        let pattern = format!("{}-*", INDEX_PREFIX);
+        let pattern = self.index_pattern();
 
         let total = self.count_query(&pattern, serde_json::json!({ "match_all": {} })).await?;
         let errors = self.count_query(&pattern, serde_json::json!({
@@ -624,8 +807,8 @@ impl TraceStore {
     /// Recherche full-text dans les XML (tous les index ou un SIREN spécifique)
     pub async fn search_xml(&self, query: &str, siren: Option<&str>) -> PdpResult<Vec<ExchangeSummary>> {
         let index = siren
-            .map(|s| Self::index_name(s))
-            .unwrap_or_else(|| format!("{}-*", INDEX_PREFIX));
+            .map(|s| self.index_name(s))
+            .unwrap_or_else(|| self.index_pattern());
 
         let search_body = serde_json::json!({
             "query": {
@@ -654,8 +837,8 @@ impl TraceStore {
     /// Utilisé par le DuplicateCheckProcessor pour vérifier BR-FR-12 et BR-FR-13.
     pub async fn search_by_invoice_key(&self, invoice_key: &str, siren: Option<&str>) -> PdpResult<Vec<ExchangeSummary>> {
         let index = siren
-            .map(|s| Self::index_name(s))
-            .unwrap_or_else(|| format!("{}-*", INDEX_PREFIX));
+            .map(|s| self.index_name(s))
+            .unwrap_or_else(|| self.index_pattern());
 
         let search_body = serde_json::json!({
             "query": { "term": { "invoice_key": invoice_key } },
@@ -683,11 +866,16 @@ impl TraceStore {
         Ok(Self::parse_summaries(&body))
     }
 
-    /// Récupère un document complet par exchange_id
-    pub async fn get_exchange(&self, exchange_id: &str, siren: Option<&str>) -> PdpResult<Option<ExchangeDocument>> {
-        let index = siren
-            .map(|s| Self::index_name(s))
-            .unwrap_or_else(|| format!("{}-*", INDEX_PREFIX));
+    /// Récupère un document complet par exchange_id.
+    ///
+    /// Le paramètre `siren` n'est plus utilisé pour scoper l'index (un même
+    /// exchange_id est unique sur tout le cluster) : la requête se fait
+    /// systématiquement sur le wildcard `pdp-*`. C'est nécessaire pour que la
+    /// page détail d'une facture **reçue** (consultée depuis l'UI du tenant
+    /// acheteur) trouve bien le document, qui est indexé sous l'index du
+    /// vendeur. Le paramètre est conservé pour compatibilité de signature.
+    pub async fn get_exchange(&self, exchange_id: &str, _siren: Option<&str>) -> PdpResult<Option<ExchangeDocument>> {
+        let index = self.index_pattern();
 
         let search_body = serde_json::json!({
             "query": { "term": { "exchange_id": exchange_id } },
@@ -715,6 +903,96 @@ impl TraceStore {
         Ok(None)
     }
 
+    /// Construit la query ES utilisée par `list_exchanges` et `count_exchanges`,
+    /// en fonction des filtres UI (siren, status, plage de dates).
+    fn build_tenant_filter_query(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+    ) -> serde_json::Value {
+        // L'index ES est keyé par seller_siren ; pour qu'un tenant voit *aussi*
+        // les factures où il est acheteur (réception), on filtre sur
+        // `seller_siren = X OR buyer_siren = X` (côté must), avec le wildcard
+        // `pdp-*` côté URL.
+        let tenant_match = serde_json::json!({
+            "bool": {
+                "should": [
+                    { "term": { "seller_siren": siren } },
+                    { "term": { "buyer_siren": siren } }
+                ],
+                "minimum_should_match": 1
+            }
+        });
+        let mut must: Vec<serde_json::Value> = vec![tenant_match];
+        let mut must_not: Vec<serde_json::Value> = Vec::new();
+        // Filtre status logique. Les statuts ES présents sur un flux passent
+        // typiquement REÇU → PARSÉ → VALIDÉ → TRANSFORMÉ → DISTRIBUÉ → ACQUITTÉ.
+        // Le filtre UI regroupe ces statuts en 3 grandes catégories :
+        //  - "ok" : aucun erreur, status terminal réussi (VALIDÉ et au-delà)
+        //  - "erreur" : error_count > 0 OU rejetté/annulé
+        //  - "attente" : pas encore arrivé à un état terminal et pas en erreur
+        //  - autre : term match exact (compatibilité API)
+        let terminal_ok = TERMINAL_OK_STATUSES;
+        let terminal_fail = TERMINAL_FAIL_STATUSES;
+        if let Some(s) = status {
+            match s.to_uppercase().as_str() {
+                "OK" | "DISTRIBUÉ" | "DISTRIBUE" | "VALIDÉ" | "VALIDE" => {
+                    must.push(serde_json::json!({ "term": { "error_count": 0 } }));
+                    must.push(serde_json::json!({ "terms": { "status": terminal_ok } }));
+                }
+                "ERREUR" | "ERROR" => {
+                    must.push(serde_json::json!({
+                        "bool": {
+                            "should": [
+                                { "range": { "error_count": { "gt": 0 } } },
+                                { "terms": { "status": terminal_fail } }
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    }));
+                }
+                "EN_ATTENTE" | "ATTENTE" | "PENDING" => {
+                    must.push(serde_json::json!({ "term": { "error_count": 0 } }));
+                    let mut blocked: Vec<&str> = terminal_ok.to_vec();
+                    blocked.extend(terminal_fail);
+                    must_not.push(serde_json::json!({ "terms": { "status": blocked } }));
+                }
+                other => {
+                    must.push(serde_json::json!({ "term": { "status": other } }));
+                }
+            }
+        }
+        let mut range = serde_json::Map::new();
+        if let Some(f) = from_date { range.insert("gte".into(), serde_json::Value::String(f.into())); }
+        if let Some(t) = to_date { range.insert("lte".into(), serde_json::Value::String(t.into())); }
+        if !range.is_empty() {
+            must.push(serde_json::json!({ "range": { "issue_date": range } }));
+        }
+        let mut bool_q = serde_json::Map::new();
+        bool_q.insert("must".into(), serde_json::Value::Array(must));
+        if !must_not.is_empty() {
+            bool_q.insert("must_not".into(), serde_json::Value::Array(must_not));
+        }
+        serde_json::json!({ "bool": bool_q })
+    }
+
+    /// Compte le nombre total d'exchanges d'un tenant, avec les mêmes filtres
+    /// que `list_exchanges` mais sans pagination. Utilisé par l'UI pour
+    /// afficher le total et le nombre de pages.
+    pub async fn count_exchanges(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+    ) -> PdpResult<i64> {
+        let index = self.index_pattern();
+        let query = self.build_tenant_filter_query(siren, status, from_date, to_date);
+        self.count_query(&index, query).await
+    }
+
     /// Liste paginée d'exchanges pour un tenant, avec filtres optionnels.
     ///
     /// Filtres :
@@ -732,51 +1010,8 @@ impl TraceStore {
         page: usize,
         page_size: usize,
     ) -> PdpResult<Vec<ExchangeSummary>> {
-        let index = Self::index_name(siren);
-        let mut must: Vec<serde_json::Value> = Vec::new();
-        let mut must_not: Vec<serde_json::Value> = Vec::new();
-        // Filtre status logique :
-        //  - "ok" / "DISTRIBUÉ" : flux distribués sans erreur
-        //  - "erreur" / "ERREUR" : error_count > 0 OU status terminal d'échec
-        //  - "attente" / "EN_ATTENTE" : ni distribué ni en erreur
-        //  - autre : term match exact (compatibilité)
-        if let Some(s) = status {
-            match s.to_uppercase().as_str() {
-                "OK" | "DISTRIBUÉ" | "DISTRIBUE" => {
-                    must.push(serde_json::json!({ "term": { "status": "DISTRIBUÉ" } }));
-                    must.push(serde_json::json!({ "term": { "error_count": 0 } }));
-                }
-                "ERREUR" | "ERROR" => {
-                    // error_count > 0 (la dedup et la validation incrémentent ce compteur)
-                    must.push(serde_json::json!({ "range": { "error_count": { "gt": 0 } } }));
-                }
-                "EN_ATTENTE" | "ATTENTE" | "PENDING" => {
-                    must.push(serde_json::json!({ "term": { "error_count": 0 } }));
-                    must_not.push(serde_json::json!({ "term": { "status": "DISTRIBUÉ" } }));
-                }
-                other => {
-                    must.push(serde_json::json!({ "term": { "status": other } }));
-                }
-            }
-        }
-        let mut range = serde_json::Map::new();
-        if let Some(f) = from_date { range.insert("gte".into(), serde_json::Value::String(f.into())); }
-        if let Some(t) = to_date { range.insert("lte".into(), serde_json::Value::String(t.into())); }
-        if !range.is_empty() {
-            must.push(serde_json::json!({ "range": { "issue_date": range } }));
-        }
-        let query = if must.is_empty() && must_not.is_empty() {
-            serde_json::json!({ "match_all": {} })
-        } else {
-            let mut bool_q = serde_json::Map::new();
-            if !must.is_empty() {
-                bool_q.insert("must".into(), serde_json::Value::Array(must));
-            }
-            if !must_not.is_empty() {
-                bool_q.insert("must_not".into(), serde_json::Value::Array(must_not));
-            }
-            serde_json::json!({ "bool": bool_q })
-        };
+        let index = self.index_pattern();
+        let query = self.build_tenant_filter_query(siren, status, from_date, to_date);
 
         let from = page * page_size;
         let body = serde_json::json!({
@@ -803,17 +1038,46 @@ impl TraceStore {
         Ok(Self::parse_summaries(&body))
     }
 
-    /// Récupère la raison sociale d'un tenant via le `seller_name` du premier
-    /// document de l'index `pdp-{siren}`. Utilisé pour afficher le nom commercial
-    /// dans l'UI (ex: "TechConseil SAS — SIREN 123456789") plutôt que le seul SIREN.
+    /// Récupère la raison sociale d'un tenant. On cherche d'abord un document où
+    /// le SIREN apparaît comme **vendeur** (le `seller_name` est alors la raison
+    /// sociale du tenant) ; sinon on retombe sur un document où il est acheteur,
+    /// auquel cas on retourne le `buyer_name`.
     pub async fn get_tenant_name(&self, siren: &str) -> Option<String> {
-        let index = Self::index_name(siren);
+        let index = self.index_pattern();
+        // Tentative 1 : tenant en tant que vendeur → seller_name
         let body = serde_json::json!({
-            "query": { "exists": { "field": "seller_name" } },
+            "query": { "term": { "seller_siren": siren } },
             "size": 1,
             "_source": ["seller_name"],
         });
-        let resp = self.client
+        let resp = self
+            .client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&body)
+            .send()
+            .await
+            .ok()?;
+        if resp.status().is_success() {
+            if let Ok(body) = resp.json::<serde_json::Value>().await {
+                if let Some(name) = body["hits"]["hits"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|h| h.get("_source"))
+                    .and_then(|s| s.get("seller_name"))
+                    .and_then(|s| s.as_str())
+                {
+                    return Some(name.to_string());
+                }
+            }
+        }
+        // Tentative 2 : tenant en tant qu'acheteur → buyer_name
+        let body = serde_json::json!({
+            "query": { "term": { "buyer_siren": siren } },
+            "size": 1,
+            "_source": ["buyer_name"],
+        });
+        let resp = self
+            .client
             .post(&format!("{}/{}/_search", self.base_url, index))
             .json(&body)
             .send()
@@ -827,21 +1091,71 @@ impl TraceStore {
             .as_array()?
             .first()?
             .get("_source")?
-            .get("seller_name")?
+            .get("buyer_name")?
             .as_str()
             .map(String::from)
     }
 
-    /// Stats par tenant (un index pdp-{siren}).
+    /// Stats par tenant : compte les flux où le tenant est **vendeur OU acheteur**
+    /// (donc émissions + réceptions). Requête sur le wildcard `pdp-*` car les
+    /// flux reçus sont indexés dans l'index du fournisseur.
+    ///
+    /// La sémantique des compteurs est alignée sur celle du filtre UI
+    /// `list_exchanges` (cf. [`TERMINAL_OK_STATUSES`] / [`TERMINAL_FAIL_STATUSES`])
+    /// pour qu'un dashboard "Distribués: 14" corresponde *exactement* à la
+    /// liste retournée par `?status=OK`.
     pub async fn get_stats_for_siren(&self, siren: &str) -> PdpResult<TraceStats> {
-        let index = Self::index_name(siren);
-        let total = self.count_query(&index, serde_json::json!({ "match_all": {} })).await?;
-        let errors = self.count_query(&index, serde_json::json!({
-            "range": { "error_count": { "gt": 0 } }
-        })).await?;
-        let distributed = self.count_query(&index, serde_json::json!({
-            "term": { "status": "DISTRIBUÉ" }
-        })).await?;
+        let index = self.index_pattern();
+        let tenant_match = |extra: serde_json::Value| -> serde_json::Value {
+            serde_json::json!({
+                "bool": {
+                    "must": [
+                        {
+                            "bool": {
+                                "should": [
+                                    { "term": { "seller_siren": siren } },
+                                    { "term": { "buyer_siren": siren } }
+                                ],
+                                "minimum_should_match": 1
+                            }
+                        },
+                        extra
+                    ]
+                }
+            })
+        };
+        let total = self
+            .count_query(&index, tenant_match(serde_json::json!({ "match_all": {} })))
+            .await?;
+        // "Erreurs" = error_count > 0 OU status terminal d'échec
+        let errors = self
+            .count_query(
+                &index,
+                tenant_match(serde_json::json!({
+                    "bool": {
+                        "should": [
+                            { "range": { "error_count": { "gt": 0 } } },
+                            { "terms": { "status": TERMINAL_FAIL_STATUSES } }
+                        ],
+                        "minimum_should_match": 1
+                    }
+                })),
+            )
+            .await?;
+        // "Distribués" (au sens UI/filtre OK) = error_count = 0 ET status terminal OK
+        let distributed = self
+            .count_query(
+                &index,
+                tenant_match(serde_json::json!({
+                    "bool": {
+                        "must": [
+                            { "term": { "error_count": 0 } },
+                            { "terms": { "status": TERMINAL_OK_STATUSES } }
+                        ]
+                    }
+                })),
+            )
+            .await?;
         Ok(TraceStats {
             total_exchanges: total,
             total_errors: errors,
@@ -863,7 +1177,7 @@ impl TraceStore {
         from_date: &str,
         to_date: &str,
     ) -> PdpResult<Vec<ExchangeDocument>> {
-        let index = Self::index_name(siren);
+        let index = self.index_name(siren);
 
         let search_body = serde_json::json!({
             "query": {
@@ -914,7 +1228,7 @@ impl TraceStore {
     /// Liste tous les index (= tous les SIREN connus)
     pub async fn list_sirens(&self) -> PdpResult<Vec<String>> {
         let resp = self.client
-            .get(&format!("{}/_cat/indices/{}-*?format=json", self.base_url, INDEX_PREFIX))
+            .get(&format!("{}/_cat/indices/{}?format=json", self.base_url, self.index_pattern()))
             .send()
             .await
             .map_err(|e| PdpError::TraceError(format!("Liste index échouée: {}", e)))?;
@@ -924,11 +1238,11 @@ impl TraceStore {
 
         let mut sirens = Vec::new();
         if let Some(indices) = body.as_array() {
-            let prefix = format!("{}-", INDEX_PREFIX);
+            let prefix = format!("{}-", self.index_prefix);
             for idx in indices {
                 if let Some(name) = idx["index"].as_str() {
                     if let Some(siren) = name.strip_prefix(&prefix) {
-                        if siren != "unknown" {
+                        if siren != UNKNOWN_SUFFIX {
                             sirens.push(siren.to_string());
                         }
                     }
@@ -939,20 +1253,25 @@ impl TraceStore {
         Ok(sirens)
     }
 
-    /// Supprime tous les index pdp-* (pour les tests)
-    /// Supprime tous les indices `pdp-*`.
+    /// Supprime tous les indices `{prefix}-*` de **ce store**.
     ///
-    /// **Garde-fou** : ne fait rien si la variable d'env
-    /// `PDP_TRACE_ALLOW_CLEANUP=1` n'est pas définie. Cela évite que
-    /// `cargo test --workspace` n'efface les indices d'une démo en cours
-    /// quand les tests partagent le même Elasticsearch que la démo.
+    /// **Double garde-fou contre la perte de données démo** :
+    ///
+    /// 1. Le préfixe est par instance : un store de test (`for_test()`)
+    ///    a un préfixe unique (`pdp-itest-{uuid}-*`) et ne peut donc PAS
+    ///    supprimer les indices `pdp-{siren}` de la démo.
+    /// 2. Si le préfixe est le préfixe de production (`pdp`), la variable
+    ///    d'env `PDP_TRACE_ALLOW_CLEANUP=1` est requise. Sinon le cleanup
+    ///    est ignoré.
     ///
     /// Les tests internes utilisent [`Self::force_cleanup`] qui ignore
-    /// le garde-fou.
+    /// uniquement le garde-fou env var (mais reste scoped au préfixe du store).
     pub async fn cleanup(&self) -> PdpResult<()> {
-        if std::env::var("PDP_TRACE_ALLOW_CLEANUP").as_deref() != Ok("1") {
+        if self.index_prefix == INDEX_PREFIX
+            && std::env::var("PDP_TRACE_ALLOW_CLEANUP").as_deref() != Ok("1")
+        {
             tracing::debug!(
-                "TraceStore::cleanup() ignoré — set PDP_TRACE_ALLOW_CLEANUP=1 pour activer"
+                "TraceStore::cleanup() ignoré sur préfixe production — set PDP_TRACE_ALLOW_CLEANUP=1 pour activer"
             );
             return Ok(());
         }
@@ -960,11 +1279,12 @@ impl TraceStore {
     }
 
     /// Cleanup inconditionnel — usage interne tests uniquement.
-    /// Supprime tous les indices `pdp-*` sans vérifier l'env var.
+    /// Supprime tous les indices `{prefix}-*` (préfixe de **ce** store) sans
+    /// vérifier l'env var. **Ne touche jamais** les indices d'autres préfixes.
     #[doc(hidden)]
     pub async fn force_cleanup(&self) -> PdpResult<()> {
         let _ = self.client
-            .delete(&format!("{}/{}-*", self.base_url, INDEX_PREFIX))
+            .delete(&format!("{}/{}", self.base_url, self.index_pattern()))
             .send()
             .await;
         Ok(())
@@ -1044,10 +1364,12 @@ mod tests {
 
     #[test]
     fn test_index_name() {
-        assert_eq!(TraceStore::index_name("123456789"), "pdp-123456789");
-        assert_eq!(TraceStore::index_name("12345678901234"), "pdp-123456789");
-        assert_eq!(TraceStore::index_name("123"), "pdp-123");
-        assert_eq!(TraceStore::index_name(""), "pdp-unknown");
+        // Utilise un store noop (préfixe par défaut "pdp") pour tester index_name
+        let store = TraceStore::noop();
+        assert_eq!(store.index_name("123456789"), "pdp-123456789");
+        assert_eq!(store.index_name("12345678901234"), "pdp-123456789");
+        assert_eq!(store.index_name("123"), "pdp-123");
+        assert_eq!(store.index_name(""), "pdp-unknown");
     }
 
     #[test]

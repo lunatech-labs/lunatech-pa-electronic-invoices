@@ -70,14 +70,15 @@ impl Processor for TraceProcessor {
             event = event.with_invoice_key(key);
         }
 
-        // Enregistrer l'événement
-        if let Err(e) = self.store.record_event(&event).await {
-            tracing::error!(error = %e, "Erreur d'enregistrement de l'événement de trace");
-        }
-
-        // Enregistrer l'état de l'exchange
+        // L'ordre est important : on enregistre d'abord le document
+        // d'exchange (upsert avec arrays initialisées), puis on append
+        // l'événement. Inversé, le fallback de `record_event` créerait
+        // un doc orphelin avec un exchange_id aléatoire.
         if let Err(e) = self.store.record_exchange(&exchange).await {
             tracing::error!(error = %e, "Erreur d'enregistrement de l'exchange");
+        }
+        if let Err(e) = self.store.record_event(&event).await {
+            tracing::error!(error = %e, "Erreur d'enregistrement de l'événement de trace");
         }
 
         tracing::debug!(

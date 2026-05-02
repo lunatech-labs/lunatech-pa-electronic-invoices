@@ -11,12 +11,22 @@
 //! - **Unicité du nom** : détection de doublons (même nom déjà traité dans le même poll)
 
 use async_trait::async_trait;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use crate::error::{PdpError, PdpResult};
 use crate::exchange::Exchange;
 use crate::processor::Processor;
+
+/// Fenêtre de déduplication par nom de fichier (REC-05).
+///
+/// Au-delà de cette durée, un même nom de fichier reçu à nouveau n'est plus
+/// considéré comme un doublon de batch. Cela évite les faux positifs lorsqu'un
+/// même fichier de démo est ré-injecté plusieurs heures (ou jours) plus tard
+/// pendant le développement, tout en gardant la détection de batch (rafale
+/// de fichiers identiques en quelques secondes).
+const DEDUP_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Taille maximale d'un fichier facture : 100 Mo (BR-FR-19)
 const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
@@ -40,7 +50,10 @@ pub struct ReceptionCheck {
 
 /// Effectue tous les contrôles de réception sur un exchange brut.
 /// Retourne la liste des contrôles échoués (vide = tout OK).
-pub fn check_reception(exchange: &Exchange, seen_filenames: Option<&HashSet<String>>) -> Vec<ReceptionCheck> {
+///
+/// Si `seen_filenames` est fourni, on vérifie REC-05 (doublon de nom dans le
+/// batch courant) sur la base de l'ensemble des noms déjà vus.
+pub fn check_reception(exchange: &Exchange, seen_filenames: Option<&std::collections::HashSet<String>>) -> Vec<ReceptionCheck> {
     let mut failures = Vec::new();
 
     let filename = exchange.source_filename.as_deref().unwrap_or("");
@@ -140,8 +153,11 @@ pub struct ReceptionProcessor {
     /// Si true, un contrôle échoué provoque une erreur fatale (exchange rejeté).
     /// Si false, les erreurs sont ajoutées à l'exchange mais le traitement continue.
     strict: bool,
-    /// Noms de fichiers déjà vus (pour la détection de doublons)
-    seen_filenames: Mutex<HashSet<String>>,
+    /// Noms de fichiers déjà vus, avec horodatage. Un nom est considéré comme
+    /// doublon (REC-05) uniquement s'il a été vu dans la fenêtre `DEDUP_WINDOW`.
+    /// Au-delà, l'entrée est expirée et n'est plus un faux positif lors de
+    /// re-soumissions tardives (par ex. populate démo après quelques minutes).
+    seen_filenames: Mutex<HashMap<String, Instant>>,
 }
 
 impl ReceptionProcessor {
@@ -149,7 +165,7 @@ impl ReceptionProcessor {
     pub fn strict() -> Self {
         Self {
             strict: true,
-            seen_filenames: Mutex::new(HashSet::new()),
+            seen_filenames: Mutex::new(HashMap::new()),
         }
     }
 
@@ -157,7 +173,7 @@ impl ReceptionProcessor {
     pub fn permissive() -> Self {
         Self {
             strict: false,
-            seen_filenames: Mutex::new(HashSet::new()),
+            seen_filenames: Mutex::new(HashMap::new()),
         }
     }
 
@@ -176,13 +192,19 @@ impl Processor for ReceptionProcessor {
     async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
         let filename = exchange.source_filename.clone().unwrap_or_default();
 
-        // Vérifier les doublons avec le set partagé
-        let seen = self.seen_filenames.lock().unwrap().clone();
+        // Calcule l'ensemble des noms vus encore valides (dans la fenêtre)
+        // et purge les entrées expirées.
+        let now = Instant::now();
+        let seen: std::collections::HashSet<String> = {
+            let mut map = self.seen_filenames.lock().unwrap();
+            map.retain(|_, ts| now.duration_since(*ts) < DEDUP_WINDOW);
+            map.keys().cloned().collect()
+        };
         let failures = check_reception(&exchange, Some(&seen));
 
-        // Enregistrer le nom dans le set (même si invalide, pour détecter les doublons suivants)
+        // Enregistrer (ou rafraîchir) le nom avec son horodatage actuel
         if !filename.is_empty() {
-            self.seen_filenames.lock().unwrap().insert(filename.clone());
+            self.seen_filenames.lock().unwrap().insert(filename.clone(), now);
         }
 
         if failures.is_empty() {
@@ -238,6 +260,7 @@ impl Processor for ReceptionProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     // ===== Tests unitaires check_reception =====
 
