@@ -172,14 +172,17 @@ curl http://localhost:8080/metrics
 curl http://localhost:8080/health
 ```
 
-**Endpoints :**
-- `POST /v1/flows` — Dépôt de flux (multipart, auth Bearer)
+**Endpoints principaux :**
+- `POST /v1/flows` — Dépôt de flux (multipart, auth Bearer, codes 202/400/401/413/429)
 - `GET /v1/flows/{flowId}` — Détail d'un flux
 - `GET /v1/flows?status=error` — Liste des flux en erreur
 - `GET /v1/stats` — Statistiques agrégées
+- `POST/GET/PATCH/DELETE /v1/webhooks[/{id}]` — Abonnements webhook (AFNOR §5.4)
+- `GET /v1/siren/code-insee:{siren}`, `/v1/siret/...`, `/v1/routing-code/...` — Directory Service
 - `GET /metrics` — Métriques Prometheus
-- `GET /health` — Healthcheck
-- `POST /v1/webhooks/ppf` — Webhook PPF (CDV entrants)
+- `GET /v1/healthcheck` — Healthcheck
+
+**Documentation complète + exemples curl** : [docs/http-api.md](docs/http-api.md)
 
 ## Multi-tenancy
 
@@ -212,7 +215,9 @@ token_tenant_map:
 
 | Document | Contenu |
 |----------|---------|
-| [docs/api.md](docs/api.md) | API de conversion, exemples par format, pièces jointes BG-24 |
+| [docs/http-api.md](docs/http-api.md) | **API HTTP REST** : tous les endpoints AFNOR Flow/Directory + webhooks, exemples curl, codes HTTP |
+| [docs/api.md](docs/api.md) | API Rust de conversion, exemples par format, pièces jointes BG-24 |
+| [docs/webhooks.md](docs/webhooks.md) | Webhooks AFNOR XP Z12-013 §5.4 : événements, sécurité HMAC, retry, OAUTH2 |
 | [docs/performance.md](docs/performance.md) | Benchmarks Criterion (parsing, validation, transformation, pipeline) |
 | [docs/facturx.md](docs/facturx.md) | Pipeline Factur-X PDF/A-3a, validation |
 | [docs/tracabilite.md](docs/tracabilite.md) | Traçabilité Elasticsearch : architecture, index par SIREN, API |

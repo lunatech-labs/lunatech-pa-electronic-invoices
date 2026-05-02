@@ -3,22 +3,23 @@
 ## Lancer les tests
 
 ```bash
-# Tous les tests (897+ tests)
+# Tous les tests (1052 tests workspace, 9 ignored)
 cargo test --workspace
 
 # Tests par crate
-cargo test -p pdp-core         #  91 tests (pipeline, routing, model, archive ZIP/tar.gz, reception)
-cargo test -p pdp-invoice      # 125 tests (parsing UBL/CII/Factur-X + validation metier)
-cargo test -p pdp-validate     #  24 tests (XSD + Schematron EN16931 + BR-FR)
-cargo test -p pdp-cdar         # 122 tests (generation + parsing + reception CDV + fixtures XP Z12-012)
+cargo test -p pdp-core         # 124 tests (pipeline, routing, model, archives, reception)
+cargo test -p pdp-invoice      # 129 tests (parsing UBL/CII/Factur-X + validation metier)
+cargo test -p pdp-validate     #  26 tests (XSD + Schematron EN16931 + BR-FR)
+cargo test -p pdp-cdar         # 174 tests (generation/parsing CDV + fixtures XP Z12-012)
 cargo test -p pdp-ereporting   #  88 tests (transactions + paiements + XML)
-cargo test -p pdp-peppol       #  60 tests (Peppol BIS 3.0 + SMP + SML)
-cargo test -p pdp-client       #  66 tests (PPF nommage/tar.gz + AFNOR + annuaire)
-cargo test -p pdp-sftp         #   8 tests (transfert SFTP)
-cargo test -p pdp-config       #  17 tests (YAML, multi-tenant)
-cargo test -p pdp-trace        #   6 tests (Elasticsearch, deduplication)
-cargo test -p pdp-transform    # 183 tests (UBL<->CII<->Factur-X<->PDF + profils + pieces jointes + Typst)
-cargo test -p pdp-app          #  34 tests (serveur HTTP, auth, webhooks, e2e)
+cargo test -p pdp-peppol       #  62 tests (Peppol BIS 3.0 + SMP + SML)
+cargo test -p pdp-client       #  99 tests (PPF tar.gz + AFNOR + annuaire + erreurs HTTP)
+cargo test -p pdp-sftp         #   9 tests (transfert SFTP)
+cargo test -p pdp-config       #  26 tests (YAML, multi-tenant)
+cargo test -p pdp-trace        #   7 tests (Elasticsearch, deduplication)
+cargo test -p pdp-transform    # 201 tests (UBL<->CII<->Factur-X<->PDF + Typst)
+cargo test -p pdp-app          #  83 tests (serveur HTTP, auth, webhooks, codes 413/408/429, e2e)
+cargo test -p pdp-annuaire     #  24 tests (parser F14, store Postgres, validation G1.63)
 
 # Tests avec sortie detaillee
 cargo test --workspace -- --nocapture
