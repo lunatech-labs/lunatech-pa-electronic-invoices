@@ -39,6 +39,7 @@ Voir [§4](#4-codes-irr-pièces-jointes-cdv-501) — bloqué par : pas encore de
 
 ### Sécurité / multi-tenant
 - Voir [§9](#9-autorisation-et-déclaration-des-tenants) — habilitation, mandat signé, F13 onboarding
+- Voir [§9ter](#9ter-authentification-sécurité--isolation-tenant) — auth UI/API, RBAC, isolation tenant, audit log
 - Voir [§10](#10-rate-limiting-http-) — rate limit par tenant
 - Vérification clé serveur SSH en prod (actuellement désactivée en dev)
 
@@ -426,6 +427,90 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
       désactivée en dev pour faciliter les tests)
 - [ ] Configuration `known_hosts` par tenant ou globale
 - [ ] Documentation procédure de rotation des clés
+
+### 9ter. Authentification, sécurité & isolation tenant
+
+L'UI `/ui/*` est actuellement **publique** (pas de Bearer requis, voir
+[docs/ui.md](ui.md)) et un utilisateur peut consulter n'importe quel
+SIREN simplement en passant `?siren=...`. C'est acceptable pour la démo
+locale ou un déploiement « admin only » derrière un reverse-proxy
+authentifié, mais pas pour un usage multi-tenant en prod.
+
+#### Authentification utilisateur
+
+- [ ] Authentification web (login + session) sur `/ui/*` — actuellement
+      seuls les endpoints `/v1/*` supportent un Bearer optionnel. Choix
+      à faire : OIDC/OAuth2 (Keycloak, Auth0, FranceConnect+ Pro pour les
+      assujettis) vs login local (email + mot de passe + 2FA TOTP).
+- [ ] Session côté serveur (cookie HttpOnly+Secure+SameSite=Lax) ou JWT
+      court avec refresh — éviter le LocalStorage pour le token.
+- [ ] Logout + invalidation côté serveur, durée de session configurable.
+- [ ] CSRF token sur les actions POST (Phase 2 : soumission factures,
+      émission CDV).
+- [ ] Headers de sécurité : `Content-Security-Policy`,
+      `X-Frame-Options: DENY`, `Strict-Transport-Security`,
+      `Referrer-Policy: strict-origin`.
+
+#### Modèle d'autorisation (RBAC)
+
+- [ ] **Rôles** :
+  - `tenant_user` — voit/édite uniquement les flux où son SIREN est
+    `seller_siren` OR `buyer_siren`. Ne voit **jamais** les flux d'un
+    autre tenant.
+  - `tenant_admin` — comme `tenant_user` + gestion des utilisateurs et
+    webhooks de son tenant.
+  - `pdp_operator` — accès lecture multi-tenant (support, debug). Doit
+    être journalisé (audit log obligatoire pour toute consultation
+    cross-tenant).
+  - `pdp_admin` — superuser (configuration globale, rotation clés,
+    annuaire).
+- [ ] **Liaison utilisateur ↔ SIREN(s)** : un user peut être attaché à 1
+      ou N tenants (ex. comptable externe gérant plusieurs clients). La
+      session porte la liste des SIREN autorisés ; le sélecteur de
+      tenant n'expose que ceux-là.
+- [ ] **Permissions spéciales** : un user peut recevoir un accès cross-
+      tenant explicite, limité dans le temps, avec consentement du
+      tenant cible (mandat signé, cf §9). Tracé dans l'audit log avec
+      la raison (incident, audit légal, support).
+
+#### Isolation effective des données
+
+- [ ] **Filtre serveur obligatoire** : les handlers UI doivent rejeter
+      tout `?siren=X` qui n'est pas dans la liste des SIREN de la
+      session. Aujourd'hui le filtre est purement *côté presentation*
+      (le SIREN est lu depuis la query string) — un user peut taper
+      n'importe quoi dans l'URL.
+- [ ] **Vérification au niveau du store** : `TraceBackend` devrait
+      prendre la liste des SIREN autorisés en paramètre (ou via un
+      `SecurityContext` injecté) et garantir qu'aucune requête ES ne
+      retourne des docs hors scope. Belt-and-braces vs un seul check
+      handler.
+- [ ] **Cross-tenant queries verrouillées** : `get_stats()` /
+      `get_error_flows()` (qui ratissent `pdp-*`) ne doivent être
+      accessibles qu'aux rôles `pdp_operator` / `pdp_admin`.
+- [ ] **API HTTP** : Bearer token doit aussi porter une identité +
+      permissions (actuellement `bearer_tokens: Vec<String>` est une
+      simple allowlist sans notion de tenant — un client peut appeler
+      `/v1/flows?siren=X` pour n'importe quel X).
+
+#### Audit & journalisation
+
+- [ ] Audit log structuré (JSON) pour chaque accès UI/API : timestamp,
+      user, role, tenant cible, action, ressource, IP, status.
+- [ ] Rétention conforme aux exigences PPF (5 ans recommandé pour les
+      accès aux données fiscales).
+- [ ] Endpoint `/v1/audit/search` réservé `pdp_admin` pour investiguer.
+- [ ] Alertes sur patterns suspects (énumération de SIREN, accès
+      massifs hors heures, échecs d'authentification répétés).
+
+#### Secrets & configuration
+
+- [ ] Plus de bearer tokens en clair dans `config.yaml` — utiliser un
+      secret manager (HashiCorp Vault, AWS Secrets Manager, ou même
+      `sops`-encrypted YAML).
+- [ ] Hash + salt + KDF (argon2) pour les mots de passe locaux.
+- [ ] Rotation des clés JWT, des secrets HMAC webhook, des credentials
+      SFTP — procédures documentées et testables.
 
 ### 10. Rate limiting HTTP ✅
 
