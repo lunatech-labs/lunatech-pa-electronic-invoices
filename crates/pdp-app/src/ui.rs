@@ -332,10 +332,19 @@ pub async fn handle_dashboard(
                 total_distributed: 0,
             });
             let pending = stats.total_exchanges - stats.total_distributed - stats.total_errors;
+            let tenant_name = store.get_tenant_name(s).await;
+            let header_title = match tenant_name.as_deref() {
+                Some(name) => format!(
+                    r#"{name} <small style="font-weight:400;color:#666">— SIREN {siren}</small>"#,
+                    name = html_escape(name),
+                    siren = html_escape(s),
+                ),
+                None => format!("Tenant : {}", html_escape(s)),
+            };
             format!(
                 r#"
 <div class="card">
-    <h2>Tenant : {siren}</h2>
+    <h2>{title}</h2>
     <p style="color:#666">Toutes les valeurs proviennent de l'index Elasticsearch <code>pdp-{siren}</code>.</p>
 </div>
 <div class="kpi-grid">
@@ -364,6 +373,7 @@ pub async fn handle_dashboard(
     <p><a href="/metrics">→ Métriques Prometheus</a></p>
 </div>
 "#,
+                title = header_title,
                 siren = html_escape(s),
                 total = stats.total_exchanges,
                 distributed = stats.total_distributed,
@@ -450,6 +460,16 @@ pub async fn handle_flows_list(
                 }
                 exchanges = filtered;
             }
+
+            let tenant_name = store.get_tenant_name(s).await;
+            let list_title = match tenant_name.as_deref() {
+                Some(name) => format!(
+                    r#"{name} <small style="font-weight:400;color:#666">— SIREN {siren}</small>"#,
+                    name = html_escape(name),
+                    siren = html_escape(s),
+                ),
+                None => format!("Factures du tenant {}", html_escape(s)),
+            };
 
             let filters_form = format!(
                 r#"<form method="get" action="/ui/flows" class="filters">
@@ -543,7 +563,7 @@ pub async fn handle_flows_list(
 
             format!(
                 r#"<div class="card">
-    <h2>Factures du tenant {siren}</h2>
+    <h2>{title}</h2>
     <div class="tenant-info">
         L'index Elasticsearch <code>pdp-{siren}</code> regroupe toutes les
         factures dont le <strong>vendeur a ce SIREN</strong>. Le marqueur
@@ -559,6 +579,7 @@ pub async fn handle_flows_list(
     </table>
     {pagination}
 </div>"#,
+                title = list_title,
                 siren = html_escape(s),
                 filters = filters_form,
                 rows = rows,

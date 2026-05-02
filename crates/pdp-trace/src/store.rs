@@ -774,6 +774,35 @@ impl TraceStore {
         Ok(Self::parse_summaries(&body))
     }
 
+    /// Récupère la raison sociale d'un tenant via le `seller_name` du premier
+    /// document de l'index `pdp-{siren}`. Utilisé pour afficher le nom commercial
+    /// dans l'UI (ex: "TechConseil SAS — SIREN 123456789") plutôt que le seul SIREN.
+    pub async fn get_tenant_name(&self, siren: &str) -> Option<String> {
+        let index = Self::index_name(siren);
+        let body = serde_json::json!({
+            "query": { "exists": { "field": "seller_name" } },
+            "size": 1,
+            "_source": ["seller_name"],
+        });
+        let resp = self.client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&body)
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let body: serde_json::Value = resp.json().await.ok()?;
+        body["hits"]["hits"]
+            .as_array()?
+            .first()?
+            .get("_source")?
+            .get("seller_name")?
+            .as_str()
+            .map(String::from)
+    }
+
     /// Stats par tenant (un index pdp-{siren}).
     pub async fn get_stats_for_siren(&self, siren: &str) -> PdpResult<TraceStats> {
         let index = Self::index_name(siren);
