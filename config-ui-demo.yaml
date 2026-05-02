@@ -1,0 +1,34 @@
+# Configuration minimale pour démo UI Phase 1.
+# Pas de PostgreSQL ni Elasticsearch requis — le serveur démarre quand même
+# et les pages /ui affichent des messages de fallback propres.
+
+pdp:
+  id: PDP-DEMO-UI
+  name: "Ferrite Démo UI"
+  matricule: "0001"
+  siret: "12345678901234"
+
+elasticsearch:
+  url: "http://localhost:9200"
+
+# Pas de section `database` — désactive l'annuaire PostgreSQL
+
+validation:
+  specs_dir: ./specs
+  xsd_enabled: false
+  en16931_enabled: false
+  br_fr_enabled: false
+
+http_server:
+  host: "127.0.0.1"
+  port: 8080
+  # Pas de bearer_tokens : auth désactivée pour la démo
+
+routes: []
+
+polling:
+  interval_secs: 60
+
+logging:
+  format: text
+  level: info

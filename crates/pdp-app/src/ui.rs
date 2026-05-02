@@ -156,6 +156,17 @@ dl.kv dd { color: #1a1a2e; }
     border-radius: 6px;
     margin-bottom: 1.5rem;
 }
+.dl-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.dl-btn {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background: #16213e;
+    color: white !important;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+.dl-btn:hover { background: #1a1a2e; text-decoration: none; }
 "#;
 
 fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> String {
@@ -319,6 +330,8 @@ pub struct FlowsListQuery {
     pub from: Option<String>,
     pub to: Option<String>,
     pub page: Option<usize>,
+    /// `emises` (le tenant est vendeur) / `recues` (le tenant est acheteur) / vide = toutes
+    pub direction: Option<String>,
 }
 
 pub async fn handle_flows_list(
@@ -336,7 +349,7 @@ pub async fn handle_flows_list(
             };
             let page = q.page.unwrap_or(0);
             let page_size = 50;
-            let exchanges = store
+            let mut exchanges = store
                 .list_exchanges(
                     s,
                     q.status.as_deref(),
@@ -348,9 +361,35 @@ pub async fn handle_flows_list(
                 .await
                 .unwrap_or_default();
 
+            // Filtre direction (côté serveur, après ES — sur seller_siren / buyer_siren)
+            // emises = le tenant est vendeur ; recues = le tenant est acheteur
+            // Note : le ExchangeSummary ne contient pas seller_siren / buyer_siren.
+            // On re-fetch ces données depuis ExchangeDocument complet au cas par cas
+            // si direction est demandée. Pour limiter le coût, on charge en parallèle.
+            if let Some(dir) = q.direction.as_deref() {
+                let mut filtered = Vec::with_capacity(exchanges.len());
+                for ex in exchanges.into_iter() {
+                    let doc = store.get_exchange(&ex.exchange_id, Some(s)).await.ok().flatten();
+                    let keep = match (dir, doc.as_ref()) {
+                        ("emises", Some(d)) => d.seller_siren.as_deref() == Some(s),
+                        ("recues", Some(d)) => d.buyer_siren.as_deref() == Some(s),
+                        _ => true,
+                    };
+                    if keep {
+                        filtered.push(ex);
+                    }
+                }
+                exchanges = filtered;
+            }
+
             let filters_form = format!(
                 r#"<form method="get" action="/ui/flows" class="filters">
     <input type="hidden" name="siren" value="{siren}">
+    <select name="direction">
+        <option value="" {sel_all}>— Toutes directions —</option>
+        <option value="emises" {sel_emises}>Émises (vendeur)</option>
+        <option value="recues" {sel_recues}>Reçues (acheteur)</option>
+    </select>
     <select name="status">
         <option value="">— Tous les statuts —</option>
         <option value="DISTRIBUÉ" {sel_dist}>Distribués</option>
@@ -362,6 +401,9 @@ pub async fn handle_flows_list(
     <button type="submit">Filtrer</button>
 </form>"#,
                 siren = html_escape(s),
+                sel_all = if q.direction.is_none() || q.direction.as_deref() == Some("") { "selected" } else { "" },
+                sel_emises = if q.direction.as_deref() == Some("emises") { "selected" } else { "" },
+                sel_recues = if q.direction.as_deref() == Some("recues") { "selected" } else { "" },
                 sel_dist = if q.status.as_deref() == Some("DISTRIBUÉ") { "selected" } else { "" },
                 sel_err = if q.status.as_deref() == Some("ERREUR") { "selected" } else { "" },
                 sel_pending = if q.status.as_deref() == Some("EN_ATTENTE") { "selected" } else { "" },
@@ -399,7 +441,7 @@ pub async fn handle_flows_list(
                     .join("\n")
             };
 
-            let pagination = build_pagination(s, q.status.as_deref(), q.from.as_deref(), q.to.as_deref(), page, exchanges.len(), page_size);
+            let pagination = build_pagination(s, q.status.as_deref(), q.from.as_deref(), q.to.as_deref(), q.direction.as_deref(), page, exchanges.len(), page_size);
 
             format!(
                 r#"<div class="card">
@@ -429,6 +471,7 @@ fn build_pagination(
     status: Option<&str>,
     from: Option<&str>,
     to: Option<&str>,
+    direction: Option<&str>,
     page: usize,
     page_count: usize,
     page_size: usize,
@@ -438,6 +481,7 @@ fn build_pagination(
         if let Some(st) = status { s.push_str(&format!("&status={}", st)); }
         if let Some(f) = from { s.push_str(&format!("&from={}", f)); }
         if let Some(t) = to { s.push_str(&format!("&to={}", t)); }
+        if let Some(d) = direction { if !d.is_empty() { s.push_str(&format!("&direction={}", d)); } }
         s
     };
     let prev = if page > 0 {
@@ -521,6 +565,8 @@ fn format_size(bytes: usize) -> String {
 fn render_attachments(
     attachments: &[pdp_core::model::InvoiceAttachment],
     fallback_filenames: &[String],
+    flow_id: &str,
+    siren: &str,
 ) -> String {
     // Cas dégradé : pas de PJ extraites du raw_xml, on affiche au moins les noms indexés
     if attachments.is_empty() {
@@ -540,7 +586,8 @@ fn render_attachments(
 
     let rows: Vec<String> = attachments
         .iter()
-        .map(|a| {
+        .enumerate()
+        .map(|(idx, a)| {
             let filename = a.filename.as_deref().unwrap_or("—");
             let id = a.id.as_deref().unwrap_or("—");
             let description = a.description.as_deref().unwrap_or("");
@@ -553,6 +600,16 @@ fn render_attachments(
                 ),
                 _ => "—".to_string(),
             };
+            let download = if a.embedded_content.is_some() {
+                format!(
+                    r#"<a href="/ui/flows/{flow_id}/download/attachment?siren={siren}&idx={idx}" title="Télécharger">⬇️</a>"#,
+                    flow_id = html_escape(flow_id),
+                    siren = html_escape(siren),
+                    idx = idx,
+                )
+            } else {
+                "—".to_string()
+            };
             format!(
                 r#"<tr>
     <td><code>{id}</code></td>
@@ -560,12 +617,14 @@ fn render_attachments(
     <td>{description}</td>
     <td>{mime}</td>
     <td>{size}</td>
+    <td>{download}</td>
 </tr>"#,
                 id = html_escape(id),
                 filename = html_escape(filename),
                 description = html_escape(description),
                 mime = html_escape(mime),
                 size = size,
+                download = download,
             )
         })
         .collect();
@@ -573,7 +632,7 @@ fn render_attachments(
     format!(
         r#"<table>
     <thead>
-        <tr><th>ID</th><th>Fichier</th><th>Description</th><th>MIME</th><th>Taille</th></tr>
+        <tr><th>ID</th><th>Fichier</th><th>Description</th><th>MIME</th><th>Taille</th><th></th></tr>
     </thead>
     <tbody>{}</tbody>
 </table>
@@ -729,8 +788,36 @@ fn render_flow_detail(
             format!(
                 r#"<div class="card"><h2>Pièces jointes{count}</h2>{body}</div>"#,
                 count = count_label,
-                body = render_attachments(&attachments, &doc.attachment_filenames),
+                body = render_attachments(&attachments, &doc.attachment_filenames, flow_id, siren),
             )
+        }
+    };
+
+    // Liens de téléchargement (XML brut, PDF Factur-X)
+    let downloads = match full {
+        None => String::new(),
+        Some(doc) => {
+            let mut links = Vec::new();
+            if doc.raw_xml.is_some() {
+                links.push(format!(
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/xml?siren={s}">⬇️ XML brut</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren),
+                ));
+            }
+            if doc.raw_pdf_base64.is_some() {
+                links.push(format!(
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/pdf?siren={s}">⬇️ PDF Factur-X</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren),
+                ));
+            }
+            if links.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    r#"<div class="card"><h2>Téléchargements</h2><div class="dl-row">{}</div></div>"#,
+                    links.join(" ")
+                )
+            }
         }
     };
 
@@ -738,14 +825,146 @@ fn render_flow_detail(
         r#"<p><a href="/ui/flows?siren={siren}">← Retour à la liste</a></p>
 <div class="card"><h2>Métadonnées</h2>{metadata}</div>
 {errors}
+{downloads}
 {attachments}
 <div class="card"><h2>Timeline du pipeline</h2>{timeline}</div>"#,
         siren = html_escape(siren),
         metadata = metadata,
         errors = errors,
+        downloads = downloads,
         attachments = attachments_section,
         timeline = timeline,
     )
+}
+
+// ============================================================
+// Téléchargements (XML brut, PDF Factur-X, PJ)
+// ============================================================
+
+/// Récupère le `ExchangeDocument` complet depuis le flow_id (ou exchange_id).
+/// Helper interne aux handlers de téléchargement.
+async fn lookup_doc(
+    state: &AppState,
+    siren: &str,
+    flow_id: &str,
+) -> Option<pdp_trace::store::ExchangeDocument> {
+    let store = state.trace_store.as_ref()?;
+    // Le flow_id peut être un flow_id ou un exchange_id
+    let summaries = store.list_exchanges(siren, None, None, None, 0, 200).await.ok()?;
+    let summary = summaries
+        .iter()
+        .find(|s| s.flow_id == flow_id || s.exchange_id == flow_id)?;
+    store.get_exchange(&summary.exchange_id, Some(siren)).await.ok().flatten()
+}
+
+/// GET /ui/flows/{flowId}/download/xml
+/// Télécharge le `raw_xml` brut (UBL/CII).
+pub async fn handle_download_xml(
+    State(state): State<Arc<AppState>>,
+    Path(flow_id): Path<String>,
+    Query(q): Query<FlowDetailQuery>,
+) -> impl IntoResponse {
+    let siren = match q.siren.as_deref() {
+        Some(s) => s,
+        None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
+    };
+    let doc = match lookup_doc(&state, siren, &flow_id).await {
+        Some(d) => d,
+        None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
+    };
+    let xml = match doc.raw_xml {
+        Some(x) => x,
+        None => return (StatusCode::NOT_FOUND, "raw_xml absent (Factur-X ou non indexé)").into_response(),
+    };
+    let filename = doc.source_filename.unwrap_or_else(|| format!("{}.xml", flow_id));
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "application/xml; charset=utf-8".parse().unwrap());
+    if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
+        headers.insert("content-disposition", v);
+    }
+    (StatusCode::OK, headers, xml).into_response()
+}
+
+/// GET /ui/flows/{flowId}/download/pdf
+/// Télécharge le PDF Factur-X (décodé du `raw_pdf_base64`).
+pub async fn handle_download_pdf(
+    State(state): State<Arc<AppState>>,
+    Path(flow_id): Path<String>,
+    Query(q): Query<FlowDetailQuery>,
+) -> impl IntoResponse {
+    let siren = match q.siren.as_deref() {
+        Some(s) => s,
+        None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
+    };
+    let doc = match lookup_doc(&state, siren, &flow_id).await {
+        Some(d) => d,
+        None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
+    };
+    let b64 = match doc.raw_pdf_base64 {
+        Some(b) => b,
+        None => return (StatusCode::NOT_FOUND, "PDF absent (format non Factur-X)").into_response(),
+    };
+    use base64::Engine as _;
+    let pdf_bytes = match base64::engine::general_purpose::STANDARD.decode(&b64) {
+        Ok(b) => b,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Décodage base64 PDF échoué").into_response(),
+    };
+    let invoice_no = doc.invoice_number.unwrap_or_else(|| flow_id.clone());
+    let filename = format!("{}.pdf", invoice_no);
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "application/pdf".parse().unwrap());
+    if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
+        headers.insert("content-disposition", v);
+    }
+    (StatusCode::OK, headers, pdf_bytes).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct AttachmentDownloadQuery {
+    pub siren: Option<String>,
+    pub idx: usize,
+}
+
+/// GET /ui/flows/{flowId}/download/attachment?idx=N
+/// Télécharge la N-ième pièce jointe (idx 0-indexé) extraite à la volée.
+pub async fn handle_download_attachment(
+    State(state): State<Arc<AppState>>,
+    Path(flow_id): Path<String>,
+    Query(q): Query<AttachmentDownloadQuery>,
+) -> impl IntoResponse {
+    let siren = match q.siren.as_deref() {
+        Some(s) => s,
+        None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
+    };
+    let doc = match lookup_doc(&state, siren, &flow_id).await {
+        Some(d) => d,
+        None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
+    };
+    let attachments = parse_attachments_from_doc(&doc);
+    let att = match attachments.into_iter().nth(q.idx) {
+        Some(a) => a,
+        None => return (StatusCode::NOT_FOUND, "Pièce jointe introuvable").into_response(),
+    };
+    let content = match att.embedded_content {
+        Some(c) => c,
+        None => return (StatusCode::NOT_FOUND, "PJ sans contenu embarqué (URI externe uniquement)").into_response(),
+    };
+    let filename = att
+        .filename
+        .clone()
+        .unwrap_or_else(|| format!("pj_{}.bin", q.idx));
+    let mime = att
+        .mime_code
+        .clone()
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let mut headers = axum::http::HeaderMap::new();
+    if let Ok(v) = mime.parse() {
+        headers.insert("content-type", v);
+    }
+    if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
+        headers.insert("content-disposition", v);
+    }
+    (StatusCode::OK, headers, content).into_response()
 }
 
 // ============================================================
@@ -840,14 +1059,14 @@ mod tests {
 
     #[test]
     fn test_render_attachments_empty_no_filenames() {
-        let html = render_attachments(&[], &[]);
+        let html = render_attachments(&[], &[], "flow-test", "123456789");
         assert!(html.contains("Aucune pièce jointe"));
     }
 
     #[test]
     fn test_render_attachments_fallback_filenames_only() {
         // raw_xml indisponible mais on a les noms indexés en ES
-        let html = render_attachments(&[], &["bon_commande.pdf".into(), "annexe.png".into()]);
+        let html = render_attachments(&[], &["bon_commande.pdf".into(), "annexe.png".into()], "flow-test", "123456789");
         assert!(html.contains("Liste indexée uniquement"));
         assert!(html.contains("bon_commande.pdf"));
         assert!(html.contains("annexe.png"));
@@ -864,7 +1083,7 @@ mod tests {
             mime_code: Some("application/pdf".into()),
             filename: Some("bon_commande.pdf".into()),
         }];
-        let html = render_attachments(&attachments, &[]);
+        let html = render_attachments(&attachments, &[], "flow-test", "123456789");
         assert!(html.contains("ATT-1"));
         assert!(html.contains("bon_commande.pdf"));
         assert!(html.contains("application/pdf"));
@@ -883,7 +1102,7 @@ mod tests {
             mime_code: None,
             filename: None,
         }];
-        let html = render_attachments(&attachments, &[]);
+        let html = render_attachments(&attachments, &[], "flow-test", "123456789");
         assert!(html.contains("ATT-2"));
         assert!(html.contains(r#"<a href="https://example.com/specs.pdf""#));
         assert!(html.contains("externe"));
@@ -900,7 +1119,7 @@ mod tests {
             mime_code: Some("application/pdf".into()),
             filename: Some("file<>.pdf".into()),
         }];
-        let html = render_attachments(&attachments, &[]);
+        let html = render_attachments(&attachments, &[], "flow-test", "123456789");
         // Pas de balise script injectée
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));

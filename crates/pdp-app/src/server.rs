@@ -285,6 +285,9 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/ui", get(crate::ui::handle_dashboard))
         .route("/ui/flows", get(crate::ui::handle_flows_list))
         .route("/ui/flows/{flow_id}", get(crate::ui::handle_flow_detail))
+        .route("/ui/flows/{flow_id}/download/xml", get(crate::ui::handle_download_xml))
+        .route("/ui/flows/{flow_id}/download/pdf", get(crate::ui::handle_download_pdf))
+        .route("/ui/flows/{flow_id}/download/attachment", get(crate::ui::handle_download_attachment))
         .with_state(state);
 
     Router::new()
@@ -3530,6 +3533,46 @@ mod tests {
         assert!(body.contains(r#"<a href="/ui/flows""#));
         assert!(body.contains(r#"<a href="/annuaire""#));
         assert!(body.ends_with("</html>"));
+    }
+
+    /// Génère 3 fichiers HTML statiques de démo dans `target/ui-demo/`.
+    /// Lancement : `cargo test -p pdp-app server::tests::generate_ui_demo_pages -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn generate_ui_demo_pages() {
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("target/ui-demo");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        for (path, filename, label) in [
+            ("/ui", "dashboard-no-siren.html", "Dashboard (sans SIREN — sélecteur)"),
+            ("/ui?siren=123456789", "dashboard-no-tracestore.html", "Dashboard (SIREN choisi, pas de TraceStore)"),
+            ("/ui/flows", "flows-list-no-siren.html", "Liste flux (sans SIREN)"),
+            ("/ui/flows/demo-flow-id?siren=123456789", "flow-detail.html", "Détail flux"),
+        ] {
+            let req = axum::http::Request::builder()
+                .uri(path)
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+            let html = String::from_utf8_lossy(&bytes).to_string();
+            let out = dir.join(filename);
+            std::fs::write(&out, &html).unwrap();
+            println!("✅ {} → {} ({} octets)", label, out.display(), html.len());
+        }
+        println!();
+        println!("📂 Pour visualiser : open {}/dashboard-no-siren.html", dir.display());
     }
 
     #[tokio::test]

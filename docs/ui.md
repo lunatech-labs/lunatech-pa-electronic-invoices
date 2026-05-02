@@ -9,19 +9,37 @@ l'API HTTP directement. Phase 1 = lecture seule (dashboard + liste + détail).
 | Route | Description | Bearer requis |
 |-------|-------------|---------------|
 | `GET /ui` | Dashboard avec KPIs du tenant | Non (public) |
-| `GET /ui/flows` | Liste paginée des factures avec filtres | Non |
-| `GET /ui/flows/{flowId}` | Détail facture + timeline pipeline | Non |
+| `GET /ui/flows` | Liste paginée + filtres (direction, statut, dates) | Non |
+| `GET /ui/flows/{flowId}` | Détail facture + PJ + timeline pipeline | Non |
+| `GET /ui/flows/{flowId}/download/xml` | Télécharge le XML brut UBL/CII | Non |
+| `GET /ui/flows/{flowId}/download/pdf` | Télécharge le PDF Factur-X | Non |
+| `GET /ui/flows/{flowId}/download/attachment?idx=N` | Télécharge la N-ième PJ extraite à la volée | Non |
 | `GET /annuaire` | UI de recherche annuaire (déjà existante) | Non |
 
 ## Démarrage rapide
 
 ```bash
-# 1. Démarrer le serveur (mode receiver ou both)
-cargo run --bin pdp -- start --config config.yaml --mode receiver
+# 1. Démarrer Elasticsearch (ou OpenSearch — API compatible)
+docker run -d --name pdp-es -p 9200:9200 \
+  -e "discovery.type=single-node" -e "DISABLE_SECURITY_PLUGIN=true" \
+  opensearchproject/opensearch:2
 
-# 2. Ouvrir un navigateur
+# 2. Démarrer Ferrite (mode receiver)
+cargo run --bin pdp -- --config config-ui-demo.yaml start --mode receiver
+
+# 3. Soumettre une facture pour avoir des données dans l'UI
+SHA=$(shasum -a 256 tests/fixtures/ubl/facture_ubl_001.xml | cut -d' ' -f1)
+echo '{"trackingId":"DEMO-001","name":"facture.xml","flowType":"CustomerInvoice","flowSyntax":"UBL","sha256":"'$SHA'"}' > /tmp/flow.json
+curl -X POST http://localhost:8080/v1/flows \
+  -F "flowInfo=@/tmp/flow.json;type=application/json" \
+  -F "file=@tests/fixtures/ubl/facture_ubl_001.xml;type=application/xml"
+
+# 4. Ouvrir un navigateur (quand le polling a indexé — délai ~1 minute)
 open http://localhost:8080/ui?siren=123456789
 ```
+
+**Config minimale `config-ui-demo.yaml`** : un fichier prêt à l'emploi est
+fourni à la racine du repo (sans Postgres ni routes — démo pure).
 
 ## Multi-tenant
 
@@ -53,6 +71,8 @@ Tableau paginé (50 par page) avec colonnes :
 N° facture · Vendeur · Acheteur · Statut (badge coloré) · Erreurs · Date.
 
 Filtres :
+- **Direction** — `Émises (vendeur)` / `Reçues (acheteur)` / toutes. Émises = le
+  tenant est `seller_siren`, Reçues = le tenant est `buyer_siren`.
 - **Statut** — `DISTRIBUÉ` / `ERREUR` / `EN_ATTENTE` / tous
 - **Du / Au** — bornes sur `issue_date` (format `YYYY-MM-DD`)
 
@@ -67,16 +87,21 @@ Exemples d'URLs :
 
 ### Détail `/ui/flows/{flowId}?siren={SIREN}`
 
-Quatre sections :
+Cinq sections :
 
 1. **Métadonnées** — flowId, exchangeId, n° facture, vendeur/acheteur (nom + SIRET), format (UBL/CII/Factur-X), totaux HT/TVA/TTC, devise, date émission, statut (badge), date de réception
 2. **Erreurs** (si `error_count > 0`) — liste step + message
-3. **Pièces jointes** — extraites **à la volée** depuis `raw_xml` (UBL/CII)
+3. **Téléchargements** — boutons :
+   - `⬇️ XML brut` (si `raw_xml` présent) → `GET /ui/flows/{flowId}/download/xml`
+   - `⬇️ PDF Factur-X` (si `raw_pdf_base64` présent) → `GET /ui/flows/{flowId}/download/pdf`
+4. **Pièces jointes** — extraites **à la volée** depuis `raw_xml` (UBL/CII)
    ou `raw_pdf_base64` (Factur-X). Affiche un tableau ID · Fichier · Description ·
-   MIME · Taille. Si `raw_xml` indisponible, fallback sur la liste indexée
-   (`attachment_filenames`). **Les PJ ne sont pas stockées en base** —
-   l'extraction est faite par les parsers UBL/CII/Factur-X au moment de l'affichage.
-4. **Timeline du pipeline** — événements horodatés par route et statut
+   MIME · Taille · ⬇️. Si `raw_xml` indisponible, fallback sur la liste indexée
+   (`attachment_filenames`). Téléchargement individuel via
+   `GET /ui/flows/{flowId}/download/attachment?siren=...&idx=N`.
+   **Les PJ ne sont pas stockées en base** — l'extraction est faite par les
+   parsers UBL/CII/Factur-X au moment de l'affichage.
+5. **Timeline du pipeline** — événements horodatés par route et statut
 
 Le `flow_id` est accepté ou son alias `exchange_id`.
 
