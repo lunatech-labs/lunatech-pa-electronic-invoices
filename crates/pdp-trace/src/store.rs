@@ -940,7 +940,29 @@ impl TraceStore {
     }
 
     /// Supprime tous les index pdp-* (pour les tests)
+    /// Supprime tous les indices `pdp-*`.
+    ///
+    /// **Garde-fou** : ne fait rien si la variable d'env
+    /// `PDP_TRACE_ALLOW_CLEANUP=1` n'est pas définie. Cela évite que
+    /// `cargo test --workspace` n'efface les indices d'une démo en cours
+    /// quand les tests partagent le même Elasticsearch que la démo.
+    ///
+    /// Les tests internes utilisent [`Self::force_cleanup`] qui ignore
+    /// le garde-fou.
     pub async fn cleanup(&self) -> PdpResult<()> {
+        if std::env::var("PDP_TRACE_ALLOW_CLEANUP").as_deref() != Ok("1") {
+            tracing::debug!(
+                "TraceStore::cleanup() ignoré — set PDP_TRACE_ALLOW_CLEANUP=1 pour activer"
+            );
+            return Ok(());
+        }
+        self.force_cleanup().await
+    }
+
+    /// Cleanup inconditionnel — usage interne tests uniquement.
+    /// Supprime tous les indices `pdp-*` sans vérifier l'env var.
+    #[doc(hidden)]
+    pub async fn force_cleanup(&self) -> PdpResult<()> {
         let _ = self.client
             .delete(&format!("{}/{}-*", self.base_url, INDEX_PREFIX))
             .send()
@@ -1008,7 +1030,8 @@ mod tests {
     async fn setup_store() -> Option<TraceStore> {
         match TraceStore::for_test().await {
             Ok(store) => {
-                store.cleanup().await.ok();
+                // force_cleanup() ignore le garde-fou ENV — réservé aux tests
+                store.force_cleanup().await.ok();
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 Some(store)
             }
