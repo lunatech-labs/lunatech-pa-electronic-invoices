@@ -423,6 +423,9 @@ pub struct FlowsListQuery {
     pub page: Option<usize>,
     /// `emises` (le tenant est vendeur) / `recues` (le tenant est acheteur) / vide = toutes
     pub direction: Option<String>,
+    /// Si "true", inclut tous les exchanges (toutes les soumissions, même les doublons).
+    /// Par défaut, on déduplique par invoice_number en gardant le plus récent.
+    pub show_duplicates: Option<String>,
 }
 
 pub async fn handle_flows_list(
@@ -454,9 +457,6 @@ pub async fn handle_flows_list(
 
             // Filtre direction (côté serveur, après ES — sur seller_siren / buyer_siren)
             // emises = le tenant est vendeur ; recues = le tenant est acheteur
-            // Note : le ExchangeSummary ne contient pas seller_siren / buyer_siren.
-            // On re-fetch ces données depuis ExchangeDocument complet au cas par cas
-            // si direction est demandée. Pour limiter le coût, on charge en parallèle.
             if let Some(dir) = q.direction.as_deref() {
                 let mut filtered = Vec::with_capacity(exchanges.len());
                 for ex in exchanges.into_iter() {
@@ -471,6 +471,32 @@ pub async fn handle_flows_list(
                     }
                 }
                 exchanges = filtered;
+            }
+
+            // Déduplication par invoice_number (par défaut activée).
+            // Plusieurs soumissions de la même facture créent plusieurs exchanges
+            // (la dedup BR-FR-12/13 marque les ré-soumissions avec error_count>0
+            // mais le doc reste indexé). On affiche le plus récent par numéro,
+            // sauf si ?show_duplicates=true.
+            let show_duplicates = q.show_duplicates.as_deref() == Some("true");
+            if !show_duplicates {
+                use std::collections::HashMap;
+                let mut latest_by_invoice: HashMap<String, pdp_trace::store::ExchangeSummary> =
+                    HashMap::new();
+                let mut without_invoice = Vec::new();
+                for ex in exchanges.into_iter() {
+                    match ex.invoice_number.clone() {
+                        Some(inv) => {
+                            // Garde le plus récent par created_at (déjà trié desc par ES)
+                            latest_by_invoice.entry(inv).or_insert(ex);
+                        }
+                        None => without_invoice.push(ex),
+                    }
+                }
+                let mut deduped: Vec<_> = latest_by_invoice.into_values().collect();
+                deduped.extend(without_invoice);
+                deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                exchanges = deduped;
             }
 
             let tenant_name = store.get_tenant_name(s).await;
@@ -590,6 +616,9 @@ pub async fn handle_flows_list(
         factures dont le <strong>vendeur a ce SIREN</strong>. Le marqueur
         <span class="dir-tag dir-out">↑</span> = émises (tenant vendeur),
         <span class="dir-tag dir-in">↓</span> = reçues (tenant acheteur).
+        Une facture re-soumise crée un doublon détecté (BR-FR-12/13) —
+        seule la dernière soumission est affichée par défaut
+        (<a href="?siren={siren}&amp;show_duplicates=true">voir tout l'historique</a>).
     </div>
     {filters}
     <table>
