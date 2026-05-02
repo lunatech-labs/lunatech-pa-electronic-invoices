@@ -22,6 +22,23 @@ impl EReportingGenerator {
         }
     }
 
+    /// BR-FR-MAP-23 : normalise une date au format YYYYMMDD attendu par le XSD
+    /// e-reporting PPF. Accepte indifféremment `YYYY-MM-DD` (UBL/CII), `YYYYMMDD`
+    /// (déjà au bon format) ou les déclinaisons avec heure.
+    pub fn normalize_date_yyyymmdd(s: &str) -> String {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        // Garde uniquement les 8 premiers chiffres après suppression des séparateurs courants
+        let digits: String = trimmed
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .take(8)
+            .collect();
+        if digits.len() == 8 { digits } else { trimmed.to_string() }
+    }
+
     /// Crée un rapport de transactions (flux 10.1) à partir d'une liste de factures
     pub fn create_transactions_report(
         &self,
@@ -57,8 +74,8 @@ impl EReportingGenerator {
                 },
             },
             transactions: Some(TransactionsReport {
-                period_start: period_start.to_string(),
-                period_end: period_end.to_string(),
+                period_start: Self::normalize_date_yyyymmdd(period_start),
+                period_end: Self::normalize_date_yyyymmdd(period_end),
                 invoices,
                 aggregated_transactions: Vec::new(),
             }),
@@ -399,6 +416,38 @@ impl EReportingGenerator {
         })
     }
 
+    /// Construit un `PaymentInvoice` (flux 10.2) avec normalisation BR-FR-MAP-23
+    /// des dates (YYYYMMDD).
+    pub fn payment_invoice(
+        invoice_id: &str,
+        issue_date: &str,
+        payment_date: &str,
+        sub_totals: Vec<PaymentSubTotal>,
+    ) -> PaymentInvoice {
+        PaymentInvoice {
+            invoice_id: invoice_id.to_string(),
+            issue_date: Self::normalize_date_yyyymmdd(issue_date),
+            payment: PaymentDetail {
+                date: Self::normalize_date_yyyymmdd(payment_date),
+                sub_totals,
+            },
+        }
+    }
+
+    /// Construit un `PaymentTransaction` agrégé (flux 10.4) avec normalisation
+    /// BR-FR-MAP-23 de la date.
+    pub fn payment_transaction(
+        payment_date: &str,
+        sub_totals: Vec<PaymentSubTotal>,
+    ) -> PaymentTransaction {
+        PaymentTransaction {
+            payment: PaymentDetail {
+                date: Self::normalize_date_yyyymmdd(payment_date),
+                sub_totals,
+            },
+        }
+    }
+
     // ================================================================
     // Flux 10.3 : Création de rapport de transactions agrégées
     // ================================================================
@@ -516,8 +565,8 @@ impl EReportingGenerator {
                 },
             },
             transactions: Some(TransactionsReport {
-                period_start: period_start.to_string(),
-                period_end: period_end.to_string(),
+                period_start: Self::normalize_date_yyyymmdd(period_start),
+                period_end: Self::normalize_date_yyyymmdd(period_end),
                 invoices: Vec::new(),
                 aggregated_transactions,
             }),
@@ -850,8 +899,8 @@ impl EReportingGenerator {
             },
             transactions: None,
             payments: Some(PaymentsReport {
-                period_start: period_start.to_string(),
-                period_end: period_end.to_string(),
+                period_start: Self::normalize_date_yyyymmdd(period_start),
+                period_end: Self::normalize_date_yyyymmdd(period_end),
                 invoices,
                 transactions: Vec::new(),
             }),
@@ -894,8 +943,8 @@ impl EReportingGenerator {
             },
             transactions: None,
             payments: Some(PaymentsReport {
-                period_start: period_start.to_string(),
-                period_end: period_end.to_string(),
+                period_start: Self::normalize_date_yyyymmdd(period_start),
+                period_end: Self::normalize_date_yyyymmdd(period_end),
                 invoices: Vec::new(),
                 transactions,
             }),
@@ -1481,5 +1530,116 @@ mod tests {
         assert!(xml.contains("<Transactions>"));
         assert!(xml.contains("<Amount>50000.00</Amount>"));
         assert!(!xml.contains("<InvoiceID>"));
+    }
+
+    // ============================================================
+    // BR-FR-MAP-23 : normalisation des dates YYYY-MM-DD → YYYYMMDD
+    // ============================================================
+
+    #[test]
+    fn test_normalize_date_iso_to_yyyymmdd() {
+        assert_eq!(
+            EReportingGenerator::normalize_date_yyyymmdd("2026-05-02"),
+            "20260502"
+        );
+    }
+
+    #[test]
+    fn test_normalize_date_already_yyyymmdd() {
+        assert_eq!(
+            EReportingGenerator::normalize_date_yyyymmdd("20260502"),
+            "20260502"
+        );
+    }
+
+    #[test]
+    fn test_normalize_date_strips_time() {
+        assert_eq!(
+            EReportingGenerator::normalize_date_yyyymmdd("2026-05-02T10:30:00Z"),
+            "20260502"
+        );
+    }
+
+    #[test]
+    fn test_normalize_date_empty_returns_empty() {
+        assert_eq!(
+            EReportingGenerator::normalize_date_yyyymmdd(""),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_normalize_date_invalid_passthrough() {
+        // Si pas reconnaissable, on retourne tel quel pour permettre debug
+        assert_eq!(
+            EReportingGenerator::normalize_date_yyyymmdd("INVALID"),
+            "INVALID"
+        );
+    }
+
+    #[test]
+    fn test_payment_invoice_normalizes_dates() {
+        let pi = EReportingGenerator::payment_invoice(
+            "F-001",
+            "2026-05-02",
+            "2026-06-15",
+            vec![PaymentSubTotal {
+                tax_percent: 20.0,
+                currency_code: Some("EUR".to_string()),
+                amount: 1200.0,
+            }],
+        );
+        assert_eq!(pi.issue_date, "20260502");
+        assert_eq!(pi.payment.date, "20260615");
+    }
+
+    #[test]
+    fn test_payments_report_normalizes_period() {
+        let gen = EReportingGenerator::new("123456789", "PDP Test");
+        let report = gen.create_payments_report(
+            "RPT-002",
+            "111111111",
+            "ACME",
+            "2026-05-01",
+            "2026-05-31",
+            vec![],
+        );
+        let pays = report.payments.unwrap();
+        assert_eq!(pays.period_start, "20260501");
+        assert_eq!(pays.period_end, "20260531");
+    }
+
+    #[test]
+    fn test_aggregated_payments_report_normalizes_period() {
+        let gen = EReportingGenerator::new("123456789", "PDP Test");
+        let report = gen.create_aggregated_payments_report(
+            "RPT-003",
+            "111111111",
+            "ACME",
+            "2026-04-01",
+            "2026-04-30",
+            vec![],
+        );
+        let pays = report.payments.unwrap();
+        assert_eq!(pays.period_start, "20260401");
+        assert_eq!(pays.period_end, "20260430");
+    }
+
+    #[test]
+    fn test_aggregated_transactions_report_normalizes_period() {
+        let gen = EReportingGenerator::new("123456789", "PDP Test");
+        let report = gen
+            .create_aggregated_transactions_report(
+                "RPT-004",
+                "111111111",
+                "ACME",
+                "2026-03-01",
+                "2026-03-31",
+                &[],
+            )
+            .unwrap();
+        let txns = report.transactions.unwrap();
+        assert_eq!(txns.period_start, "20260301");
+        assert_eq!(txns.period_end, "20260331");
     }
 }

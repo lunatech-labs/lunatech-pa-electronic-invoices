@@ -84,6 +84,67 @@ enum Commands {
         #[command(subcommand)]
         action: AnnuaireCommands,
     },
+
+    /// Génération de rapports e-reporting (Flux 10.1/10.2/10.3/10.4)
+    Ereporting {
+        #[command(subcommand)]
+        action: EreportingCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum EreportingCommands {
+    /// Génère un rapport Flux 10.1 (transactions ventes détaillées) à partir
+    /// d'un répertoire de factures (UBL/CII/Factur-X autodétection).
+    Generate101 {
+        /// Répertoire contenant les factures
+        #[arg(long)]
+        invoices_dir: PathBuf,
+        /// SIREN du déclarant (vendeur)
+        #[arg(long)]
+        siren: String,
+        /// Nom du déclarant
+        #[arg(long)]
+        name: String,
+        /// Date de début (YYYY-MM-DD ou YYYYMMDD)
+        #[arg(long)]
+        from: String,
+        /// Date de fin (YYYY-MM-DD ou YYYYMMDD)
+        #[arg(long)]
+        to: String,
+        /// Identifiant du rapport (sinon généré automatiquement)
+        #[arg(long)]
+        report_id: Option<String>,
+        /// Fichier de sortie (sinon stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Génère un rapport Flux 10.3 (transactions ventes agrégées par jour/catégorie)
+    /// à partir d'un répertoire de factures.
+    Generate103 {
+        /// Répertoire contenant les factures
+        #[arg(long)]
+        invoices_dir: PathBuf,
+        /// SIREN du déclarant (vendeur)
+        #[arg(long)]
+        siren: String,
+        /// Nom du déclarant
+        #[arg(long)]
+        name: String,
+        /// Date de début (YYYY-MM-DD ou YYYYMMDD)
+        #[arg(long)]
+        from: String,
+        /// Date de fin (YYYY-MM-DD ou YYYYMMDD)
+        #[arg(long)]
+        to: String,
+        /// Identifiant du rapport (sinon généré automatiquement)
+        #[arg(long)]
+        report_id: Option<String>,
+        /// Fichier de sortie (sinon stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -129,6 +190,7 @@ async fn main() -> Result<()> {
         Commands::Errors => cmd_errors(&cli.config).await,
         Commands::FlowEvents { flow_id } => cmd_flow_events(&cli.config, &flow_id).await,
         Commands::Annuaire { action } => cmd_annuaire(&cli.config, action).await,
+        Commands::Ereporting { action } => cmd_ereporting(action).await,
     }
 }
 
@@ -1760,6 +1822,144 @@ async fn cmd_annuaire(config_path: &std::path::Path, action: AnnuaireCommands) -
     }
 }
 
+// ============================================================
+// E-reporting (Flux 10.1, 10.3) — agrégation depuis répertoire local
+// ============================================================
+
+/// Lit toutes les factures (XML/PDF) d'un répertoire et les parse via la
+/// détection de format automatique.
+fn load_invoices_from_dir(
+    dir: &std::path::Path,
+) -> Result<Vec<pdp_core::model::InvoiceData>> {
+    let mut invoices = Vec::new();
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| anyhow::anyhow!("Impossible de lire {} : {}", dir.display(), e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        if !matches!(ext.as_deref(), Some("xml") | Some("pdf")) {
+            continue;
+        }
+
+        let data = match std::fs::read(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("⚠️  {} : lecture impossible ({})", path.display(), e);
+                continue;
+            }
+        };
+        let format = match pdp_invoice::detect_format(&data) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("⚠️  {} : format non détecté ({})", path.display(), e);
+                continue;
+            }
+        };
+        let parsed = match format {
+            pdp_core::model::InvoiceFormat::UBL => {
+                let xml = std::str::from_utf8(&data)?;
+                pdp_invoice::UblParser::new().parse(xml)
+            }
+            pdp_core::model::InvoiceFormat::CII => {
+                let xml = std::str::from_utf8(&data)?;
+                pdp_invoice::CiiParser::new().parse(xml)
+            }
+            pdp_core::model::InvoiceFormat::FacturX => {
+                pdp_invoice::FacturXParser::new().parse(&data)
+            }
+        };
+        match parsed {
+            Ok(inv) => invoices.push(inv),
+            Err(e) => eprintln!("⚠️  {} : parsing échoué ({})", path.display(), e),
+        }
+    }
+    Ok(invoices)
+}
+
+fn write_or_print(output: Option<&std::path::Path>, content: &str) -> Result<()> {
+    match output {
+        Some(path) => {
+            std::fs::write(path, content)?;
+            println!("✅ Rapport écrit dans {}", path.display());
+        }
+        None => println!("{}", content),
+    }
+    Ok(())
+}
+
+async fn cmd_ereporting(action: EreportingCommands) -> Result<()> {
+    use pdp_ereporting::EReportingGenerator;
+
+    match action {
+        EreportingCommands::Generate101 {
+            invoices_dir,
+            siren,
+            name,
+            from,
+            to,
+            report_id,
+            output,
+        } => {
+            let invoices = load_invoices_from_dir(&invoices_dir)?;
+            println!(
+                "📊 {} factures chargées depuis {}",
+                invoices.len(),
+                invoices_dir.display()
+            );
+            let transactions: Vec<_> = invoices
+                .iter()
+                .map(EReportingGenerator::invoice_to_transaction)
+                .collect();
+            let gen = EReportingGenerator::new(&siren, &name);
+            let id = report_id.unwrap_or_else(|| {
+                format!("RPT-10.1-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"))
+            });
+            let report =
+                gen.create_transactions_report(&id, &siren, &name, &from, &to, transactions);
+            let xml = gen
+                .to_xml(&report)
+                .map_err(|e| anyhow::anyhow!("Sérialisation XML : {}", e))?;
+            write_or_print(output.as_deref(), &xml)?;
+            Ok(())
+        }
+        EreportingCommands::Generate103 {
+            invoices_dir,
+            siren,
+            name,
+            from,
+            to,
+            report_id,
+            output,
+        } => {
+            let invoices = load_invoices_from_dir(&invoices_dir)?;
+            println!(
+                "📊 {} factures chargées depuis {}",
+                invoices.len(),
+                invoices_dir.display()
+            );
+            let gen = EReportingGenerator::new(&siren, &name);
+            let id = report_id.unwrap_or_else(|| {
+                format!("RPT-10.3-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"))
+            });
+            let report = gen
+                .create_aggregated_transactions_report(&id, &siren, &name, &from, &to, &invoices)
+                .map_err(|e| anyhow::anyhow!("Agrégation 10.3 : {}", e))?;
+            let xml = gen
+                .to_xml(&report)
+                .map_err(|e| anyhow::anyhow!("Sérialisation XML : {}", e))?;
+            write_or_print(output.as_deref(), &xml)?;
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1786,5 +1986,113 @@ mod tests {
         assert!(CliMode::Receiver.should_run_reception());
         assert!(CliMode::Both.should_run_emission());
         assert!(CliMode::Both.should_run_reception());
+    }
+
+    // ============================================================
+    // E-reporting CLI : chargement et génération
+    // ============================================================
+
+    fn ereporting_test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ferrite-ereport-{}", name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn copy_fixture(src: &str, dst_dir: &std::path::Path) {
+        let src_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(src);
+        let dst = dst_dir.join(src_path.file_name().unwrap());
+        std::fs::copy(&src_path, &dst).unwrap();
+    }
+
+    #[test]
+    fn test_load_invoices_from_dir_ubl() {
+        let dir = ereporting_test_dir("load-ubl");
+        copy_fixture("tests/fixtures/ubl/facture_ubl_001.xml", &dir);
+        let invoices = load_invoices_from_dir(&dir).unwrap();
+        assert_eq!(invoices.len(), 1);
+        assert!(invoices[0].seller_siret.is_some());
+    }
+
+    #[test]
+    fn test_load_invoices_skips_non_invoice_files() {
+        let dir = ereporting_test_dir("load-mixed");
+        std::fs::write(dir.join("readme.txt"), b"hello").unwrap();
+        std::fs::write(dir.join("config.json"), b"{}").unwrap();
+        copy_fixture("tests/fixtures/ubl/facture_ubl_001.xml", &dir);
+        let invoices = load_invoices_from_dir(&dir).unwrap();
+        // Seul le XML facture est pris en compte
+        assert_eq!(invoices.len(), 1);
+    }
+
+    #[test]
+    fn test_load_invoices_empty_dir() {
+        let dir = ereporting_test_dir("load-empty");
+        let invoices = load_invoices_from_dir(&dir).unwrap();
+        assert!(invoices.is_empty());
+    }
+
+    #[test]
+    fn test_load_invoices_missing_dir_errors() {
+        let dir = std::path::Path::new("/tmp/ferrite-ereport-does-not-exist-xyz");
+        assert!(load_invoices_from_dir(dir).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cmd_ereporting_generate_101_writes_xml() {
+        let dir = ereporting_test_dir("gen-101");
+        copy_fixture("tests/fixtures/ubl/facture_ubl_001.xml", &dir);
+        let out = dir.join("report-10.1.xml");
+
+        cmd_ereporting(EreportingCommands::Generate101 {
+            invoices_dir: dir.clone(),
+            siren: "123456789".to_string(),
+            name: "ACME SAS".to_string(),
+            from: "2025-11-01".to_string(),
+            to: "2025-11-30".to_string(),
+            report_id: Some("RPT-TEST-101".to_string()),
+            output: Some(out.clone()),
+        })
+        .await
+        .unwrap();
+
+        let xml = std::fs::read_to_string(&out).unwrap();
+        assert!(xml.contains("<TypeCode>10.1</TypeCode>"));
+        assert!(xml.contains("<Id>RPT-TEST-101</Id>"));
+        // BR-FR-MAP-23 appliqué : période YYYYMMDD
+        assert!(xml.contains("<StartDate>20251101</StartDate>"));
+        assert!(xml.contains("<EndDate>20251130</EndDate>"));
+        // Date facture aussi normalisée (UBL fixture utilise YYYY-MM-DD)
+        assert!(xml.contains("<IssueDate>20251115</IssueDate>"));
+    }
+
+    #[tokio::test]
+    async fn test_cmd_ereporting_generate_103_aggregates() {
+        let dir = ereporting_test_dir("gen-103");
+        copy_fixture("tests/fixtures/ubl/facture_ubl_001.xml", &dir);
+        let out = dir.join("report-10.3.xml");
+
+        cmd_ereporting(EreportingCommands::Generate103 {
+            invoices_dir: dir.clone(),
+            siren: "123456789".to_string(),
+            name: "ACME SAS".to_string(),
+            from: "2025-11-01".to_string(),
+            to: "2025-11-30".to_string(),
+            report_id: None,
+            output: Some(out.clone()),
+        })
+        .await
+        .unwrap();
+
+        let xml = std::fs::read_to_string(&out).unwrap();
+        assert!(xml.contains("<TypeCode>10.3</TypeCode>"));
+        assert!(xml.contains("<AggregatedTransaction>"));
+        // Période normalisée
+        assert!(xml.contains("<StartDate>20251101</StartDate>"));
     }
 }

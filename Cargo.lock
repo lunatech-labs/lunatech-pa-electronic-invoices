@@ -3297,6 +3297,7 @@ dependencies = [
  "pdp-client",
  "pdp-config",
  "pdp-core",
+ "pdp-ereporting",
  "pdp-invoice",
  "pdp-sftp",
  "pdp-trace",

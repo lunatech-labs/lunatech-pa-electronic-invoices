@@ -19,6 +19,7 @@ pdp-config = { path = "../pdp-config" }
 pdp-client = { path = "../pdp-client" }
 pdp-validate = { path = "../pdp-validate" }
 pdp-annuaire = { path = "../pdp-annuaire" }
+pdp-ereporting = { path = "../pdp-ereporting" }
 tokio = { workspace = true }
 sqlx = { workspace = true }
 chrono = { workspace = true }

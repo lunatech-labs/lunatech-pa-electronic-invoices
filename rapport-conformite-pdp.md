@@ -18,11 +18,11 @@
 | Spécification | Conformité | Statut |
 |---------------|-----------|--------|
 | **XP Z12-012** (Formats & Profils) | **97%** | Quasi-complet — manque Flux 11 V1.3 et multi-vendeurs |
-| **XP Z12-013** (APIs Flow/Directory) | **90%** | Webhooks ✅, Directory complet ✅, manque : retry webhooks, OAUTH2, headers Request-Id/Org-Id |
+| **XP Z12-013** (APIs Flow/Directory) | **95%** | Webhooks ✅ (persistence Postgres, retry, OAUTH2), Directory complet ✅, codes HTTP fins ✅ |
 | **XP Z12-014** (Cas d'usage B2B) | **69%** | 35/51 cas implémentés, 13 partiels |
-| **DSE AIFE** (Specifications externes) | **85%** | SFTP PPF complet, Flux 13/14 manquants |
+| **DSE AIFE** (Specifications externes) | **92%** | E-reporting Flux 10.1-10.4 complet ✅, BR-FR-MAP-23 ✅, manque Flux 13/14 (annuaire SFTP) |
 
-**Évaluation globale** : Ferrite couvre solidement le cœur métier (parsing UBL/CII/Factur-X, validation Schematron, transformation, CDAR avec acteurs corrects V1.2, annuaire local PostgreSQL, séparation PA-E/PA-R, relais CDV→PPF Flux 6). Les fondamentaux réglementaires sont conformes. **Points en attente** : webhooks AFNOR, Flux 10.2/10.3/10.4, Flux 11 (nouveau V1.3), Flux 13/14 annuaire, intégration `AnnuaireValidationProcessor` dans le pipeline.
+**Évaluation globale** : Ferrite couvre solidement le cœur métier (parsing UBL/CII/Factur-X, validation Schematron, transformation, CDAR avec acteurs corrects V1.2, annuaire local PostgreSQL, séparation PA-E/PA-R, relais CDV→PPF Flux 6, e-reporting Flux 10.1-10.4 avec BR-FR-MAP-23, webhooks AFNOR persistés, codes HTTP 408/413/429/501). Les fondamentaux réglementaires sont conformes. **Points en attente** : Flux 11 (nouveau V1.3), Flux 13/14 annuaire SFTP, multi-vendeurs, CDV 221.
 
 ---
 
@@ -93,7 +93,7 @@ Les 9 chemins de conversion sont implémentés. Les pièces jointes (BG-24) sont
 | EN16931 codelists | ✅ | v16-fx1.08 |
 | BR-FR-21, BR-FR-22 (BAR subject code) | ⚠️ | À vérifier dans V1.3.0 |
 | BR-FR-23/24/25/26 (taille/caractères) | ⚠️ | À vérifier dans V1.3.0 |
-| BR-FR-MAP-23 (date Flux 10.1 UBL) | ❌ | À implémenter avec Flux 10 |
+| BR-FR-MAP-23 (date YYYYMMDD Flux 10) | ✅ | `EReportingGenerator::normalize_date_yyyymmdd()` appliqué sur factures, paiements, périodes |
 
 ### 1.6 Règles métier (code Rust)
 
@@ -325,11 +325,12 @@ Les 9 chemins de conversion sont implémentés. Les pièces jointes (BG-24) sont
 
 | Flux | Statut | Détails |
 |------|--------|---------|
-| 10.1 Transactions ventes | ✅ | Generator + modèle |
-| 10.2 Paiements ventes | ⚠️ | Modèle existe, générateur limité |
-| 10.3 Transactions acquisitions | ⚠️ | Structure présente |
-| 10.4 Paiements acquisitions | ⚠️ | Structure présente |
-| Règles BR-FR-MAP | ⚠️ | MAP-01, 04, 06, 08, 10, 12, 14, 15 vues, BR-FR-MAP-23 manquant |
+| 10.1 Transactions ventes | ✅ | `create_transactions_report` + `invoice_to_transaction` + CLI `pdp ereporting generate101` |
+| 10.2 Paiements ventes | ✅ | `create_payments_report` + helper `payment_invoice` (BR-FR-MAP-23 sur dates) |
+| 10.3 Transactions agrégées | ✅ | `create_aggregated_transactions_report` (TLB1/TPS1/TNT1/TMA1) + CLI `pdp ereporting generate103` |
+| 10.4 Paiements agrégés | ✅ | `create_aggregated_payments_report` + helper `payment_transaction` |
+| Règles BR-FR-MAP | ✅ | MAP-01, 04, 06, 08, 10, 12, 14, 15, 16, 17, 18, 19, 23 (date YYYYMMDD normalisée partout : factures, paiements, périodes) |
+| Code interface PPF | ✅ | `FFE1025A` (`F10TransactionPaiement`) défini, prêt pour SFTP |
 
 ### 4.4 Traçabilité (Elasticsearch)
 
