@@ -1,0 +1,15 @@
+meta {
+  name: Get SIREN
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/v1/siren/code-insee:{{siren}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

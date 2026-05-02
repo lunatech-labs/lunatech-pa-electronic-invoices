@@ -1,0 +1,27 @@
+meta {
+  name: Update Webhook (PATCH)
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/v1/webhooks/{{webhookId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "headers": [
+      { "headerName": "X-Updated", "headerValue": "true" }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 204
+}

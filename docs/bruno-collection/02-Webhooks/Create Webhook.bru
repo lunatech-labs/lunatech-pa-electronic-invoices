@@ -1,0 +1,44 @@
+meta {
+  name: Create Webhook
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/v1/webhooks
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "callback": {
+      "url": "https://webhook.site/your-uuid",
+      "headers": [
+        { "headerName": "X-API-Key", "headerValue": "demo" }
+      ],
+      "signature": {
+        "algo": "HS256",
+        "key": "c2VjcmV0LWtleQ=="
+      }
+    },
+    "metadata": {
+      "flowType": "CustomerInvoice",
+      "flowDirection": "In",
+      "ackStatus": "Ok"
+    }
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.webhookId: isString
+}
+
+script:post-response {
+  bru.setVar("webhookId", res.body.webhookId);
+}

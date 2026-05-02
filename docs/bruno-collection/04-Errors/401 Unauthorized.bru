@@ -1,0 +1,15 @@
+meta {
+  name: 401 Unauthorized (no token)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/v1/flows
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 401
+}

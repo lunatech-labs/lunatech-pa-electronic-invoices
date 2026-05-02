@@ -1,0 +1,35 @@
+meta {
+  name: Submit Flow (multipart)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/v1/flows
+  body: multipartForm
+  auth: bearer
+}
+
+headers {
+  Request-Id: req-{{$randomUUID}}
+  Organization-Id: {{siren}}
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:multipart-form {
+  flowInfo: {"trackingId":"TRACK-001","name":"facture.xml","flowType":"CustomerInvoice","flowSyntax":"UBL","flowProfile":"EN16931"}
+  file: @file(../../tests/fixtures/ubl/facture_ubl_001.xml)
+}
+
+assert {
+  res.status: eq 202
+  res.body.flowId: isString
+  res.body.status: eq RECEIVED
+}
+
+script:post-response {
+  bru.setVar("flowId", res.body.flowId);
+}

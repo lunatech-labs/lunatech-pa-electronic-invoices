@@ -1,0 +1,20 @@
+meta {
+  name: List Flows (filter status)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/v1/flows?status=error&limit=20
+  body: none
+  auth: bearer
+}
+
+params:query {
+  status: error
+  limit: 20
+}
+
+auth:bearer {
+  token: {{token}}
+}

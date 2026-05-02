@@ -1,0 +1,19 @@
+meta {
+  name: Get Flow by ID
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/v1/flows/{{flowId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}

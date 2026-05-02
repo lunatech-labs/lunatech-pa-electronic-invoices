@@ -1,0 +1,648 @@
+openapi: 3.1.0
+info:
+  title: Ferrite — PDP HTTP API
+  description: |
+    API REST exposée par Ferrite (PDP — Plateforme de Dématérialisation Partenaire),
+    conforme à **AFNOR XP Z12-013 V1.2.0** :
+    - Annexe A : Flow Service (`/v1/flows`, `/v1/webhooks`)
+    - Annexe B : Directory Service (`/v1/siren`, `/v1/siret`, `/v1/routing-code`, `/v1/directory-line`)
+
+    Compléments Ferrite (hors AFNOR mais utiles) :
+    - `/metrics` (Prometheus)
+    - `/v1/annuaire/*` (stats internes, plateformes)
+    - `/annuaire` (UI HTML de recherche)
+
+    **Codes HTTP** : 200, 201, 202, 204, 400, 401, 404, 408, 413, 429, 500, 501, 503.
+  version: "1.2.0-ferrite"
+  contact:
+    name: Ferrite
+    url: https://github.com/lunatech-labs/pdp-facture
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: Dev local
+  - url: https://pdp.example.com
+    description: Production (à adapter)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Flow
+    description: Échange de flux (factures, CDV, e-reporting) — XP Z12-013 §5.1-5.3
+  - name: Webhook
+    description: Abonnements webhook — XP Z12-013 §5.4
+  - name: Directory
+    description: Annuaire PPF — XP Z12-013 Annexe B
+  - name: Health
+    description: Santé et observabilité
+
+paths:
+
+  # ============================================================
+  # Flow Service
+  # ============================================================
+
+  /v1/flows:
+    post:
+      tags: [Flow]
+      summary: Dépôt d'un flux entrant (multipart)
+      description: |
+        Soumet une facture, un CDV ou un e-reporting. Réponse asynchrone :
+        le serveur valide la requête et retourne `202 Accepted` avec un
+        `flowId`. Le traitement (parsing, validation, distribution) se fait
+        en arrière-plan.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [flowInfo, file]
+              properties:
+                flowInfo:
+                  $ref: '#/components/schemas/InboundFlowInfo'
+                file:
+                  type: string
+                  format: binary
+                  description: Contenu du flux (XML UBL/CII, PDF Factur-X, CDAR XML)
+      responses:
+        '202':
+          description: Flux accepté, traitement en cours
+          headers:
+            Request-Id:
+              schema: { type: string }
+              description: Echo de Request-Id si fourni
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlowAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+    get:
+      tags: [Flow]
+      summary: Lister les flux
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [received, validated, distributed, error] }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: Liste paginée
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Flow' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+
+  /v1/flows/{flowId}:
+    get:
+      tags: [Flow]
+      summary: Détail d'un flux
+      parameters:
+        - in: path
+          name: flowId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Détail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Flow' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Webhooks (XP Z12-013 §5.4)
+  # ============================================================
+
+  /v1/webhooks:
+    post:
+      tags: [Webhook]
+      summary: Créer un abonnement webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookCreateRequest' }
+      responses:
+        '201':
+          description: Abonnement créé
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhookId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+    get:
+      tags: [Webhook]
+      summary: Lister les abonnements
+      responses:
+        '200':
+          description: Liste des UIDs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhookIds:
+                    type: array
+                    items: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/webhooks/{webhookId}:
+    parameters:
+      - in: path
+        name: webhookId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Webhook]
+      summary: Détails d'un webhook
+      responses:
+        '200':
+          description: Détails
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Webhook]
+      summary: Mise à jour partielle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookUpdateRequest' }
+      responses:
+        '204': { description: Mis à jour }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Webhook]
+      summary: Désabonnement
+      responses:
+        '204': { description: Supprimé }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/webhooks/callback:
+    post:
+      tags: [Webhook]
+      summary: Réception webhook PPF (callback entrant)
+      description: |
+        Endpoint où le PPF pousse les CDV. Vérification HMAC-SHA256 si
+        `webhook_secret` est configuré.
+      security: []  # signature HMAC, pas Bearer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: OK }
+        '401':
+          description: Signature HMAC invalide
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  # ============================================================
+  # Directory Service (XP Z12-013 Annexe B)
+  # ============================================================
+
+  /v1/siren/code-insee:{siren}:
+    get:
+      tags: [Directory]
+      summary: Détail SIREN
+      parameters:
+        - in: path
+          name: siren
+          required: true
+          schema: { type: string, pattern: '^[0-9]{9}$' }
+      responses:
+        '200': { description: Détail SIREN }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/siren/search:
+    post:
+      tags: [Directory]
+      summary: Recherche SIREN multi-critères
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                statut: { type: string }
+      responses:
+        '200': { description: Résultats }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+
+  /v1/siret/code-insee:{siret}:
+    get:
+      tags: [Directory]
+      summary: Détail SIRET
+      parameters:
+        - in: path
+          name: siret
+          required: true
+          schema: { type: string, pattern: '^[0-9]{14}$' }
+      responses:
+        '200': { description: Détail SIRET }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/siret/search:
+    post:
+      tags: [Directory]
+      summary: Recherche SIRET multi-critères
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Résultats }
+
+  /v1/routing-code/search:
+    post:
+      tags: [Directory]
+      summary: Recherche codes de routage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Résultats }
+
+  /v1/routing-code/siret:{siret}/code:{routingIdentifier}:
+    get:
+      tags: [Directory]
+      summary: Code de routage spécifique
+      parameters:
+        - in: path
+          name: siret
+          required: true
+          schema: { type: string, pattern: '^[0-9]{14}$' }
+        - in: path
+          name: routingIdentifier
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Code de routage }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/directory-line/code:{addressingId}:
+    get:
+      tags: [Directory]
+      summary: Détail ligne annuaire par addressing-identifier
+      parameters:
+        - in: path
+          name: addressingId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Ligne annuaire }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/directory-line/search:
+    post:
+      tags: [Directory]
+      summary: Recherche de lignes annuaire
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Résultats }
+
+  # ============================================================
+  # Endpoints internes annuaire (Ferrite, hors AFNOR)
+  # ============================================================
+
+  /v1/annuaire/stats:
+    get:
+      tags: [Directory]
+      summary: Statistiques annuaire (interne)
+      responses:
+        '200': { description: Stats }
+
+  /v1/annuaire/plateformes:
+    get:
+      tags: [Directory]
+      summary: Liste des PDP enregistrées
+      responses:
+        '200': { description: Liste }
+
+  # ============================================================
+  # Health & métriques
+  # ============================================================
+
+  /v1/healthcheck:
+    get:
+      tags: [Health]
+      summary: Healthcheck
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  pdp_name: { type: string }
+                  pdp_matricule: { type: string }
+                  version: { type: string }
+
+  /metrics:
+    get:
+      tags: [Health]
+      summary: Métriques Prometheus
+      security: []
+      responses:
+        '200':
+          description: Format texte Prometheus
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /v1/stats:
+    get:
+      tags: [Health]
+      summary: Statistiques agrégées (depuis Elasticsearch)
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatsResponse' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+
+# ============================================================
+# Components
+# ============================================================
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+
+  parameters:
+    RequestId:
+      in: header
+      name: Request-Id
+      schema: { type: string }
+      description: ID de corrélation logs (echo dans la réponse)
+    OrganizationId:
+      in: header
+      name: Organization-Id
+      schema: { type: string }
+      description: SIREN du tenant (multi-tenant)
+
+  responses:
+    BadRequest:
+      description: 400 — Requête mal formée
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: 401 — Token manquant ou invalide
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: 404 — Ressource introuvable
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PayloadTooLarge:
+      description: 413 — Taille > max_flow_size_bytes
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RateLimited:
+      description: 429 — Quota dépassé
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Secondes avant la prochaine fenêtre
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotImplemented:
+      description: 501 — Endpoint indisponible (TraceStore/Annuaire absent)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: 503 — Pipeline saturé
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: PAYLOAD_TOO_LARGE
+        message:
+          type: string
+
+    InboundFlowInfo:
+      type: object
+      required: [trackingId, name]
+      properties:
+        trackingId:
+          type: string
+          example: TRACK-20260502-001
+        name:
+          type: string
+          example: facture_001.xml
+        flowType:
+          type: string
+          enum:
+            [
+              CustomerInvoice,
+              SupplierInvoice,
+              Cdar,
+              EReporting,
+              StateInvoice,
+              B2G,
+              B2GInt,
+              B2GOutOfScope,
+            ]
+        flowSyntax:
+          type: string
+          enum: [UBL, CII, FacturX, CDAR, FRR]
+        flowProfile:
+          type: string
+          example: EN16931
+        processingRule:
+          type: string
+          example: STANDARD
+        sha256:
+          type: string
+          description: Empreinte SHA-256 hexadécimale du `file` (vérifiée serveur)
+          pattern: '^[a-f0-9]{64}$'
+        callbackUrl:
+          type: string
+          format: uri
+
+    FlowAcceptedResponse:
+      type: object
+      required: [flowId, submittedAt, status, message]
+      properties:
+        flowId: { type: string }
+        submittedAt: { type: string, format: date-time }
+        trackingId: { type: string }
+        name: { type: string }
+        flowType: { type: string }
+        flowSyntax: { type: string }
+        flowProfile: { type: string }
+        processingRule: { type: string }
+        status: { type: string, example: RECEIVED }
+        message: { type: string }
+
+    Flow:
+      type: object
+      properties:
+        flowId: { type: string }
+        trackingId: { type: string }
+        flowType: { type: string }
+        flowSyntax: { type: string }
+        status: { type: string }
+        submittedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    StatsResponse:
+      type: object
+      properties:
+        totalExchanges: { type: integer }
+        totalErrors: { type: integer }
+        totalDistributed: { type: integer }
+
+    CallbackHeader:
+      type: object
+      required: [headerName, headerValue]
+      properties:
+        headerName: { type: string }
+        headerValue: { type: string }
+
+    CallbackAuthentication:
+      type: object
+      required: [authType]
+      properties:
+        authType:
+          type: string
+          enum: [BASIC, OAUTH2]
+        userId: { type: string }
+        userPassword: { type: string }
+        tokenUrl: { type: string, format: uri }
+        clientId: { type: string }
+        clientSecret: { type: string }
+
+    CallbackSignature:
+      type: object
+      required: [algo, key]
+      properties:
+        algo:
+          type: string
+          enum: [HS256, RS256, ECDSA, EDDSA_25519, RSA_PSS, EDDSA_448]
+        key:
+          type: string
+          description: Clé encodée en base64
+
+    CallbackParameters:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+        headers:
+          type: array
+          items: { $ref: '#/components/schemas/CallbackHeader' }
+        authentication: { $ref: '#/components/schemas/CallbackAuthentication' }
+        signature: { $ref: '#/components/schemas/CallbackSignature' }
+
+    WebhookMetadata:
+      type: object
+      required: [flowType, flowDirection]
+      properties:
+        flowType:
+          type: string
+          enum: [CustomerInvoice, SupplierInvoice, Cdar, EReporting]
+        flowDirection:
+          type: string
+          enum: [In, Out]
+        processingRule: { type: string }
+        ackStatus:
+          type: string
+          enum: [Pending, Ok, Error]
+
+    WebhookCreateRequest:
+      type: object
+      required: [callback, metadata]
+      properties:
+        callback: { $ref: '#/components/schemas/CallbackParameters' }
+        metadata: { $ref: '#/components/schemas/WebhookMetadata' }
+
+    WebhookUpdateRequest:
+      type: object
+      properties:
+        headers:
+          type: array
+          items: { $ref: '#/components/schemas/CallbackHeader' }
+        authentication: { $ref: '#/components/schemas/CallbackAuthentication' }
+        signature: { $ref: '#/components/schemas/CallbackSignature' }
+
+    Webhook:
+      type: object
+      required: [webhookId, callback, metadata]
+      properties:
+        webhookId: { type: string, format: uuid }
+        callback: { $ref: '#/components/schemas/CallbackParameters' }
+        metadata: { $ref: '#/components/schemas/WebhookMetadata' }
+        owner:
+          type: string
+          description: SIREN du tenant propriétaire (multi-tenant)

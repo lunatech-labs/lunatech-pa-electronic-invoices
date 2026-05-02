@@ -1,0 +1,19 @@
+meta {
+  name: Delete Webhook
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/v1/webhooks/{{webhookId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 204
+}

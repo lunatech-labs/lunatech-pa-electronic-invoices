@@ -1,0 +1,20 @@
+meta {
+  name: List Webhooks
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/v1/webhooks
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.webhookIds: isArray
+}

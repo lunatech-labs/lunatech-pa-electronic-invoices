@@ -1,0 +1,19 @@
+meta {
+  name: 404 Not Found
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/v1/flows/inexistant
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 404
+}

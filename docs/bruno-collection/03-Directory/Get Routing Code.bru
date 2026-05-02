@@ -1,0 +1,15 @@
+meta {
+  name: Get Routing Code
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/v1/routing-code/siret:{{siret}}/code:{{routingId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
