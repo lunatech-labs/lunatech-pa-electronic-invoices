@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:CustomizationID>urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:extended</cbc:CustomizationID>
+    <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+    <cbc:ID>FA-2025-PJ-00501</cbc:ID>
+    <cbc:IssueDate>2025-11-20</cbc:IssueDate>
+    <cbc:DueDate>2025-12-20</cbc:DueDate>
+    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+    <cbc:Note>Facture avec pièces jointes (bon de commande + photo livraison + détail CSV)</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    <cbc:BuyerReference>BC-2025-PJ-099</cbc:BuyerReference>
+
+    <!-- Pièce jointe 1 : Bon de commande PDF (contenu embarqué base64) -->
+    <cac:AdditionalDocumentReference>
+        <cbc:ID>BC-PJ-001</cbc:ID>
+        <cbc:DocumentDescription>Bon de commande signé</cbc:DocumentDescription>
+        <cac:Attachment>
+            <cbc:EmbeddedDocumentBinaryObject mimeCode="application/pdf"
+                filename="bon_commande_PO-2025-4567.pdf">JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAxMDAgMTAwXT4+CmVuZG9iagp4cmVmCjAgNAowMDAwMDAwMDAwIDY1NTM1IGYNCjAwMDAwMDAwMDkgMDAwMDAgbg0KMDAwMDAwMDA1NyAwMDAwMCBuDQowMDAwMDAwMTEzIDAwMDAwIG4NCnRyYWlsZXIKPDwvU2l6ZSA0L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKMTcyCiUlRU9G</cbc:EmbeddedDocumentBinaryObject>
+        </cac:Attachment>
+    </cac:AdditionalDocumentReference>
+
+    <!-- Pièce jointe 2 : Photo bordereau livraison PNG (1x1 transparent) -->
+    <cac:AdditionalDocumentReference>
+        <cbc:ID>BL-PJ-002</cbc:ID>
+        <cbc:DocumentDescription>Photo bordereau de livraison signé</cbc:DocumentDescription>
+        <cac:Attachment>
+            <cbc:EmbeddedDocumentBinaryObject mimeCode="image/png"
+                filename="bordereau_livraison.png">iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=</cbc:EmbeddedDocumentBinaryObject>
+        </cac:Attachment>
+    </cac:AdditionalDocumentReference>
+
+    <!-- Pièce jointe 3 : Détail des lignes en CSV -->
+    <cac:AdditionalDocumentReference>
+        <cbc:ID>DET-PJ-003</cbc:ID>
+        <cbc:DocumentDescription>Détail des lignes (CSV)</cbc:DocumentDescription>
+        <cac:Attachment>
+            <cbc:EmbeddedDocumentBinaryObject mimeCode="text/csv"
+                filename="detail_lignes.csv">cmVmO3F0ZTtwdQpBMDAxOzEwOzI1LjAwCkEwMDI7NTsxMi41MAo=</cbc:EmbeddedDocumentBinaryObject>
+        </cac:Attachment>
+    </cac:AdditionalDocumentReference>
+
+    <!-- Pièce jointe 4 : Référence externe (cahier des charges en ligne) -->
+    <cac:AdditionalDocumentReference>
+        <cbc:ID>SPEC-PJ-004</cbc:ID>
+        <cbc:DocumentDescription>Cahier des charges projet</cbc:DocumentDescription>
+        <cac:Attachment>
+            <cac:ExternalReference>
+                <cbc:URI>https://docs.example.com/specs/cahier_charges_2025.pdf</cbc:URI>
+            </cac:ExternalReference>
+        </cac:Attachment>
+    </cac:AdditionalDocumentReference>
+
+    <cac:OrderReference>
+        <cbc:ID>PO-2025-4567</cbc:ID>
+    </cac:OrderReference>
+
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:EndpointID schemeID="0009">12345678901234</cac:EndpointID>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0002">123456789</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>TechConseil SAS</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>10 rue de la Paix</cbc:StreetName>
+                <cbc:CityName>Paris</cbc:CityName>
+                <cbc:PostalZone>75001</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR12123456789</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>TechConseil SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">123456789</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:EndpointID schemeID="0009">98765432109876</cac:EndpointID>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="0002">987654321</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>IndustrieFrance SA</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
+                <cbc:CityName>Lyon</cbc:CityName>
+                <cbc:PostalZone>69001</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>FR</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>FR98987654321</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>IndustrieFrance SA</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">987654321</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+        <cbc:PaymentID>FA-2025-PJ-00501</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>FR7630001007941234567890185</cbc:ID>
+            <cbc:Name>TechConseil SAS</cbc:Name>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">300.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">1500.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">300.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">1500.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">1500.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">1800.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">1800.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="HUR">15</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">1500.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Conseil et accompagnement projet — voir cahier des charges en PJ</cbc:Description>
+            <cbc:Name>Prestation conseil</cbc:Name>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20.00</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">100.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

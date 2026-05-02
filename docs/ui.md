@@ -89,7 +89,11 @@ le healthcheck et les métriques Prometheus.
 ### Liste `/ui/flows?siren={SIREN}`
 
 Tableau paginé (50 par page) avec colonnes :
-N° facture · Vendeur · Acheteur · Statut (badge coloré) · Erreurs · Date.
+N° facture · Vendeur · Acheteur · Statut (badge coloré) · **PJ** (badge 📎 N) · Erreurs · Date.
+
+La colonne **PJ** affiche `📎 N` quand la facture a N pièces jointes
+(`attachment_count` indexé en ES) ou `—` sinon. Cliquer la facture pour
+voir le détail des PJ (extraction à la volée du `raw_xml` / `raw_pdf`).
 
 Filtres :
 - **Direction** — `Émises (vendeur)` / `Reçues (acheteur)` / toutes. Émises = le

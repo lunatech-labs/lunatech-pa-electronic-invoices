@@ -113,9 +113,21 @@ pub struct ExchangeSummary {
     pub invoice_number: Option<String>,
     pub seller_name: Option<String>,
     pub buyer_name: Option<String>,
+    #[serde(default)]
+    pub seller_siret: Option<String>,
+    #[serde(default)]
+    pub buyer_siret: Option<String>,
+    #[serde(default)]
+    pub seller_siren: Option<String>,
+    #[serde(default)]
+    pub buyer_siren: Option<String>,
     pub status: String,
     pub error_count: i32,
     pub created_at: String,
+    /// Nombre de pièces jointes (BG-24) — utile pour les listes UI sans
+    /// avoir à re-charger le document complet.
+    #[serde(default)]
+    pub attachment_count: usize,
 }
 
 impl TraceStore {
@@ -621,7 +633,7 @@ impl TraceStore {
             },
             "sort": [{ "created_at": "desc" }],
             "size": 50,
-            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number",
+            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
                         "seller_name", "buyer_name", "status", "error_count", "created_at"]
         });
 
@@ -649,7 +661,7 @@ impl TraceStore {
             "query": { "term": { "invoice_key": invoice_key } },
             "sort": [{ "created_at": "desc" }],
             "size": 5,
-            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number",
+            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
                         "seller_name", "buyer_name", "status", "error_count", "created_at"]
         });
 
@@ -743,7 +755,7 @@ impl TraceStore {
             "from": from,
             "size": page_size,
             "sort": [{ "created_at": "desc" }],
-            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number",
+            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
                         "seller_name", "buyer_name", "status", "error_count", "created_at"]
         });
 
@@ -891,9 +903,14 @@ impl TraceStore {
                         invoice_number: source["invoice_number"].as_str().map(|s| s.to_string()),
                         seller_name: source["seller_name"].as_str().map(|s| s.to_string()),
                         buyer_name: source["buyer_name"].as_str().map(|s| s.to_string()),
+                        seller_siret: source["seller_siret"].as_str().map(|s| s.to_string()),
+                        buyer_siret: source["buyer_siret"].as_str().map(|s| s.to_string()),
+                        seller_siren: source["seller_siren"].as_str().map(|s| s.to_string()),
+                        buyer_siren: source["buyer_siren"].as_str().map(|s| s.to_string()),
                         status: source["status"].as_str().unwrap_or("INCONNU").to_string(),
                         error_count: source["error_count"].as_i64().unwrap_or(0) as i32,
                         created_at: source["created_at"].as_str().unwrap_or("").to_string(),
+                        attachment_count: source["attachment_count"].as_u64().unwrap_or(0) as usize,
                     });
                 }
             }

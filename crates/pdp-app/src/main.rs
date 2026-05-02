@@ -2146,9 +2146,13 @@ async fn cmd_demo_populate(
         }
     }
 
-    // 2. Collecter les fixtures (UBL + CII)
-    let mut files: Vec<(std::path::PathBuf, &'static str)> = Vec::new();
-    for (sub, syntax) in [("ubl", "UBL"), ("cii", "CII")] {
+    // 2. Collecter les fixtures (UBL + CII XML + Factur-X PDF)
+    let mut files: Vec<(std::path::PathBuf, &'static str, &'static str)> = Vec::new();
+    for (sub, syntax, ext, mime) in [
+        ("ubl", "UBL", "xml", "application/xml"),
+        ("cii", "CII", "xml", "application/xml"),
+        ("facturx", "FacturX", "pdf", "application/pdf"),
+    ] {
         let dir = fixtures_dir.join(sub);
         if !dir.is_dir() {
             eprintln!("⚠️  {} introuvable, sauté", dir.display());
@@ -2157,16 +2161,17 @@ async fn cmd_demo_populate(
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("xml") {
-                files.push((path, syntax));
+            if path.extension().and_then(|s| s.to_str()) == Some(ext) {
+                files.push((path, syntax, mime));
             }
         }
     }
-    files.sort_by_key(|(p, _)| p.clone());
+    files.sort_by_key(|(p, _, _)| p.clone());
 
     if files.is_empty() {
         anyhow::bail!(
-            "Aucune fixture XML trouvée dans {}/ubl ou {}/cii",
+            "Aucune fixture trouvée dans {}/ubl, {}/cii ou {}/facturx",
+            fixtures_dir.display(),
             fixtures_dir.display(),
             fixtures_dir.display()
         );
@@ -2177,7 +2182,7 @@ async fn cmd_demo_populate(
     let flows_url = format!("{}/v1/flows", server_url.trim_end_matches('/'));
     let mut ok = 0usize;
     let mut errors = 0usize;
-    for (path, syntax) in &files {
+    for (path, syntax, mime) in &files {
         let bytes = std::fs::read(path)?;
         let sha = format!("{:x}", Sha256::digest(&bytes));
         let filename = path
@@ -2185,7 +2190,12 @@ async fn cmd_demo_populate(
             .and_then(|s| s.to_str())
             .unwrap_or("facture.xml")
             .to_string();
-        let tracking_id = format!("DEMO-{}", filename.trim_end_matches(".xml"));
+        let tracking_id = format!(
+            "DEMO-{}",
+            filename
+                .trim_end_matches(".xml")
+                .trim_end_matches(".pdf")
+        );
         let flow_info = serde_json::json!({
             "trackingId": tracking_id,
             "name": filename,
@@ -2200,7 +2210,7 @@ async fn cmd_demo_populate(
             .map_err(|e| anyhow::anyhow!("MIME flowInfo: {}", e))?;
         let part_file = reqwest::multipart::Part::bytes(bytes)
             .file_name(filename.clone())
-            .mime_str("application/xml")
+            .mime_str(mime)
             .map_err(|e| anyhow::anyhow!("MIME file: {}", e))?;
         let form = reqwest::multipart::Form::new()
             .part("flowInfo", part_info)
@@ -2213,7 +2223,7 @@ async fn cmd_demo_populate(
         match req.send().await {
             Ok(resp) if resp.status().as_u16() == 202 => {
                 ok += 1;
-                println!("  ✅ {} ({})", filename, syntax);
+                println!("  ✅ {} ({})", filename, *syntax);
             }
             Ok(resp) => {
                 errors += 1;

@@ -198,6 +198,39 @@ dl.kv dd { color: #1a1a2e; }
     font-size: 0.9rem;
 }
 .dl-btn:hover { background: #1a1a2e; text-decoration: none; }
+.pj-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 12px;
+    background: #f0ecf9;
+    color: #534ab7;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.siret-sub { color: #999; font-size: 0.75rem; margin-top: 0.1rem; }
+.dir-tag {
+    display: inline-block;
+    width: 1.1rem;
+    height: 1.1rem;
+    line-height: 1.1rem;
+    text-align: center;
+    border-radius: 50%;
+    font-size: 0.7rem;
+    font-weight: 700;
+    margin-right: 0.3rem;
+}
+.dir-out { background: #e3f2fd; color: #1565c0; }
+.dir-in { background: #fff3e0; color: #ed6c02; }
+.tenant-info {
+    background: #f0ecf9;
+    border-left: 3px solid #534ab7;
+    padding: 0.7rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: #16213e;
+}
 "#;
 
 fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> String {
@@ -448,27 +481,56 @@ pub async fn handle_flows_list(
             );
 
             let rows = if exchanges.is_empty() {
-                r#"<tr><td colspan="6" class="empty">Aucune facture trouvée pour ces critères.</td></tr>"#.to_string()
+                r#"<tr><td colspan="7" class="empty">Aucune facture trouvée pour ces critères.</td></tr>"#.to_string()
             } else {
                 exchanges
                     .iter()
                     .map(|e| {
+                        let pj_cell = if e.attachment_count == 0 {
+                            r#"<span style="color:#bbb">—</span>"#.to_string()
+                        } else {
+                            format!(
+                                r#"<span class="pj-badge" title="{n} pièce(s) jointe(s)">📎 {n}</span>"#,
+                                n = e.attachment_count
+                            )
+                        };
+                        // Indique si le tenant est vendeur ou acheteur de cette facture
+                        let direction_marker = if e.seller_siren.as_deref() == Some(s) {
+                            r#"<span class="dir-tag dir-out" title="Émise par ce tenant">↑</span>"#
+                        } else if e.buyer_siren.as_deref() == Some(s) {
+                            r#"<span class="dir-tag dir-in" title="Reçue par ce tenant">↓</span>"#
+                        } else {
+                            ""
+                        };
+                        let seller_cell = format!(
+                            r#"<div>{name}</div><div class="siret-sub">SIRET {siret}</div>"#,
+                            name = html_escape(e.seller_name.as_deref().unwrap_or("—")),
+                            siret = html_escape(e.seller_siret.as_deref().unwrap_or("—")),
+                        );
+                        let buyer_cell = format!(
+                            r#"<div>{name}</div><div class="siret-sub">SIRET {siret}</div>"#,
+                            name = html_escape(e.buyer_name.as_deref().unwrap_or("—")),
+                            siret = html_escape(e.buyer_siret.as_deref().unwrap_or("—")),
+                        );
                         format!(
                             r#"<tr>
-    <td><a href="/ui/flows/{flow_id}?siren={siren}">{invoice}</a></td>
+    <td>{dir} <a href="/ui/flows/{flow_id}?siren={siren}">{invoice}</a></td>
     <td>{seller}</td>
     <td>{buyer}</td>
     <td><span class="badge {badge}">{status}</span></td>
+    <td>{pj}</td>
     <td>{errors}</td>
     <td>{date}</td>
 </tr>"#,
+                            dir = direction_marker,
                             flow_id = html_escape(&e.flow_id),
                             siren = html_escape(s),
                             invoice = html_escape(e.invoice_number.as_deref().unwrap_or("—")),
-                            seller = html_escape(e.seller_name.as_deref().unwrap_or("—")),
-                            buyer = html_escape(e.buyer_name.as_deref().unwrap_or("—")),
+                            seller = seller_cell,
+                            buyer = buyer_cell,
                             badge = status_badge(&e.status),
                             status = html_escape(&e.status),
+                            pj = pj_cell,
                             errors = e.error_count,
                             date = html_escape(&e.created_at[..e.created_at.len().min(10)]),
                         )
@@ -482,10 +544,16 @@ pub async fn handle_flows_list(
             format!(
                 r#"<div class="card">
     <h2>Factures du tenant {siren}</h2>
+    <div class="tenant-info">
+        L'index Elasticsearch <code>pdp-{siren}</code> regroupe toutes les
+        factures dont le <strong>vendeur a ce SIREN</strong>. Le marqueur
+        <span class="dir-tag dir-out">↑</span> = émises (tenant vendeur),
+        <span class="dir-tag dir-in">↓</span> = reçues (tenant acheteur).
+    </div>
     {filters}
     <table>
         <thead>
-            <tr><th>N° facture</th><th>Vendeur</th><th>Acheteur</th><th>Statut</th><th>Err.</th><th>Reçue le</th></tr>
+            <tr><th>N° facture</th><th>Vendeur</th><th>Acheteur</th><th>Statut</th><th>PJ</th><th>Err.</th><th>Reçue le</th></tr>
         </thead>
         <tbody>{rows}</tbody>
     </table>
