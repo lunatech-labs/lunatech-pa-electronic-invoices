@@ -286,6 +286,17 @@
         debounceTimer = setTimeout(() => doSearch(q), 250);
     });
 
+    // Pre-remplit la recherche depuis ?q=... pour les liens partageables
+    // et les screenshots de doc.
+    (() => {
+        const params = new URLSearchParams(window.location.search);
+        const q0 = (params.get('q') || '').trim();
+        if (q0.length >= 3) {
+            searchInput.value = q0;
+            doSearch(q0);
+        }
+    })();
+
     async function doSearch(query) {
         if (query === currentQuery) return;
         currentQuery = query;
