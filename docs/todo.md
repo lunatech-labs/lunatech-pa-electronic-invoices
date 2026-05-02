@@ -298,8 +298,8 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [x] Modèle de données pour transactions et paiements (TransactionInvoice, PaymentInvoice, AggregatedTransaction)
 - [x] Sérialisation au format XSD PPF V1.0 (10.1, 10.2, 10.3, 10.4)
 - [x] Règles BR-FR-MAP (01, 04, 06, 08, 10, 12, 14, 15, 16, 17, 18, 19, 23)
-- [x] Tests générateur (22 tests) + 6 tests CLI E2E
-- [ ] Source automatique des factures (pull depuis Elasticsearch `pdp-{siren}`)
+- [x] Tests générateur (22 tests) + 10 tests CLI E2E
+- [x] Source automatique des factures depuis Elasticsearch `pdp-{siren}` (`TraceStore::get_invoices_by_period`, re-parsing UBL/CII/Factur-X)
 - [ ] CLI 10.2/10.4 (paiements — nécessite source de paiements depuis DB métier)
 - [ ] Cron / scheduler pour génération mensuelle automatique
 - [ ] Envoi SFTP via `PpfSftpProducer` avec `FFE1025A`

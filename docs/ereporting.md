@@ -33,6 +33,8 @@ DSE AIFE).
 
 ### Générer un rapport 10.1 (transactions ventes détaillées)
 
+**Source 1 — répertoire local** :
+
 ```bash
 pdp ereporting generate101 \
   --invoices-dir ./factures-novembre \
@@ -43,18 +45,46 @@ pdp ereporting generate101 \
   --output rapport-10.1-novembre.xml
 ```
 
-Le répertoire `--invoices-dir` est scanné pour les fichiers `.xml` (UBL/CII)
-et `.pdf` (Factur-X). Format détecté automatiquement.
+Le répertoire est scanné pour les fichiers `.xml` (UBL/CII) et `.pdf`
+(Factur-X). Format détecté automatiquement.
+
+**Source 2 — Elasticsearch (`pdp-{siren}`)** : omettre `--invoices-dir` pour
+que Ferrite aille chercher les factures **directement dans son propre index ES**
+(toutes les factures avec `status = DISTRIBUÉ` sur la période). Pas besoin de
+préparer un répertoire :
+
+```bash
+pdp --config config.yaml ereporting generate101 \
+  --siren 123456789 \
+  --name "ACME SAS" \
+  --from 2025-11-01 \
+  --to 2025-11-30 \
+  --output rapport-10.1-novembre.xml
+
+# 📊 1247 factures trouvées dans pdp-123456789 sur la période 2025-11-01..2025-11-30
+# ✅ Rapport écrit dans rapport-10.1-novembre.xml
+```
+
+Les factures sont reconstruites depuis `raw_xml` (UBL/CII parsers
+automatiques selon `source_format`). Idéal pour automatiser la déclaration
+mensuelle via cron.
 
 ### Générer un rapport 10.3 (transactions agrégées)
 
 ```bash
+# Depuis un répertoire local
 pdp ereporting generate103 \
   --invoices-dir ./factures-novembre \
   --siren 123456789 \
   --name "ACME SAS" \
   --from 2025-11-01 \
   --to 2025-11-30 \
+  --output rapport-10.3-novembre.xml
+
+# Ou depuis Elasticsearch (omettre --invoices-dir)
+pdp --config config.yaml ereporting generate103 \
+  --siren 123456789 --name "ACME SAS" \
+  --from 2025-11-01 --to 2025-11-30 \
   --output rapport-10.3-novembre.xml
 ```
 

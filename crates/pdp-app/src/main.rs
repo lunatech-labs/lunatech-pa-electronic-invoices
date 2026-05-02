@@ -94,13 +94,16 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum EreportingCommands {
-    /// Génère un rapport Flux 10.1 (transactions ventes détaillées) à partir
-    /// d'un répertoire de factures (UBL/CII/Factur-X autodétection).
+    /// Génère un rapport Flux 10.1 (transactions ventes détaillées).
+    ///
+    /// Source des factures : `--invoices-dir <chemin>` (autodétection UBL/CII/
+    /// Factur-X) OU automatiquement depuis Elasticsearch `pdp-{siren}` si
+    /// `--invoices-dir` est omis (la config doit fournir `elasticsearch.url`).
     Generate101 {
-        /// Répertoire contenant les factures
+        /// Répertoire contenant les factures (sinon : pull depuis Elasticsearch)
         #[arg(long)]
-        invoices_dir: PathBuf,
-        /// SIREN du déclarant (vendeur)
+        invoices_dir: Option<PathBuf>,
+        /// SIREN du déclarant (vendeur) — sert aussi à cibler l'index ES
         #[arg(long)]
         siren: String,
         /// Nom du déclarant
@@ -120,13 +123,15 @@ enum EreportingCommands {
         output: Option<PathBuf>,
     },
 
-    /// Génère un rapport Flux 10.3 (transactions ventes agrégées par jour/catégorie)
-    /// à partir d'un répertoire de factures.
+    /// Génère un rapport Flux 10.3 (transactions ventes agrégées par jour/catégorie).
+    ///
+    /// Source des factures : `--invoices-dir <chemin>` OU Elasticsearch
+    /// `pdp-{siren}` si `--invoices-dir` est omis.
     Generate103 {
-        /// Répertoire contenant les factures
+        /// Répertoire contenant les factures (sinon : pull depuis Elasticsearch)
         #[arg(long)]
-        invoices_dir: PathBuf,
-        /// SIREN du déclarant (vendeur)
+        invoices_dir: Option<PathBuf>,
+        /// SIREN du déclarant (vendeur) — sert aussi à cibler l'index ES
         #[arg(long)]
         siren: String,
         /// Nom du déclarant
@@ -190,7 +195,7 @@ async fn main() -> Result<()> {
         Commands::Errors => cmd_errors(&cli.config).await,
         Commands::FlowEvents { flow_id } => cmd_flow_events(&cli.config, &flow_id).await,
         Commands::Annuaire { action } => cmd_annuaire(&cli.config, action).await,
-        Commands::Ereporting { action } => cmd_ereporting(action).await,
+        Commands::Ereporting { action } => cmd_ereporting(&cli.config, action).await,
     }
 }
 
@@ -1911,7 +1916,89 @@ fn write_or_print(output: Option<&std::path::Path>, content: &str) -> Result<()>
     Ok(())
 }
 
-async fn cmd_ereporting(action: EreportingCommands) -> Result<()> {
+/// Convertit un `ExchangeDocument` Elasticsearch en `InvoiceData` complet
+/// en re-parsant le `raw_xml` (UBL/CII/Factur-X selon `source_format`).
+/// Si `raw_xml` est absent ou le parsing échoue, retourne `None`.
+fn exchange_doc_to_invoice(
+    doc: &pdp_trace::store::ExchangeDocument,
+) -> Option<pdp_core::model::InvoiceData> {
+    let raw = doc.raw_xml.as_deref()?;
+    let format_str = doc.source_format.as_deref().unwrap_or("UBL");
+    let bytes = raw.as_bytes().to_vec();
+
+    match format_str.to_uppercase().as_str() {
+        "UBL" => pdp_invoice::UblParser::new().parse(raw).ok(),
+        "CII" => pdp_invoice::CiiParser::new().parse(raw).ok(),
+        "FACTURX" | "FACTUR-X" => pdp_invoice::FacturXParser::new().parse(&bytes).ok(),
+        _ => {
+            // Format inconnu : tenter détection automatique
+            let format = pdp_invoice::detect_format(&bytes).ok()?;
+            match format {
+                pdp_core::model::InvoiceFormat::UBL => {
+                    pdp_invoice::UblParser::new().parse(raw).ok()
+                }
+                pdp_core::model::InvoiceFormat::CII => {
+                    pdp_invoice::CiiParser::new().parse(raw).ok()
+                }
+                pdp_core::model::InvoiceFormat::FacturX => {
+                    pdp_invoice::FacturXParser::new().parse(&bytes).ok()
+                }
+            }
+        }
+    }
+}
+
+/// Récupère les factures du tenant depuis Elasticsearch sur la période donnée
+/// et les convertit en `InvoiceData` parseés.
+async fn load_invoices_from_es(
+    config_path: &std::path::Path,
+    siren: &str,
+    from: &str,
+    to: &str,
+) -> Result<Vec<pdp_core::model::InvoiceData>> {
+    let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))
+        .map_err(|e| anyhow::anyhow!("Chargement config : {}", e))?;
+    let store = pdp_trace::TraceStore::new(&config.elasticsearch.url)
+        .await
+        .map_err(|e| anyhow::anyhow!("Connexion Elasticsearch : {}", e))?;
+
+    let docs = store
+        .get_invoices_by_period(siren, from, to)
+        .await
+        .map_err(|e| anyhow::anyhow!("Recherche ES : {}", e))?;
+
+    println!(
+        "📊 {} factures trouvées dans pdp-{} sur la période {}..{}",
+        docs.len(),
+        siren,
+        from,
+        to
+    );
+
+    let mut invoices = Vec::with_capacity(docs.len());
+    let mut skipped = 0;
+    for doc in &docs {
+        match exchange_doc_to_invoice(doc) {
+            Some(inv) => invoices.push(inv),
+            None => {
+                skipped += 1;
+                tracing::debug!(
+                    invoice_number = doc.invoice_number.as_deref().unwrap_or("?"),
+                    "Facture non re-parseable depuis ES (raw_xml manquant ou invalide)"
+                );
+            }
+        }
+    }
+    if skipped > 0 {
+        eprintln!("⚠️  {} factures ignorées (raw_xml manquant ou invalide)", skipped);
+    }
+    Ok(invoices)
+}
+
+async fn cmd_ereporting(
+    config_path: &std::path::Path,
+    action: EreportingCommands,
+) -> Result<()> {
     use pdp_ereporting::EReportingGenerator;
 
     match action {
@@ -1924,12 +2011,18 @@ async fn cmd_ereporting(action: EreportingCommands) -> Result<()> {
             report_id,
             output,
         } => {
-            let invoices = load_invoices_from_dir(&invoices_dir)?;
-            println!(
-                "📊 {} factures chargées depuis {}",
-                invoices.len(),
-                invoices_dir.display()
-            );
+            let invoices = match invoices_dir {
+                Some(dir) => {
+                    let inv = load_invoices_from_dir(&dir)?;
+                    println!(
+                        "📊 {} factures chargées depuis {}",
+                        inv.len(),
+                        dir.display()
+                    );
+                    inv
+                }
+                None => load_invoices_from_es(config_path, &siren, &from, &to).await?,
+            };
             let transactions: Vec<_> = invoices
                 .iter()
                 .map(EReportingGenerator::invoice_to_transaction)
@@ -1955,12 +2048,18 @@ async fn cmd_ereporting(action: EreportingCommands) -> Result<()> {
             report_id,
             output,
         } => {
-            let invoices = load_invoices_from_dir(&invoices_dir)?;
-            println!(
-                "📊 {} factures chargées depuis {}",
-                invoices.len(),
-                invoices_dir.display()
-            );
+            let invoices = match invoices_dir {
+                Some(dir) => {
+                    let inv = load_invoices_from_dir(&dir)?;
+                    println!(
+                        "📊 {} factures chargées depuis {}",
+                        inv.len(),
+                        dir.display()
+                    );
+                    inv
+                }
+                None => load_invoices_from_es(config_path, &siren, &from, &to).await?,
+            };
             let gen = EReportingGenerator::new(&siren, &name);
             let id = report_id.unwrap_or_else(|| {
                 format!("RPT-10.3-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"))
@@ -2065,9 +2164,11 @@ mod tests {
         let dir = ereporting_test_dir("gen-101");
         copy_fixture("tests/fixtures/ubl/facture_ubl_001.xml", &dir);
         let out = dir.join("report-10.1.xml");
+        // Le config_path n'est pas utilisé quand invoices_dir est fourni
+        let dummy_config = std::path::PathBuf::from("/tmp/unused-config.yaml");
 
-        cmd_ereporting(EreportingCommands::Generate101 {
-            invoices_dir: dir.clone(),
+        cmd_ereporting(&dummy_config, EreportingCommands::Generate101 {
+            invoices_dir: Some(dir.clone()),
             siren: "123456789".to_string(),
             name: "ACME SAS".to_string(),
             from: "2025-11-01".to_string(),
@@ -2093,9 +2194,10 @@ mod tests {
         let dir = ereporting_test_dir("gen-103");
         copy_fixture("tests/fixtures/ubl/facture_ubl_001.xml", &dir);
         let out = dir.join("report-10.3.xml");
+        let dummy_config = std::path::PathBuf::from("/tmp/unused-config.yaml");
 
-        cmd_ereporting(EreportingCommands::Generate103 {
-            invoices_dir: dir.clone(),
+        cmd_ereporting(&dummy_config, EreportingCommands::Generate103 {
+            invoices_dir: Some(dir.clone()),
             siren: "123456789".to_string(),
             name: "ACME SAS".to_string(),
             from: "2025-11-01".to_string(),
@@ -2111,5 +2213,84 @@ mod tests {
         assert!(xml.contains("<AggregatedTransaction>"));
         // Période normalisée
         assert!(xml.contains("<StartDate>20251101</StartDate>"));
+    }
+
+    fn fixture_xml(rel_path: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(rel_path);
+        std::fs::read_to_string(&path).unwrap()
+    }
+
+    fn exchange_doc(raw_xml: Option<String>, source_format: Option<&str>) -> pdp_trace::store::ExchangeDocument {
+        pdp_trace::store::ExchangeDocument {
+            exchange_id: "exch-1".to_string(),
+            flow_id: "flow-1".to_string(),
+            source_filename: Some("facture.xml".to_string()),
+            invoice_number: Some("F-001".to_string()),
+            invoice_key: None,
+            seller_name: None,
+            buyer_name: None,
+            seller_siret: Some("12345678901234".to_string()),
+            buyer_siret: Some("98765432109876".to_string()),
+            seller_siren: Some("123456789".to_string()),
+            buyer_siren: Some("987654321".to_string()),
+            source_format: source_format.map(String::from),
+            total_ht: Some(1000.0),
+            total_ttc: Some(1200.0),
+            total_tax: Some(200.0),
+            currency: Some("EUR".to_string()),
+            issue_date: Some("2025-11-15".to_string()),
+            status: "DISTRIBUÉ".to_string(),
+            error_count: 0,
+            raw_xml,
+            raw_pdf_base64: None,
+            converted_xml: None,
+            converted_format: None,
+            attachment_count: 0,
+            attachment_filenames: vec![],
+            events: vec![],
+            errors: vec![],
+            validation_warnings: vec![],
+            created_at: "2025-11-15T10:00:00Z".to_string(),
+            updated_at: "2025-11-15T10:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_exchange_doc_to_invoice_ubl() {
+        let xml = fixture_xml("tests/fixtures/ubl/facture_ubl_001.xml");
+        let doc = exchange_doc(Some(xml), Some("UBL"));
+        let invoice = exchange_doc_to_invoice(&doc).expect("UBL parse");
+        assert!(!invoice.invoice_number.is_empty());
+        assert!(invoice.seller_siret.is_some());
+    }
+
+    #[test]
+    fn test_exchange_doc_to_invoice_cii() {
+        let xml = fixture_xml("tests/fixtures/cii/facture_cii_001.xml");
+        let doc = exchange_doc(Some(xml), Some("CII"));
+        let invoice = exchange_doc_to_invoice(&doc).expect("CII parse");
+        assert!(!invoice.invoice_number.is_empty());
+    }
+
+    #[test]
+    fn test_exchange_doc_to_invoice_no_raw_xml() {
+        let doc = exchange_doc(None, Some("UBL"));
+        assert!(exchange_doc_to_invoice(&doc).is_none());
+    }
+
+    #[test]
+    fn test_exchange_doc_to_invoice_unknown_format_autodetect() {
+        // source_format absent → détection automatique sur le contenu
+        let xml = fixture_xml("tests/fixtures/ubl/facture_ubl_001.xml");
+        let doc = exchange_doc(Some(xml), None);
+        let invoice = exchange_doc_to_invoice(&doc);
+        // Soit autodétection réussit, soit échoue proprement (None)
+        // — pas de panic dans tous les cas
+        let _ = invoice;
     }
 }

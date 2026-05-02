@@ -703,6 +703,68 @@ impl TraceStore {
         Ok(None)
     }
 
+    /// Récupère toutes les factures émises (status DISTRIBUÉ) d'un tenant
+    /// sur une période donnée. Utilisé par l'e-reporting Flux 10.
+    ///
+    /// - `siren` : SIREN du tenant (un index par SIREN : `pdp-{siren}`)
+    /// - `from_date`, `to_date` : bornes au format `YYYY-MM-DD` (inclusives)
+    ///
+    /// Retourne les `ExchangeDocument` complets (incluant le `raw_xml`)
+    /// triés par date d'émission croissante.
+    pub async fn get_invoices_by_period(
+        &self,
+        siren: &str,
+        from_date: &str,
+        to_date: &str,
+    ) -> PdpResult<Vec<ExchangeDocument>> {
+        let index = Self::index_name(siren);
+
+        let search_body = serde_json::json!({
+            "query": {
+                "bool": {
+                    "must": [
+                        { "range": {
+                            "issue_date": {
+                                "gte": from_date,
+                                "lte": to_date,
+                            }
+                        }},
+                        { "term": { "status": "DISTRIBUÉ" } }
+                    ]
+                }
+            },
+            "sort": [{ "issue_date": "asc" }],
+            "size": 10_000,
+        });
+
+        let resp = self.client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&search_body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Recherche factures par période échouée: {}", e)))?;
+
+        if !resp.status().is_success() {
+            // Index n'existe pas encore (tenant sans facture)
+            return Ok(Vec::new());
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+
+        let mut docs = Vec::new();
+        if let Some(hits) = body["hits"]["hits"].as_array() {
+            for hit in hits {
+                if let Some(source) = hit.get("_source") {
+                    if let Ok(doc) = serde_json::from_value::<ExchangeDocument>(source.clone()) {
+                        docs.push(doc);
+                    }
+                }
+            }
+        }
+        Ok(docs)
+    }
+
     /// Liste tous les index (= tous les SIREN connus)
     pub async fn list_sirens(&self) -> PdpResult<Vec<String>> {
         let resp = self.client
