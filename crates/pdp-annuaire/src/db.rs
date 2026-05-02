@@ -21,6 +21,19 @@ pub struct EtablissementRow {
     pub code_postal: Option<String>,
 }
 
+/// Ligne de code routage pour les résultats de requête
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct CodeRoutageRow {
+    pub siret: String,
+    pub id_routage: String,
+    pub nom: String,
+    pub statut: String,
+    pub adresse_1: Option<String>,
+    pub localite: Option<String>,
+    pub code_postal: Option<String>,
+    pub code_pays: Option<String>,
+}
+
 /// Ligne de plateforme pour les résultats de requête
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct PlateformeRow {
@@ -476,6 +489,26 @@ impl AnnuaireStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
+    }
+
+    /// Recherche un code de routage par SIRET + identifiant de routage
+    /// (utilisé par l'endpoint AFNOR GET /v1/routing-code/siret:{siret}/code:{routing-id}).
+    pub async fn lookup_code_routage(
+        &self,
+        siret: &str,
+        id_routage: &str,
+    ) -> Result<Option<CodeRoutageRow>, DbError> {
+        let row = sqlx::query_as::<_, CodeRoutageRow>(
+            "SELECT siret, id_routage, nom, statut, adresse_1, localite, code_postal, code_pays
+             FROM codes_routage
+             WHERE siret = $1 AND id_routage = $2
+             LIMIT 1",
+        )
+        .bind(siret)
+        .bind(id_routage)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
     }
 
     /// Recherche un établissement par SIRET exact

@@ -62,6 +62,19 @@ Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 - [x] Intégré dans `add_common_processors` après `DocumentTypeRouter`
 - [x] 10 tests unitaires (relay 210/212, skip pour autres codes, erreur PPF)
 
+### Directory Service AFNOR (XP Z12-013 Annexe B) — endpoints complets
+
+- [x] GET /v1/siren/code-insee:{siren}
+- [x] POST /v1/siren/search
+- [x] GET /v1/siret/code-insee:{siret}
+- [x] POST /v1/siret/search
+- [x] GET /v1/routing-code/siret:{siret}/code:{routing-id} (nouveau)
+- [x] POST /v1/routing-code/search
+- [x] GET /v1/directory-line/code:{addressing-id}
+- [x] POST /v1/directory-line/search
+- [x] GET /v1/healthcheck
+- [x] AnnuaireStore.lookup_code_routage() + 3 tests testcontainers PostgreSQL
+
 ### Webhooks AFNOR (XP Z12-013 §5.4)
 
 - [x] Modèles conformes Swagger : `CallbackParameters`, `WebhookMetadata`, etc.

@@ -21,7 +21,7 @@ pub mod parser;
 pub mod processor;
 pub mod service;
 
-pub use db::{AnnuaireStore, EtablissementRow, PlateformeRow, SearchResult};
+pub use db::{AnnuaireStore, CodeRoutageRow, EtablissementRow, PlateformeRow, SearchResult};
 pub use ingest::ingest_f14;
 pub use model::*;
 pub use parser::parse_f14;

@@ -18,7 +18,7 @@
 | Spécification | Conformité | Statut |
 |---------------|-----------|--------|
 | **XP Z12-012** (Formats & Profils) | **97%** | Quasi-complet — manque Flux 11 V1.3 et multi-vendeurs |
-| **XP Z12-013** (APIs Flow/Directory) | **55%** | docType implémenté, webhooks manquants |
+| **XP Z12-013** (APIs Flow/Directory) | **90%** | Webhooks ✅, Directory complet ✅, manque : retry webhooks, OAUTH2, headers Request-Id/Org-Id |
 | **XP Z12-014** (Cas d'usage B2B) | **69%** | 35/51 cas implémentés, 13 partiels |
 | **DSE AIFE** (Specifications externes) | **85%** | SFTP PPF complet, Flux 13/14 manquants |
 
@@ -148,14 +148,14 @@ Les 9 chemins de conversion sont implémentés. Les pièces jointes (BG-24) sont
 | Endpoint | Statut | Détails |
 |----------|--------|---------|
 | GET /v1/siren/code-insee:{siren} | ✅ | `get_siren()` avec Bearer token |
-| POST /v1/siren/search | ❌ | Recherche multi-SIREN non implémentée |
+| POST /v1/siren/search | ✅ | `handle_ds_search_siren` |
 | GET /v1/siret/code-insee:{siret} | ✅ | `get_siret()` avec Bearer token |
-| POST /v1/siret/search | ❌ | Recherche multi-SIRET non implémentée |
-| GET /v1/routing-code/siret:{siret}/code:{id} | ❌ | Pas de GET direct par siret+code |
-| POST /v1/routing-code/search | ✅ | `search_routing_codes()` |
-| GET /v1/directory-line/code:{id} | ❌ | Pas de GET par addressing-identifier |
-| POST /v1/directory-line/search | ✅ | `search_directory_lines()` |
-| GET /v1/healthcheck | ❌ | Non implémenté |
+| POST /v1/siret/search | ✅ | `handle_ds_search_siret` |
+| GET /v1/routing-code/siret:{siret}/code:{id} | ✅ | `handle_ds_get_routing_code` (lookup_code_routage) |
+| POST /v1/routing-code/search | ✅ | `handle_ds_search_routing` |
+| GET /v1/directory-line/code:{id} | ✅ | `handle_ds_get_directory_line` |
+| POST /v1/directory-line/search | ✅ | `handle_ds_search_directory_lines` |
+| GET /v1/healthcheck | ✅ | `handle_healthcheck` |
 
 ### 2.3 Authentification OAuth2 PISTE
 

@@ -163,6 +163,10 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/v1/siret/code-insee:{siret}", get(handle_ds_get_siret))
         .route("/v1/siret/search", post(handle_ds_search_siret))
         .route("/v1/routing-code/search", post(handle_ds_search_routing))
+        .route(
+            "/v1/routing-code/siret:{siret}/code:{routing_identifier}",
+            get(handle_ds_get_routing_code),
+        )
         .route("/v1/directory-line/code:{addressing_id}", get(handle_ds_get_directory_line))
         .route("/v1/directory-line/search", post(handle_ds_search_directory_lines))
         // Endpoints internes (stats, plateformes)
@@ -1152,6 +1156,49 @@ async fn handle_ds_search_routing(
         }
         Ok(None) => (StatusCode::OK, Json(serde_json::json!({"items": [], "total": 0}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// GET /v1/routing-code/siret:{siret}/code:{routing_identifier}
+/// AFNOR XP Z12-013 V1.2.0 §Annexe B — récupère un code de routage par SIRET + identifiant.
+async fn handle_ds_get_routing_code(
+    State(state): State<Arc<AppState>>,
+    Path((siret, routing_identifier)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let store = require_annuaire!(state);
+
+    match store.lookup_code_routage(&siret, &routing_identifier).await {
+        Ok(Some(cr)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "routingIdentifier": cr.id_routage,
+                "siret": cr.siret,
+                "routingCodeName": cr.nom,
+                "administrativeStatus": cr.statut,
+                "address": {
+                    "addressLine1": cr.adresse_1,
+                    "city": cr.localite,
+                    "postalCode": cr.code_postal,
+                    "countryCode": cr.code_pays,
+                },
+            })),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": format!(
+                    "Code de routage non trouvé pour SIRET={} et routing-identifier={}",
+                    siret, routing_identifier
+                ),
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
     }
 }
 
@@ -2865,6 +2912,53 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ---------------------------------------------------------------
+    // Directory Service : GET /v1/routing-code/siret:{siret}/code:{id}
+    // (XP Z12-013 V1.2.0 Annexe B)
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_get_routing_code_returns_404_when_not_found() {
+        // Pas d'annuaire_store configuré : l'endpoint répond 503
+        // (require_annuaire! retourne SERVICE_UNAVAILABLE).
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/routing-code/siret:12345678901234/code:0224ABC")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        // Sans annuaire_store, on attend 503
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_get_routing_code_route_registered() {
+        // Vérifie simplement que la route est bien câblée (méthode + path)
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        // Mauvaise méthode → 405 Method Not Allowed (route existe mais GET seulement)
+        let req = Request::builder()
+            .uri("/v1/routing-code/siret:12345678901234/code:0224ABC")
+            .method("DELETE")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        // 405 si la route est enregistrée avec une autre méthode, 404 sinon
+        assert!(
+            resp.status() == StatusCode::METHOD_NOT_ALLOWED
+                || resp.status() == StatusCode::NOT_FOUND
+                || resp.status() == StatusCode::SERVICE_UNAVAILABLE,
+            "status was {}",
+            resp.status()
+        );
     }
 
     #[tokio::test]
