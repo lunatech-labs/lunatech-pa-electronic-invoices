@@ -20,7 +20,7 @@
 | **XP Z12-012** (Formats & Profils) | **97%** | Quasi-complet — manque Flux 11 V1.3 et multi-vendeurs |
 | **XP Z12-013** (APIs Flow/Directory) | **95%** | Webhooks ✅ (persistence Postgres, retry, OAUTH2), Directory complet ✅, codes HTTP fins ✅ |
 | **XP Z12-014** (Cas d'usage B2B) | **69%** | 35/51 cas implémentés, 13 partiels |
-| **DSE AIFE** (Specifications externes) | **92%** | E-reporting Flux 10.1-10.4 complet ✅, BR-FR-MAP-23 ✅, manque Flux 13/14 (annuaire SFTP) |
+| **DSE AIFE** (Specifications externes) | **96%** | E-reporting Flux 10.1-10.4 ✅, BR-FR-MAP-23 ✅, F13 generator + F14 auto-import + CDV F6 annuaire (400/401) ✅, restent : orchestration SFTP cron F13/F14 |
 
 **Évaluation globale** : Ferrite couvre solidement le cœur métier (parsing UBL/CII/Factur-X, validation Schematron, transformation, CDAR avec acteurs corrects V1.2 + 22 statuts incluant CDV 221 ERREUR_ROUTAGE, annuaire local PostgreSQL, séparation PA-E/PA-R, relais CDV→PPF Flux 6, e-reporting Flux 10.1-10.4 avec BR-FR-MAP-23, webhooks AFNOR persistés, codes HTTP 408/413/429/501). Les fondamentaux réglementaires sont conformes. **Points en attente** : Flux 11 (nouveau V1.3), Flux 13/14 annuaire SFTP, multi-vendeurs.
 
@@ -317,9 +317,12 @@ Les 9 chemins de conversion sont implémentés. Les pièces jointes (BG-24) sont
 | Authentification PISTE | ✅ | OAuth2 client_credentials |
 | **Annuaire local PostgreSQL** | ✅ | Import F14 streaming, 9.7M UL |
 | **Service AnnuaireService** | ✅ | exists_siren, is_active, validate_parties (G1.63) |
-| **AnnuaireValidationProcessor** | ⚠️ | Créé mais pas encore wiré dans le pipeline |
-| Flux 13 (actualisation annuaire) | ❌ | Code interface défini mais pas implémenté |
-| Flux 14 (export annuaire) | ❌ | Code interface défini mais pas implémenté |
+| **AnnuaireValidationProcessor** | ✅ | Wiré dans `add_emission_processors` et `add_reception_processors` |
+| **AnnuaireImportProcessor** | ✅ | Auto-ingestion F14 quand reçu via `PpfReturnConsumer` (FFE1435A) |
+| **F13 Generator** | ✅ | `generate_f13_xml()` + `build_ligne_for_f13()` (Création/Modification/Suppression) |
+| **CDV F6 annuaire (400/401)** | ✅ | `AnnuaireStatusCode` + détection dans `DocumentTypeRouter` (FFE0634A) |
+| Flux 13 envoi SFTP automatique | ⚠️ | Generator livré ; orchestration cron / déclencheur métier à câbler |
+| Flux 14 polling SFTP automatique | ⚠️ | Processor livré ; configuration `PpfReturnConsumerConfig` avec chemin F14 à compléter |
 
 ### 4.3 E-reporting
 

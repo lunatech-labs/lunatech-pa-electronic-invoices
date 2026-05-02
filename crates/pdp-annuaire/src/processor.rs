@@ -175,6 +175,143 @@ impl Processor for AnnuaireValidationProcessor {
     }
 }
 
+// ============================================================
+// AnnuaireImportProcessor — ingestion automatique des F14 reçus du PPF
+// ============================================================
+
+/// Processor qui ingère automatiquement un flux F14 (export annuaire PPF)
+/// reçu via le `PpfReturnConsumer`.
+///
+/// Conditions de déclenchement :
+/// - L'exchange porte la propriété `ppf.code_interface = FFE1435A`
+/// - Le `body` contient le XML F14 décompressé
+/// - Un `AnnuaireStore` est configuré (sinon le processor logue et passe)
+///
+/// Produit après traitement :
+/// - `annuaire.import.ok = "true"` ou `annuaire.import.error = <message>`
+/// - `annuaire.import.unites_legales`, `.etablissements`, `.codes_routage`,
+///   `.plateformes`, `.lignes_annuaire` (compteurs)
+///
+/// Code interface PPF : `FFE1435A`
+/// Spécifications externes DSE AIFE V3.1, §3.4 (Flux 14 — export annuaire).
+pub struct AnnuaireImportProcessor {
+    store: Option<Arc<crate::AnnuaireStore>>,
+    /// Si `Some`, vérifie que l'horodate du F14 correspond à la valeur attendue
+    /// (utile pour les imports différentiels successifs).
+    expect_horodate: Option<String>,
+}
+
+impl AnnuaireImportProcessor {
+    pub fn new(store: Option<Arc<crate::AnnuaireStore>>) -> Self {
+        Self {
+            store,
+            expect_horodate: None,
+        }
+    }
+
+    pub fn with_expected_horodate(mut self, horodate: &str) -> Self {
+        self.expect_horodate = Some(horodate.to_string());
+        self
+    }
+}
+
+#[async_trait]
+impl Processor for AnnuaireImportProcessor {
+    fn name(&self) -> &str {
+        "AnnuaireImportProcessor"
+    }
+
+    async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        // Skip si pas un F14
+        let is_f14 = exchange
+            .get_property("ppf.code_interface")
+            .map(|s| s.as_str() == "FFE1435A")
+            .unwrap_or(false);
+        if !is_f14 {
+            return Ok(exchange);
+        }
+
+        // Skip si pas de store
+        let store = match &self.store {
+            Some(s) => s.clone(),
+            None => {
+                tracing::warn!(
+                    exchange_id = %exchange.id,
+                    "F14 reçu mais aucun AnnuaireStore configuré — ingestion ignorée"
+                );
+                exchange.set_property(
+                    "annuaire.import.error",
+                    "AnnuaireStore non configuré",
+                );
+                return Ok(exchange);
+            }
+        };
+
+        // Skip si body vide
+        if exchange.body.is_empty() {
+            exchange.set_property("annuaire.import.error", "F14 body vide");
+            return Ok(exchange);
+        }
+
+        let bytes = exchange.body.clone();
+        let reader = std::io::Cursor::new(bytes);
+
+        tracing::info!(
+            exchange_id = %exchange.id,
+            size = exchange.body.len(),
+            "Ingestion F14 reçu du PPF"
+        );
+
+        match crate::ingest::ingest_f14(reader, &store, self.expect_horodate.as_deref()).await {
+            Ok(stats) => {
+                tracing::info!(
+                    unites_legales = stats.unites_legales,
+                    etablissements = stats.etablissements,
+                    codes_routage = stats.codes_routage,
+                    plateformes = stats.plateformes,
+                    lignes_annuaire = stats.lignes_annuaire,
+                    "F14 ingéré avec succès"
+                );
+                exchange.set_property("annuaire.import.ok", "true");
+                exchange.set_property(
+                    "annuaire.import.unites_legales",
+                    &stats.unites_legales.to_string(),
+                );
+                exchange.set_property(
+                    "annuaire.import.etablissements",
+                    &stats.etablissements.to_string(),
+                );
+                exchange.set_property(
+                    "annuaire.import.codes_routage",
+                    &stats.codes_routage.to_string(),
+                );
+                exchange.set_property(
+                    "annuaire.import.plateformes",
+                    &stats.plateformes.to_string(),
+                );
+                exchange.set_property(
+                    "annuaire.import.lignes_annuaire",
+                    &stats.lignes_annuaire.to_string(),
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    exchange_id = %exchange.id,
+                    error = %e,
+                    "Échec ingestion F14"
+                );
+                exchange.set_property("annuaire.import.error", &e.to_string());
+                exchange.add_error(
+                    "annuaire-import",
+                    &PdpError::ConfigError(format!("Ingestion F14 échouée: {}", e)),
+                );
+            }
+        }
+
+        Ok(exchange)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +355,55 @@ mod tests {
 
         let result = processor.process(exchange).await.unwrap();
         assert!(!result.has_errors());
+    }
+
+    // ============================================================
+    // AnnuaireImportProcessor — tests sans Postgres
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_import_skips_non_f14() {
+        // Pas de ppf.code_interface → skip propre
+        let processor = AnnuaireImportProcessor::new(None);
+        let exchange = Exchange::new(b"<not-f14/>".to_vec());
+
+        let result = processor.process(exchange).await.unwrap();
+        assert!(result.get_property("annuaire.import.ok").is_none());
+        assert!(result.get_property("annuaire.import.error").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_import_skips_other_code_interface() {
+        // Code interface différent (FFE0614A = F6 facture) → skip
+        let processor = AnnuaireImportProcessor::new(None);
+        let mut exchange = Exchange::new(b"<not-f14/>".to_vec());
+        exchange.set_property("ppf.code_interface", "FFE0614A");
+
+        let result = processor.process(exchange).await.unwrap();
+        assert!(result.get_property("annuaire.import.ok").is_none());
+        assert!(result.get_property("annuaire.import.error").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_import_f14_no_store_logs_warning() {
+        // F14 reconnu mais pas de store → annuaire.import.error renseigné, pas d'erreur fatale
+        let processor = AnnuaireImportProcessor::new(None);
+        let mut exchange = Exchange::new(b"<irrelevant/>".to_vec());
+        exchange.set_property("ppf.code_interface", "FFE1435A");
+
+        let result = processor.process(exchange).await.unwrap();
+        assert_eq!(
+            result.get_property("annuaire.import.error").map(|s| s.as_str()),
+            Some("AnnuaireStore non configuré")
+        );
+        // Pas d'erreur fatale — on continue le pipeline (par ex. archivage du flux)
+        assert!(!result.has_errors());
+    }
+
+    #[test]
+    fn test_import_processor_with_expected_horodate() {
+        let processor = AnnuaireImportProcessor::new(None)
+            .with_expected_horodate("20260501120000");
+        assert_eq!(processor.expect_horodate.as_deref(), Some("20260501120000"));
     }
 }

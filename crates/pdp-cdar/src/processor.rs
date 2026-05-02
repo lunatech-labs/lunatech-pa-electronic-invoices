@@ -145,6 +145,40 @@ impl Processor for DocumentTypeRouter {
                     exchange.add_error("CdvReception", &error);
                 }
 
+                // CDV F6 annuaire (FFE0634A) — réponse PPF à un flux F13.
+                // Codes 400 (Acceptée) / 401 (Rejetée).
+                let is_annuaire_cdv = exchange
+                    .get_property("ppf.code_interface")
+                    .map(|s| s.as_str() == "FFE0634A")
+                    .unwrap_or(false);
+                if is_annuaire_cdv {
+                    if let Some(annuaire_status) =
+                        crate::model::AnnuaireStatusCode::from_code(status_code)
+                    {
+                        exchange.set_property("cdv.annuaire", "true");
+                        exchange.set_property(
+                            "cdv.annuaire.status_code",
+                            &annuaire_status.code().to_string(),
+                        );
+                        exchange.set_property(
+                            "cdv.annuaire.status_label",
+                            annuaire_status.label(),
+                        );
+                        if matches!(annuaire_status, crate::model::AnnuaireStatusCode::Rejetee) {
+                            let err = PdpError::CdarError(format!(
+                                "Demande F13 rejetée par le PPF: {}",
+                                process_condition
+                            ));
+                            exchange.add_error("CdvAnnuaire", &err);
+                        }
+                        tracing::info!(
+                            cdv_id = %cdv.document_id,
+                            annuaire_status = %annuaire_status,
+                            "CDV F6 annuaire reçu (réponse à un F13)"
+                        );
+                    }
+                }
+
                 // Mapper le statut CDV vers le FlowStatus du pipeline
                 let flow_status = map_cdv_to_flow_status(status_code);
                 exchange.status = flow_status.clone();
@@ -484,6 +518,13 @@ impl Processor for CdvReceptionProcessor {
 
 /// Mappe un code statut CDV (InvoiceStatusCode) vers un FlowStatus du pipeline
 fn map_cdv_to_flow_status(status_code: u16) -> FlowStatus {
+    // CDV F6 annuaire (réponses PPF aux F13)
+    if let Some(annuaire) = crate::model::AnnuaireStatusCode::from_code(status_code) {
+        return match annuaire {
+            crate::model::AnnuaireStatusCode::Acceptee => FlowStatus::Acknowledged,
+            crate::model::AnnuaireStatusCode::Rejetee => FlowStatus::Rejected,
+        };
+    }
     match InvoiceStatusCode::from_code(status_code) {
         // Phase Transmission
         Some(InvoiceStatusCode::Deposee) => FlowStatus::Distributed,
@@ -893,6 +934,25 @@ mod tests {
         assert_eq!(map_cdv_to_flow_status(220), FlowStatus::Cancelled);
         assert_eq!(map_cdv_to_flow_status(207), FlowStatus::WaitingAck);
         assert_eq!(map_cdv_to_flow_status(9999), FlowStatus::WaitingAck);
+    }
+
+    #[test]
+    fn test_map_cdv_to_flow_status_annuaire() {
+        // CDV F6 annuaire : 400 (Acceptée) → Acknowledged, 401 (Rejetée) → Rejected
+        assert_eq!(map_cdv_to_flow_status(400), FlowStatus::Acknowledged);
+        assert_eq!(map_cdv_to_flow_status(401), FlowStatus::Rejected);
+    }
+
+    #[test]
+    fn test_annuaire_status_code_roundtrip() {
+        use crate::model::AnnuaireStatusCode;
+        assert_eq!(AnnuaireStatusCode::from_code(400), Some(AnnuaireStatusCode::Acceptee));
+        assert_eq!(AnnuaireStatusCode::from_code(401), Some(AnnuaireStatusCode::Rejetee));
+        assert_eq!(AnnuaireStatusCode::from_code(200), None);
+        assert_eq!(AnnuaireStatusCode::Acceptee.code(), 400);
+        assert_eq!(AnnuaireStatusCode::Rejetee.code(), 401);
+        assert_eq!(AnnuaireStatusCode::Acceptee.label(), "ACCEPTEE");
+        assert_eq!(AnnuaireStatusCode::Rejetee.label(), "REJETEE");
     }
 
     // ===== Tests exhaustifs : FlowStatus pour toutes les fixtures =====

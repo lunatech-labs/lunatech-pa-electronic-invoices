@@ -130,6 +130,45 @@ impl std::fmt::Display for InvoiceStatusCode {
     }
 }
 
+/// Statuts retournés par le PPF sur un flux F13 (actualisation annuaire).
+///
+/// Code interface PPF : `FFE0634A` (F6 annuaire).
+/// Codes selon Spécifications Externes DSE AIFE V3.1, §3.4 (Flux 6 annuaire).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum AnnuaireStatusCode {
+    /// 400 — Demande F13 acceptée par le PPF (ligne créée/modifiée/supprimée)
+    Acceptee = 400,
+    /// 401 — Demande F13 rejetée par le PPF (motif dans `reason_code` du CDV)
+    Rejetee = 401,
+}
+
+impl AnnuaireStatusCode {
+    pub fn code(&self) -> u16 {
+        *self as u16
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Acceptee => "ACCEPTEE",
+            Self::Rejetee => "REJETEE",
+        }
+    }
+
+    pub fn from_code(code: u16) -> Option<Self> {
+        match code {
+            400 => Some(Self::Acceptee),
+            401 => Some(Self::Rejetee),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for AnnuaireStatusCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.code())
+    }
+}
+
 /// Code statut de transmission — MDT-88
 /// Conforme BR-FR-CDV-CL-05
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]

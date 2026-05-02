@@ -46,6 +46,14 @@ impl MotifPresence {
             _ => None,
         }
     }
+
+    pub fn as_code(&self) -> &'static str {
+        match self {
+            Self::Creation => "C",
+            Self::Modification => "M",
+            Self::Suppression => "S",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

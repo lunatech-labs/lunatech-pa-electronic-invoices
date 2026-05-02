@@ -15,6 +15,7 @@
 //! ```
 
 pub mod db;
+pub mod f13;
 pub mod ingest;
 pub mod model;
 pub mod parser;
@@ -22,8 +23,9 @@ pub mod processor;
 pub mod service;
 
 pub use db::{AnnuaireStore, CodeRoutageRow, EtablissementRow, PlateformeRow, SearchResult};
+pub use f13::{build_ligne_for_f13, generate_f13_xml, F13Operation};
 pub use ingest::ingest_f14;
 pub use model::*;
 pub use parser::parse_f14;
-pub use processor::{AnnuaireValidationProcessor, ValidationMode};
+pub use processor::{AnnuaireImportProcessor, AnnuaireValidationProcessor, ValidationMode};
 pub use service::AnnuaireService;

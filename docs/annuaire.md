@@ -451,11 +451,67 @@ crates/pdp-annuaire/
     parser.rs    — Parser XML streaming (quick-xml pull), fichiers 10+ Go sans chargement mémoire
     db.rs        — Store PostgreSQL (schéma, insert batch, résolution de routage, lookups)
     ingest.rs    — Orchestration parsing → batch insert PostgreSQL
+    f13.rs       — Générateur XML F13 (actualisation : Création / Modification / Suppression)
+    processor.rs — AnnuaireValidationProcessor (G1.63) + AnnuaireImportProcessor (auto-import F14)
+    service.rs   — AnnuaireService (lookup, validate_parties)
     lib.rs       — Exports publics
   tests/
-    parser_test.rs       — 7 tests unitaires sur l'extrait F14 réel
-    integration_test.rs  — Test sur le vrai fichier PPF 10 Go (#[ignore])
+    parser_test.rs              — Tests parser F14
+    integration_test.rs         — Test sur le vrai fichier PPF 10 Go (#[ignore])
+    annuaire_validation_test.rs — Tests Postgres (testcontainers)
+    routing_code_lookup_test.rs — Tests Postgres (testcontainers)
 ```
+
+### F13 — Émission des actualisations (PDP → PPF)
+
+Le module `f13.rs` génère le XML d'actualisation à partir de `LigneAnnuaire` :
+
+```rust
+use pdp_annuaire::{build_ligne_for_f13, generate_f13_xml, F13Operation};
+
+let ligne = build_ligne_for_f13(
+    F13Operation::Creation,
+    1,                       // id_instance
+    "123456789",             // SIREN
+    Some("12345678901234"),  // SIRET (optionnel)
+    None,                    // code routage (optionnel)
+    "0001",                  // matricule plateforme
+    "20260502",              // date début YYYYMMDD
+    None,                    // date fin (optionnel)
+);
+
+let xml = generate_f13_xml(&[ligne], None);
+// → XML prêt à empaqueter en tar.gz et déposer sur le SAS PPF (FFE1235A)
+```
+
+### F14 — Auto-ingestion lors d'un dépôt PPF
+
+Le `AnnuaireImportProcessor` détecte les flux marqués `ppf.code_interface = FFE1435A`
+(annoté par le `PpfReturnConsumer`) et déclenche l'ingestion automatiquement :
+
+```rust
+use pdp_annuaire::{AnnuaireImportProcessor, AnnuaireStore};
+use std::sync::Arc;
+
+let store = Arc::new(AnnuaireStore::new(pool));
+let processor = AnnuaireImportProcessor::new(Some(store));
+
+// Dans le pipeline réception PPF :
+//   PpfReturnConsumer → DocumentTypeRouter → AnnuaireImportProcessor
+// Le processor :
+//   - skip si pas FFE1435A
+//   - sinon ingère le F14 et renseigne annuaire.import.{ok,unites_legales,etablissements,...}
+```
+
+### CDV F6 annuaire (réponse PPF aux F13)
+
+Quand le PPF répond à un F13 par un CDV `FFE0634A`, le `DocumentTypeRouter` détecte
+le code interface et stocke :
+- `cdv.annuaire = "true"`
+- `cdv.annuaire.status_code` = 400 ou 401
+- `cdv.annuaire.status_label` = `ACCEPTEE` ou `REJETEE`
+
+Si `401 (Rejetée)`, une erreur est ajoutée à l'exchange (step `CdvAnnuaire`).
 
 ### Codes abrégés du fichier PPF réel
 
