@@ -62,6 +62,19 @@ Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 - [x] Intégré dans `add_common_processors` après `DocumentTypeRouter`
 - [x] 10 tests unitaires (relay 210/212, skip pour autres codes, erreur PPF)
 
+### Webhooks AFNOR (XP Z12-013 §5.4)
+
+- [x] Modèles conformes Swagger : `CallbackParameters`, `WebhookMetadata`, etc.
+- [x] Store thread-safe in-memory (`WebhookStore`)
+- [x] 5 endpoints : POST/GET /v1/webhooks, GET/PATCH/DELETE /v1/webhooks/{uid}
+- [x] Validation URL, flowType, flowDirection (In/Out)
+- [x] Authentification Bearer (réutilise middleware existant)
+- [x] `WebhookDispatcher` : envoie POST avec headers, auth BASIC, signature HMAC-SHA256
+- [x] Trigger `flow.received` sur POST /v1/flows accepté (tokio::spawn non-bloquant)
+- [x] Filtrage par metadata (flowType + flowDirection + ackStatus)
+- [x] 20+ tests unitaires + intégration HTTP (round-trip create/get/list/update/delete)
+- [x] Documentation `docs/webhooks.md`
+
 ## Haute priorité
 
 ### 1. Tests d'intégration `AnnuaireValidationProcessor` ✅

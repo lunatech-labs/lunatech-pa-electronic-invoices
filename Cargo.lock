@@ -3301,6 +3301,7 @@ dependencies = [
  "pdp-trace",
  "pdp-transform",
  "pdp-validate",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

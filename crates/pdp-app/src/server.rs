@@ -72,6 +72,8 @@ pub struct AppState {
     pub metrics: Metrics,
     /// Store annuaire PPF (optionnel — nécessite PostgreSQL)
     pub annuaire_store: Option<pdp_annuaire::AnnuaireStore>,
+    /// Store des webhooks (in-memory, partagé)
+    pub webhook_store: Arc<crate::webhooks::WebhookStore>,
 }
 
 /// Flux entrant reçu via l'API HTTP
@@ -143,6 +145,18 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/v1/flows/{flow_id}", get(handle_get_flow))
         .route("/v1/stats", get(handle_stats))
         .route("/v1/webhooks/callback", post(handle_webhook_callback))
+        // Webhooks subscriptions — AFNOR XP Z12-013 §5.4
+        .route(
+            "/v1/webhooks",
+            post(crate::webhooks::handle_create_webhook)
+                .get(crate::webhooks::handle_list_webhooks),
+        )
+        .route(
+            "/v1/webhooks/{webhook_id}",
+            get(crate::webhooks::handle_get_webhook)
+                .patch(crate::webhooks::handle_update_webhook)
+                .delete(crate::webhooks::handle_delete_webhook),
+        )
         // Annuaire PPF — Directory Service conforme AFNOR XP Z12-013 Annexe B
         .route("/v1/siren/code-insee:{siren}", get(handle_ds_get_siren))
         .route("/v1/siren/search", post(handle_ds_search_siren))
@@ -376,6 +390,25 @@ async fn handle_receive_flow(
     match state.flow_sender.send(inbound).await {
         Ok(_) => {
             state.metrics.flows_accepted.fetch_add(1, Ordering::Relaxed);
+
+            // Dispatcher webhook : événement flow.received
+            // Non-bloquant — exécuté en arrière-plan pour ne pas ralentir le pipeline
+            let store = state.webhook_store.clone();
+            let flow_id_clone = flow_id.clone();
+            let flow_type = flow_info.flow_type.clone().unwrap_or_else(|| "Unknown".to_string());
+            tokio::spawn(async move {
+                let dispatcher = crate::webhooks::WebhookDispatcher::new(store);
+                dispatcher
+                    .dispatch(
+                        crate::webhooks::WebhookEventType::FlowReceived,
+                        &flow_id_clone,
+                        &flow_type,
+                        "In",
+                        Some("Pending"),
+                    )
+                    .await;
+            });
+
             (
                 StatusCode::ACCEPTED,
                 Json(FlowAcceptedResponse {
@@ -1367,6 +1400,7 @@ mod tests {
             bearer_tokens: None,
             metrics: Metrics::default(),
             annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
         })
     }
 
@@ -1382,6 +1416,7 @@ mod tests {
             bearer_tokens: None,
             metrics: Metrics::default(),
             annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
         })
     }
 
@@ -1397,6 +1432,7 @@ mod tests {
             bearer_tokens: None,
             metrics: Metrics::default(),
             annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
         });
         (state, rx)
     }
@@ -1413,6 +1449,7 @@ mod tests {
             bearer_tokens: Some(vec!["valid-token-123".to_string(), "valid-token-456".to_string()]),
             metrics: Metrics::default(),
             annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
         })
     }
 
@@ -1897,6 +1934,7 @@ mod tests {
                 bearer_tokens: Some(vec!["my-secret-token".to_string()]),
                 metrics: Metrics::default(),
                 annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
             });
             (state, rx)
         };
@@ -1959,6 +1997,7 @@ mod tests {
             trace_store: None,
             metrics: Metrics::default(),
             annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
         });
         let app = build_api_router(state);
 
@@ -2424,6 +2463,7 @@ mod tests {
             bearer_tokens: Some(vec!["e2e-token-valid".to_string()]),
             metrics: Metrics::default(),
             annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
         });
         let app = build_api_router(state);
 
@@ -2565,4 +2605,280 @@ mod tests {
         assert!(text.contains("pdp_flows_accepted_total 3"));
     }
 
+    // ---------------------------------------------------------------
+    // Webhooks endpoints (XP Z12-013 §5.4)
+    // ---------------------------------------------------------------
+
+    fn webhook_create_body() -> String {
+        serde_json::json!({
+            "callback": {
+                "url": "https://example.com/webhook"
+            },
+            "metadata": {
+                "flowType": "CustomerInvoice",
+                "flowDirection": "In"
+            }
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn test_webhook_create_201() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("POST")
+            .header("Content-Type", "application/json")
+            .body(Body::from(webhook_create_body()))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert!(json["webhookId"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_webhook_create_invalid_url() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let body = serde_json::json!({
+            "callback": {
+                "url": "not-a-url"
+            },
+            "metadata": {
+                "flowType": "CustomerInvoice",
+                "flowDirection": "In"
+            }
+        })
+        .to_string();
+
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("POST")
+            .header("Content-Type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_webhook_create_invalid_direction() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let body = serde_json::json!({
+            "callback": {"url": "https://example.com"},
+            "metadata": {
+                "flowType": "CustomerInvoice",
+                "flowDirection": "Both"  // invalid
+            }
+        })
+        .to_string();
+
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("POST")
+            .header("Content-Type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_webhook_list_empty() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["webhookIds"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_webhook_list_after_create() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        // Create
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("POST")
+            .header("Content-Type", "application/json")
+            .body(Body::from(webhook_create_body()))
+            .unwrap();
+        let _ = app.clone().oneshot(req).await.unwrap();
+
+        // List
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["webhookIds"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_webhook_get_by_id() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        // Create
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("POST")
+            .header("Content-Type", "application/json")
+            .body(Body::from(webhook_create_body()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        let webhook_id = json["webhookId"].as_str().unwrap().to_string();
+
+        // Get by id
+        let req = Request::builder()
+            .uri(format!("/v1/webhooks/{}", webhook_id))
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["webhookId"], webhook_id);
+        assert_eq!(json["callback"]["url"], "https://example.com/webhook");
+        assert_eq!(json["metadata"]["flowType"], "CustomerInvoice");
+        assert_eq!(json["metadata"]["flowDirection"], "In");
+    }
+
+    #[tokio::test]
+    async fn test_webhook_get_not_found() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/webhooks/00000000-0000-0000-0000-000000000000")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_webhook_patch_204() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        // Create
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("POST")
+            .header("Content-Type", "application/json")
+            .body(Body::from(webhook_create_body()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        let webhook_id = json["webhookId"].as_str().unwrap().to_string();
+
+        // Patch
+        let patch_body = serde_json::json!({
+            "headers": [{"headerName": "X-Test", "headerValue": "ok"}]
+        })
+        .to_string();
+        let req = Request::builder()
+            .uri(format!("/v1/webhooks/{}", webhook_id))
+            .method("PATCH")
+            .header("Content-Type", "application/json")
+            .body(Body::from(patch_body))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        // Verify GET shows the new headers
+        let req = Request::builder()
+            .uri(format!("/v1/webhooks/{}", webhook_id))
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["callback"]["headers"][0]["headerName"], "X-Test");
+    }
+
+    #[tokio::test]
+    async fn test_webhook_delete_204() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        // Create
+        let req = Request::builder()
+            .uri("/v1/webhooks")
+            .method("POST")
+            .header("Content-Type", "application/json")
+            .body(Body::from(webhook_create_body()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        let webhook_id = json["webhookId"].as_str().unwrap().to_string();
+
+        // Delete
+        let req = Request::builder()
+            .uri(format!("/v1/webhooks/{}", webhook_id))
+            .method("DELETE")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        // GET → 404
+        let req = Request::builder()
+            .uri(format!("/v1/webhooks/{}", webhook_id))
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_webhook_delete_not_found() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/webhooks/00000000-0000-0000-0000-000000000000")
+            .method("DELETE")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }

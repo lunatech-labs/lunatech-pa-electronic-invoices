@@ -1,4 +1,5 @@
 mod server;
+mod webhooks;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -205,6 +206,7 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             trace_store,
             metrics: server::Metrics::default(),
             annuaire_store,
+            webhook_store: std::sync::Arc::new(webhooks::WebhookStore::new()),
         });
 
         let server_config = server::ServerConfig {
