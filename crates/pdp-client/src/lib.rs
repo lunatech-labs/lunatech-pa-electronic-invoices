@@ -89,4 +89,7 @@ pub use afnor::AfnorFlowClient;
 pub use annuaire::{AnnuaireClient, AfnorDirectoryClient};
 pub use batch::BatchProducer;
 pub use producer::{PpfSftpProducer, PpfSftpProducerConfig, AfnorFlowProducer, Destination};
-pub use routing::{RoutingProcessor, RoutingResolverProcessor, DynamicRoutingProducer, PartnerDirectory};
+pub use routing::{
+    DynamicRoutingProducer, PartnerDirectory, RoutingProcessor,
+    RoutingResolverProcessor, RoutingValidationProcessor,
+};

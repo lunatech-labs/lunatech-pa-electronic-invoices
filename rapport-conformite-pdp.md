@@ -22,7 +22,7 @@
 | **XP Z12-014** (Cas d'usage B2B) | **69%** | 35/51 cas implémentés, 13 partiels |
 | **DSE AIFE** (Specifications externes) | **92%** | E-reporting Flux 10.1-10.4 complet ✅, BR-FR-MAP-23 ✅, manque Flux 13/14 (annuaire SFTP) |
 
-**Évaluation globale** : Ferrite couvre solidement le cœur métier (parsing UBL/CII/Factur-X, validation Schematron, transformation, CDAR avec acteurs corrects V1.2, annuaire local PostgreSQL, séparation PA-E/PA-R, relais CDV→PPF Flux 6, e-reporting Flux 10.1-10.4 avec BR-FR-MAP-23, webhooks AFNOR persistés, codes HTTP 408/413/429/501). Les fondamentaux réglementaires sont conformes. **Points en attente** : Flux 11 (nouveau V1.3), Flux 13/14 annuaire SFTP, multi-vendeurs, CDV 221.
+**Évaluation globale** : Ferrite couvre solidement le cœur métier (parsing UBL/CII/Factur-X, validation Schematron, transformation, CDAR avec acteurs corrects V1.2 + 22 statuts incluant CDV 221 ERREUR_ROUTAGE, annuaire local PostgreSQL, séparation PA-E/PA-R, relais CDV→PPF Flux 6, e-reporting Flux 10.1-10.4 avec BR-FR-MAP-23, webhooks AFNOR persistés, codes HTTP 408/413/429/501). Les fondamentaux réglementaires sont conformes. **Points en attente** : Flux 11 (nouveau V1.3), Flux 13/14 annuaire SFTP, multi-vendeurs.
 
 ---
 
@@ -114,7 +114,7 @@ Les 9 chemins de conversion sont implémentés. Les pièces jointes (BG-24) sont
 | Multi-vendeurs (§4.5.4) | Moyenne | Sub-lines / multi-seller invoices non implémenté |
 | Flux 11 (NOUVEAU V1.3) | Moyenne | Annuaire publiable PPF→PA→utilisateurs |
 | Codes IRR pièces jointes | Faible | `IRR_TAILLE_PJ`, `IRR_VID_PJ`, `IRR_EXT_DOC`, `IRR_ANTIVIRUS` |
-| CDV 221 ERREUR_ROUTAGE | Faible | Pas généré activement par le `DynamicRoutingProducer` |
+| CDV 221 ERREUR_ROUTAGE | ✅ | `RoutingValidationProcessor` détecte PDP injoignable, `CdarProcessor` génère 221 avec ROUTAGE_ERR / CODE_ROUTAGE_ERR |
 | Terminologie V1.2 (PA/SC) | Faible | Code utilise encore "PDP" et "OD" |
 | Strategie Auto Flux 1 | Faible | Logique de décision Auto (Base/Full) peu documentée |
 
@@ -446,7 +446,7 @@ Les 9 chemins de conversion sont implémentés. Les pièces jointes (BG-24) sont
 
 8. **Ajouter les endpoints Directory manquants** — POST /v1/siren/search, POST /v1/siret/search, GET routing-code, GET directory-line.
 
-9. **CDV 221 (ERREUR_ROUTAGE)** — émission active par le `DynamicRoutingProducer` quand le routage échoue.
+9. ~~**CDV 221 (ERREUR_ROUTAGE)**~~ — ✅ livré : `RoutingValidationProcessor` (pdp-client) détecte les PDP injoignables, `CdarProcessor` génère le CDV 221 avec ROUTAGE_ERR.
 
 10. **Codes IRR pièces jointes** — `IRR_TAILLE_PJ`, `IRR_VID_PJ`, `IRR_EXT_DOC`, `IRR_ANTIVIRUS`.
 

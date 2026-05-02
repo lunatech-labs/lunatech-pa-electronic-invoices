@@ -604,3 +604,74 @@ async fn test_reception_facture_valide_pipeline_complet_cdv_202() {
         assert_eq!(result.get_property("cdv.status_code").unwrap(), "202");
     }
 }
+
+
+// ============================================================
+// CDV 221 ERREUR_ROUTAGE (PDP destinataire injoignable)
+// ============================================================
+
+#[tokio::test]
+async fn test_emission_routage_erreur_genere_cdv_221() {
+    // Exchange avec erreur step="routage" → CDV 221 (pas 213)
+    let mut exchange = Exchange::new(b"<invoice/>".to_vec());
+    exchange.source_filename = Some("facture.xml".to_string());
+    exchange.invoice = Some(make_invoice());
+    exchange.add_error(
+        "routage",
+        &PdpError::RoutingError(
+            "PDP destinataire injoignable : matricule 1234".to_string(),
+        ),
+    );
+
+    let processor = CdarProcessor::emission("999888777", "Ma PDP");
+    let result = processor.process(exchange).await.unwrap();
+
+    // CDV 221 (Erreur de routage), pas 213 (Rejetée)
+    assert_eq!(result.get_property("cdv.status_code").unwrap(), "221");
+
+    // Le motif doit être ROUTAGE_ERR, pas REJ_SEMAN ou autre
+    let cdv_xml = result.get_property("cdv.xml").unwrap();
+    let cdv = CdarParser::new().parse(cdv_xml).unwrap();
+    let status = &cdv.referenced_documents[0].statuses[0];
+    assert_eq!(status.reason_code.as_deref(), Some("ROUTAGE_ERR"));
+    assert!(status.reason.as_deref().unwrap().contains("matricule 1234"));
+}
+
+#[tokio::test]
+async fn test_emission_routage_step_routing_alias() {
+    // step="routing" (alias anglais) → aussi CDV 221
+    let mut exchange = Exchange::new(b"<invoice/>".to_vec());
+    exchange.source_filename = Some("facture.xml".to_string());
+    exchange.invoice = Some(make_invoice());
+    exchange.add_error(
+        "routing",
+        &PdpError::RoutingError("Aucun producer AFNOR".to_string()),
+    );
+
+    let processor = CdarProcessor::emission("999888777", "Ma PDP");
+    let result = processor.process(exchange).await.unwrap();
+
+    assert_eq!(result.get_property("cdv.status_code").unwrap(), "221");
+}
+
+#[tokio::test]
+async fn test_emission_routage_prioritaire_sur_validation() {
+    // Si plusieurs erreurs (validation + routage), le CDV doit rester 221
+    // (le routage prime sur le rejet sémantique).
+    let mut exchange = Exchange::new(b"<invoice/>".to_vec());
+    exchange.source_filename = Some("facture.xml".to_string());
+    exchange.invoice = Some(make_invoice());
+    exchange.add_error(
+        "validate",
+        &PdpError::ValidationError("BR-FR-12 montant invalide".to_string()),
+    );
+    exchange.add_error(
+        "routage",
+        &PdpError::RoutingError("PDP injoignable".to_string()),
+    );
+
+    let processor = CdarProcessor::emission("999888777", "Ma PDP");
+    let result = processor.process(exchange).await.unwrap();
+
+    assert_eq!(result.get_property("cdv.status_code").unwrap(), "221");
+}

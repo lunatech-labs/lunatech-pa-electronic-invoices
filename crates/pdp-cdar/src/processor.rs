@@ -287,37 +287,53 @@ impl Processor for CdarProcessor {
         let invoice_type_code = invoice.invoice_type_code.as_deref().unwrap_or("380");
 
         let cdv = if exchange.has_errors() {
-            let errors: Vec<CdarValidationError> = exchange
+            // CDV 221 ERREUR_ROUTAGE : si au moins une erreur a step="routage" ou
+            // "routing", on génère un 221 plutôt qu'un 213 (Acteurs CDV V1.2).
+            let routing_error = exchange
                 .errors
                 .iter()
-                .map(|e| {
-                    let reason_code = classify_error_reason(&e.step, &e.message);
-                    CdarValidationError {
-                        rule_id: format!("PDP-{}", e.step),
-                        severity: "ERROR".to_string(),
-                        location: None,
-                        message: e.message.clone(),
-                        reason_code: Some(reason_code),
-                    }
-                })
-                .collect();
+                .find(|e| e.step == "routage" || e.step == "routing");
 
-            match self.mode {
-                CdarMode::Emission => {
-                    tracing::warn!(
-                        invoice = %invoice.invoice_number,
-                        error_count = errors.len(),
-                        "Génération CDV de rejet 213 (émission — SE + PPF)"
-                    );
-                    self.generator.generate_rejetee_emission(invoice, invoice_type_code, errors)
-                }
-                CdarMode::Reception => {
-                    tracing::warn!(
-                        invoice = %invoice.invoice_number,
-                        error_count = errors.len(),
-                        "Génération CDV de rejet 213 (réception — SE + BY, pas de PPF)"
-                    );
-                    self.generator.generate_rejetee_reception(invoice, invoice_type_code, errors)
+            if let Some(err) = routing_error {
+                tracing::warn!(
+                    invoice = %invoice.invoice_number,
+                    routing_error = %err.message,
+                    "Génération CDV 221 ERREUR_ROUTAGE"
+                );
+                self.generator.generate_erreur_routage(invoice, &err.message)
+            } else {
+                let errors: Vec<CdarValidationError> = exchange
+                    .errors
+                    .iter()
+                    .map(|e| {
+                        let reason_code = classify_error_reason(&e.step, &e.message);
+                        CdarValidationError {
+                            rule_id: format!("PDP-{}", e.step),
+                            severity: "ERROR".to_string(),
+                            location: None,
+                            message: e.message.clone(),
+                            reason_code: Some(reason_code),
+                        }
+                    })
+                    .collect();
+
+                match self.mode {
+                    CdarMode::Emission => {
+                        tracing::warn!(
+                            invoice = %invoice.invoice_number,
+                            error_count = errors.len(),
+                            "Génération CDV de rejet 213 (émission — SE + PPF)"
+                        );
+                        self.generator.generate_rejetee_emission(invoice, invoice_type_code, errors)
+                    }
+                    CdarMode::Reception => {
+                        tracing::warn!(
+                            invoice = %invoice.invoice_number,
+                            error_count = errors.len(),
+                            "Génération CDV de rejet 213 (réception — SE + BY, pas de PPF)"
+                        );
+                        self.generator.generate_rejetee_reception(invoice, invoice_type_code, errors)
+                    }
                 }
             }
         } else {
@@ -635,6 +651,16 @@ fn map_reception_to_irrecevabilite(rule_ids: &str, filename: &str) -> (StatusRea
 /// Classifie une erreur de pipeline en code motif CDV officiel
 fn classify_error_reason(step: &str, message: &str) -> StatusReasonCode {
     let msg_lower = message.to_lowercase();
+
+    // Priorité 0 : erreurs de routage → CDV 221 (ERREUR_ROUTAGE)
+    // Doivent passer AVANT les autres checks pour ne pas être confondus avec
+    // une erreur sémantique générique. Step canonique : "routage" (FR).
+    if step == "routage" {
+        if msg_lower.contains("code") {
+            return StatusReasonCode::CodeRoutageErr;
+        }
+        return StatusReasonCode::RoutageErr;
+    }
 
     // Priorité 1 : validations annuaire (step = "annuaire-validation")
     // Doivent passer AVANT les checks "br-" car les messages contiennent "(BR-FR-10/11)"
@@ -1150,6 +1176,22 @@ mod tests {
         // Destinataire inconnu dans l'annuaire → DEST_INC (rejet émission)
         assert_eq!(classify_error_reason("annuaire-validation", "Destinataire inconnu dans l'annuaire PPF (BR-FR-11) (SIREN: 123)"), StatusReasonCode::DestInc);
         assert_eq!(classify_error_reason("annuaire-validation", "Destinataire inactif dans l'annuaire PPF (BR-FR-11) (SIREN: 456)"), StatusReasonCode::DestInc);
+    }
+
+    #[test]
+    fn test_classify_routage_err() {
+        // step="routage" → ROUTAGE_ERR (CDV 221)
+        assert_eq!(
+            classify_error_reason("routage", "PDP destinataire injoignable : matricule 1234"),
+            StatusReasonCode::RoutageErr
+        );
+        // Mot-clé "code" → CODE_ROUTAGE_ERR (sous-code distinct selon Acteurs CDV V1.2)
+        assert_eq!(
+            classify_error_reason("routage", "Code de routage invalide"),
+            StatusReasonCode::CodeRoutageErr
+        );
+        // step="routing" (anglais) NE matche PAS — c'est utilisé pour les
+        // erreurs de résolution Annuaire (DEST_INC). Le step canonique est "routage".
     }
 
     #[test]

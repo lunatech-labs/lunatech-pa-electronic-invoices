@@ -403,6 +403,86 @@ impl Processor for RoutingResolverProcessor {
     }
 }
 
+/// Processor qui vérifie qu'un producer AFNOR est disponible pour la destination
+/// résolue par `RoutingResolverProcessor`.
+///
+/// Si la destination est `PDP-{matricule}` mais qu'aucun producer AFNOR n'est
+/// configuré pour ce matricule, ajoute une erreur `step="routage"` à
+/// l'exchange. En aval, `CdarProcessor` détecte cette erreur et génère un
+/// **CDV 221 ERREUR_ROUTAGE** avec le code motif `ROUTAGE_ERR` (Acteurs CDV V1.2).
+///
+/// Doit s'exécuter **après** `RoutingResolverProcessor` et **avant**
+/// `CdarProcessor` pour que ce dernier puisse générer le bon CDV.
+pub struct RoutingValidationProcessor {
+    /// Matricules de PDP pour lesquels un producer AFNOR est configuré
+    known_matricules: Vec<String>,
+}
+
+impl RoutingValidationProcessor {
+    pub fn new(known_matricules: Vec<String>) -> Self {
+        Self { known_matricules }
+    }
+
+    /// Construit depuis la map de producers AFNOR (cas usuel)
+    pub fn from_producers(
+        afnor_producers: &HashMap<String, Arc<AfnorFlowProducer>>,
+    ) -> Self {
+        Self {
+            known_matricules: afnor_producers.keys().cloned().collect(),
+        }
+    }
+}
+
+#[async_trait]
+impl Processor for RoutingValidationProcessor {
+    fn name(&self) -> &str {
+        "routing-validation"
+    }
+
+    async fn process(&self, exchange: Exchange) -> PdpResult<Exchange> {
+        // Skip si pas une facture
+        if exchange.invoice.is_none() {
+            return Ok(exchange);
+        }
+
+        let destination = match exchange.get_property("routing.destination") {
+            Some(d) => d.clone(),
+            // Pas de routage résolu : laisser le pipeline aval gérer
+            None => return Ok(exchange),
+        };
+
+        // Seul le routage vers une PDP partenaire peut échouer pour absence
+        // de producer. PPF-SE et INTRA-PDP sont toujours servis.
+        if !destination.starts_with("PDP-") {
+            return Ok(exchange);
+        }
+
+        let matricule = &destination[4..];
+        if self.known_matricules.iter().any(|m| m == matricule) {
+            return Ok(exchange);
+        }
+
+        // PDP destinataire injoignable → erreur de routage
+        let mut exchange = exchange;
+        let buyer_siren = RoutingProcessor::extract_buyer_siren(&exchange);
+        let message = format!(
+            "PDP destinataire injoignable : matricule {} (acheteur SIREN: {})",
+            matricule,
+            buyer_siren.as_deref().unwrap_or("inconnu"),
+        );
+        tracing::warn!(
+            exchange_id = %exchange.id,
+            matricule = %matricule,
+            "Aucun producer AFNOR pour la PDP destinataire — CDV 221 sera émis"
+        );
+        exchange.add_error(
+            "routage",
+            &PdpError::RoutingError(message),
+        );
+        Ok(exchange)
+    }
+}
+
 /// Producer dynamique qui route l'exchange vers PPF ou PDP
 /// en fonction de la propriete `routing.destination` definie par le RoutingResolverProcessor.
 pub struct DynamicRoutingProducer {
@@ -632,5 +712,93 @@ mod tests {
     fn test_destination_intra_pdp_display() {
         let dest = Destination::IntraPdp;
         assert_eq!(format!("{}", dest), "INTRA-PDP");
+    }
+
+    // ============================================================
+    // RoutingValidationProcessor — CDV 221 ERREUR_ROUTAGE
+    // ============================================================
+
+    fn invoice_with_buyer(buyer_siret: &str) -> Exchange {
+        let mut exchange = Exchange::new(b"<invoice/>".to_vec());
+        let mut invoice = pdp_core::model::InvoiceData::new(
+            "F-001".to_string(),
+            pdp_core::model::InvoiceFormat::UBL,
+        );
+        invoice.buyer_siret = Some(buyer_siret.to_string());
+        exchange.invoice = Some(invoice);
+        exchange
+    }
+
+    #[tokio::test]
+    async fn test_routing_validation_known_pdp_passes() {
+        let mut exchange = invoice_with_buyer("12345678901234");
+        exchange.set_property("routing.destination", "PDP-1111");
+
+        let validator =
+            RoutingValidationProcessor::new(vec!["1111".to_string(), "2222".to_string()]);
+        let result = validator.process(exchange).await.unwrap();
+
+        assert!(!result.has_errors());
+    }
+
+    #[tokio::test]
+    async fn test_routing_validation_unknown_pdp_adds_error() {
+        let mut exchange = invoice_with_buyer("12345678901234");
+        exchange.set_property("routing.destination", "PDP-9999");
+
+        let validator =
+            RoutingValidationProcessor::new(vec!["1111".to_string()]);
+        let result = validator.process(exchange).await.unwrap();
+
+        assert!(result.has_errors());
+        let err = result.errors.first().unwrap();
+        assert_eq!(err.step, "routage");
+        assert!(err.message.contains("9999"));
+    }
+
+    #[tokio::test]
+    async fn test_routing_validation_ppf_skipped() {
+        // PPF-SE est toujours servi → pas d'erreur même sans matricule connu
+        let mut exchange = invoice_with_buyer("12345678901234");
+        exchange.set_property("routing.destination", "PPF-SE");
+
+        let validator = RoutingValidationProcessor::new(vec![]);
+        let result = validator.process(exchange).await.unwrap();
+
+        assert!(!result.has_errors());
+    }
+
+    #[tokio::test]
+    async fn test_routing_validation_intra_pdp_skipped() {
+        let mut exchange = invoice_with_buyer("12345678901234");
+        exchange.set_property("routing.destination", "INTRA-PDP");
+
+        let validator = RoutingValidationProcessor::new(vec![]);
+        let result = validator.process(exchange).await.unwrap();
+
+        assert!(!result.has_errors());
+    }
+
+    #[tokio::test]
+    async fn test_routing_validation_no_invoice_skipped() {
+        let mut exchange = Exchange::new(b"<invoice/>".to_vec());
+        exchange.set_property("routing.destination", "PDP-9999");
+
+        let validator = RoutingValidationProcessor::new(vec![]);
+        let result = validator.process(exchange).await.unwrap();
+
+        // Sans invoice on ne peut rien valider
+        assert!(!result.has_errors());
+    }
+
+    #[tokio::test]
+    async fn test_routing_validation_no_destination_skipped() {
+        // Pas de routing.destination → on laisse le pipeline aval gérer
+        let exchange = invoice_with_buyer("12345678901234");
+
+        let validator = RoutingValidationProcessor::new(vec![]);
+        let result = validator.process(exchange).await.unwrap();
+
+        assert!(!result.has_errors());
     }
 }
