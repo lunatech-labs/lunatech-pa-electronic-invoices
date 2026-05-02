@@ -38,6 +38,7 @@ hmac = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
 reqwest = { workspace = true }
+async-trait = { workspace = true }
 
 [[bench]]
 name = "volume_bench"

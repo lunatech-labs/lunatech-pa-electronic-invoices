@@ -111,10 +111,39 @@ pub struct InboundFlowInfo {
 // Réponses API
 // ============================================================
 
+/// Réponse 202 Accepted pour POST /v1/flows.
+///
+/// Conforme au schema `FullFlowInfo` du Swagger AFNOR XP Z12-013 V1.2.0 :
+/// `FullFlowInfo = CoreFlowInfo + FlowInfoExtension + FullFlowInfoExtension`
+/// où `FullFlowInfoExtension` ajoute `flowId` et `submittedAt` (obligatoires).
+///
+/// Les champs additionnels (status, message) sont des extensions non normatives
+/// pour la commodité du client.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowAcceptedResponse {
+    /// `flowId` AFNOR (UUID + ID externe optionnel)
     pub flow_id: String,
+    /// Date-heure de soumission au format ISO 8601 (RFC3339)
+    pub submitted_at: String,
+    /// `trackingId` original passé par le client (si fourni)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tracking_id: Option<String>,
+    /// Nom du flux (issu de FlowInfo.name)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Type de flux (CustomerInvoice, SupplierInvoice, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow_type: Option<String>,
+    /// Syntaxe du flux (UBL, CII, Factur-X, CDAR)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow_syntax: Option<String>,
+    /// Profil du flux
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow_profile: Option<String>,
+    /// Règle de traitement
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub processing_rule: Option<String>,
     pub status: String,
     pub message: String,
 }
@@ -253,8 +282,19 @@ async fn auth_middleware(
 /// Retourne 202 Accepted avec l'ID du flux créé
 async fn handle_receive_flow(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
+    // Headers optionnels conformes XP Z12-013 V1.2.0
+    let request_id = headers
+        .get("Request-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let organization_id = headers
+        .get("Organization-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
     let mut flow_info: Option<InboundFlowInfo> = None;
     let mut file_content: Option<Vec<u8>> = None;
     let mut filename: Option<String> = None;
@@ -413,14 +453,32 @@ async fn handle_receive_flow(
                     .await;
             });
 
-            (
-                StatusCode::ACCEPTED,
-                Json(FlowAcceptedResponse {
-                    flow_id,
-                    status: "RECEIVED".to_string(),
-                    message: "Flux accepté pour traitement".to_string(),
-                }),
-            ).into_response()
+            // Headers de réponse : echo Request-Id pour corrélation logs (XP Z12-013)
+            let mut response_headers = axum::http::HeaderMap::new();
+            if let Some(ref rid) = request_id {
+                if let Ok(v) = axum::http::HeaderValue::from_str(rid) {
+                    response_headers.insert("Request-Id", v);
+                }
+            }
+            if let Some(ref oid) = organization_id {
+                if let Ok(v) = axum::http::HeaderValue::from_str(oid) {
+                    response_headers.insert("Organization-Id", v);
+                }
+            }
+
+            let body = FlowAcceptedResponse {
+                flow_id,
+                submitted_at: chrono::Utc::now().to_rfc3339(),
+                tracking_id: Some(flow_info.tracking_id.clone()),
+                name: Some(flow_info.name.clone()),
+                flow_type: flow_info.flow_type.clone(),
+                flow_syntax: flow_info.flow_syntax.clone(),
+                flow_profile: flow_info.flow_profile.clone(),
+                processing_rule: flow_info.processing_rule.clone(),
+                status: "RECEIVED".to_string(),
+                message: "Flux accepté pour traitement".to_string(),
+            };
+            (StatusCode::ACCEPTED, response_headers, Json(body)).into_response()
         }
         Err(e) => {
             state.metrics.flows_rejected.fetch_add(1, Ordering::Relaxed);

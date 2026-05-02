@@ -406,10 +406,35 @@ pub struct WebhookPayload {
     pub timestamp: String,
 }
 
+/// Configuration du retry du dispatcher webhook.
+#[derive(Debug, Clone, Copy)]
+pub struct RetryConfig {
+    /// Nombre maximum de tentatives (la 1ère + retries)
+    pub max_attempts: u32,
+    /// Délai initial en millisecondes
+    pub initial_delay_ms: u64,
+    /// Multiplicateur exponentiel
+    pub multiplier: u64,
+    /// Délai maximum entre tentatives
+    pub max_delay_ms: u64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_delay_ms: 500,
+            multiplier: 2,
+            max_delay_ms: 30_000,
+        }
+    }
+}
+
 /// Dispatcher de webhooks : envoie les événements aux abonnés.
 pub struct WebhookDispatcher {
     store: Arc<WebhookStore>,
     client: reqwest::Client,
+    retry: RetryConfig,
 }
 
 impl WebhookDispatcher {
@@ -420,7 +445,14 @@ impl WebhookDispatcher {
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
+            retry: RetryConfig::default(),
         }
+    }
+
+    /// Configure le retry exponentiel.
+    pub fn with_retry(mut self, retry: RetryConfig) -> Self {
+        self.retry = retry;
+        self
     }
 
     /// Envoie un événement à tous les webhooks correspondants (non-bloquant).
@@ -456,22 +488,82 @@ impl WebhookDispatcher {
                 timestamp: chrono::Utc::now().to_rfc3339(),
             };
 
-            if let Err(e) = self.send_one(&webhook, &payload).await {
-                tracing::warn!(
-                    webhook_id = %webhook.webhook_id,
-                    callback_url = %webhook.callback.url,
-                    error = %e,
-                    "Échec d'envoi de webhook (non bloquant)"
-                );
+            // Retry exponentiel
+            let mut attempt = 0u32;
+            let mut delay_ms = self.retry.initial_delay_ms;
+            loop {
+                attempt += 1;
+                match self.send_one(&webhook, &payload).await {
+                    Ok(()) => break,
+                    Err(e) => {
+                        if attempt >= self.retry.max_attempts {
+                            tracing::warn!(
+                                webhook_id = %webhook.webhook_id,
+                                callback_url = %webhook.callback.url,
+                                attempts = attempt,
+                                error = %e,
+                                "Échec d'envoi de webhook après retries (non bloquant)"
+                            );
+                            break;
+                        }
+                        tracing::debug!(
+                            webhook_id = %webhook.webhook_id,
+                            attempt = attempt,
+                            next_delay_ms = delay_ms,
+                            error = %e,
+                            "Webhook en erreur, retry après backoff"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                        delay_ms = (delay_ms * self.retry.multiplier).min(self.retry.max_delay_ms);
+                    }
+                }
             }
         }
+    }
+
+    /// Récupère un access token OAUTH2 via client_credentials grant.
+    async fn fetch_oauth2_token(&self, auth: &CallbackAuthentication) -> Option<String> {
+        let token_url = auth.token_url.as_deref()?;
+        let client_id = auth.client_id.as_deref()?;
+        let client_secret = auth.client_secret.as_deref()?;
+
+        #[derive(serde::Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+        }
+
+        let resp = self
+            .client
+            .post(token_url)
+            .form(&[
+                ("grant_type", "client_credentials"),
+                ("client_id", client_id),
+                ("client_secret", client_secret),
+            ])
+            .send()
+            .await
+            .ok()?;
+
+        if !resp.status().is_success() {
+            tracing::warn!(
+                status = %resp.status(),
+                token_url = %token_url,
+                "OAUTH2 token endpoint a échoué"
+            );
+            return None;
+        }
+
+        resp.json::<TokenResponse>()
+            .await
+            .ok()
+            .map(|tr| tr.access_token)
     }
 
     async fn send_one(
         &self,
         webhook: &Webhook,
         payload: &WebhookPayload,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let body = serde_json::to_vec(payload)?;
         let mut req = self.client.post(&webhook.callback.url).body(body.clone());
 
@@ -484,12 +576,19 @@ impl WebhookDispatcher {
 
         // Authentification
         if let Some(ref auth) = webhook.callback.authentication {
-            if auth.auth_type == "BASIC" {
-                if let (Some(u), Some(p)) = (&auth.user_id, &auth.user_password) {
-                    req = req.basic_auth(u, Some(p));
+            match auth.auth_type.as_str() {
+                "BASIC" => {
+                    if let (Some(u), Some(p)) = (&auth.user_id, &auth.user_password) {
+                        req = req.basic_auth(u, Some(p));
+                    }
                 }
+                "OAUTH2" => {
+                    if let Some(token) = self.fetch_oauth2_token(auth).await {
+                        req = req.bearer_auth(token);
+                    }
+                }
+                _ => {}
             }
-            // OAUTH2 non implémenté pour l'instant
         }
 
         // Signature HMAC SHA-256 (algo HS256)
@@ -527,6 +626,95 @@ impl WebhookDispatcher {
             "Webhook envoyé avec succès"
         );
         Ok(())
+    }
+}
+
+// ============================================================
+// WebhookAckProcessor — déclenche flow.ack.updated dans le pipeline
+// ============================================================
+
+/// Processor qui déclenche un événement webhook `flow.ack.updated`
+/// quand le statut de l'exchange atteint un point notable :
+/// - `Validated` → ackStatus = "Ok"
+/// - `Distributed` → ackStatus = "Ok"
+/// - `Acknowledged` → ackStatus = "Ok"
+/// - `Rejected` → ackStatus = "Error"
+/// - `Error` → ackStatus = "Error"
+///
+/// Le dispatch est non-bloquant (tokio::spawn).
+/// Utilise la propriété `webhook.last_ack_status` pour éviter les doublons.
+pub struct WebhookAckProcessor {
+    store: Arc<WebhookStore>,
+    flow_direction: String,
+}
+
+impl WebhookAckProcessor {
+    pub fn new(store: Arc<WebhookStore>, flow_direction: &str) -> Self {
+        Self {
+            store,
+            flow_direction: flow_direction.to_string(),
+        }
+    }
+
+    /// Mappe un FlowStatus vers un ackStatus AFNOR.
+    fn map_ack_status(status: &pdp_core::model::FlowStatus) -> Option<&'static str> {
+        use pdp_core::model::FlowStatus;
+        match status {
+            FlowStatus::Validated | FlowStatus::Distributed | FlowStatus::Acknowledged => {
+                Some("Ok")
+            }
+            FlowStatus::Rejected | FlowStatus::Error => Some("Error"),
+            _ => None,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl pdp_core::processor::Processor for WebhookAckProcessor {
+    fn name(&self) -> &str {
+        "WebhookAckProcessor"
+    }
+
+    async fn process(&self, exchange: pdp_core::exchange::Exchange) -> pdp_core::error::PdpResult<pdp_core::exchange::Exchange> {
+        // Skip si pas d'invoice ou pas de statut notable
+        let ack_status = match Self::map_ack_status(&exchange.status) {
+            Some(s) => s,
+            None => return Ok(exchange),
+        };
+
+        // Éviter les doublons : ne déclencher qu'une fois par valeur de ackStatus
+        let last = exchange.get_property("webhook.last_ack_status");
+        if last.map(|s| s.as_str()) == Some(ack_status) {
+            return Ok(exchange);
+        }
+
+        let flow_id = exchange.flow_id.to_string();
+        let flow_type = exchange
+            .invoice
+            .as_ref()
+            .and_then(|i| i.invoice_type_code.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+        let direction = self.flow_direction.clone();
+        let ack = ack_status.to_string();
+        let store = self.store.clone();
+
+        // Dispatch non-bloquant
+        tokio::spawn(async move {
+            let dispatcher = WebhookDispatcher::new(store);
+            dispatcher
+                .dispatch(
+                    WebhookEventType::FlowAckUpdated,
+                    &flow_id,
+                    &flow_type,
+                    &direction,
+                    Some(&ack),
+                )
+                .await;
+        });
+
+        let mut exchange = exchange;
+        exchange.set_property("webhook.last_ack_status", ack_status);
+        Ok(exchange)
     }
 }
 

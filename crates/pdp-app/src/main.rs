@@ -157,8 +157,18 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
     // Répertoire de base pour la découverte des tenants
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
 
+    // Webhook store partagé entre le pipeline (WebhookAckProcessor) et le serveur HTTP
+    let webhook_store = std::sync::Arc::new(webhooks::WebhookStore::new());
+
     // Construire le router avec la route HTTP inbound
-    let router = build_router(&config, base_dir, Some(http_exchange_rx), cli_mode).await?;
+    let router = build_router(
+        &config,
+        base_dir,
+        Some(http_exchange_rx),
+        cli_mode,
+        webhook_store.clone(),
+    )
+    .await?;
 
     // Démarrer le serveur HTTP si configuré ET si le mode réception est actif
     if let Some(ref http_config) = config.http_server {
@@ -206,7 +216,7 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             trace_store,
             metrics: server::Metrics::default(),
             annuaire_store,
-            webhook_store: std::sync::Arc::new(webhooks::WebhookStore::new()),
+            webhook_store: webhook_store.clone(),
         });
 
         let server_config = server::ServerConfig {
@@ -284,7 +294,8 @@ async fn cmd_run(config_path: &std::path::Path, mode_str: &str) -> Result<()> {
 
     tracing::info!(mode = ?cli_mode, "Exécution unique de toutes les routes");
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
-    let router = build_router(&config, base_dir, None, cli_mode).await?;
+    let webhook_store = std::sync::Arc::new(webhooks::WebhookStore::new());
+    let router = build_router(&config, base_dir, None, cli_mode, webhook_store).await?;
     let results = router.execute_all().await;
 
     let mut total_success = 0;
@@ -313,7 +324,8 @@ async fn cmd_run(config_path: &std::path::Path, mode_str: &str) -> Result<()> {
 async fn cmd_run_route(config_path: &std::path::Path, route_id: &str) -> Result<()> {
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
-    let router = build_router(&config, base_dir, None, CliMode::Both).await?;
+    let webhook_store = std::sync::Arc::new(webhooks::WebhookStore::new());
+    let router = build_router(&config, base_dir, None, CliMode::Both, webhook_store).await?;
 
     tracing::info!(route_id = %route_id, "Exécution de la route");
     let exchanges = router.execute_route(route_id).await?;
@@ -621,6 +633,7 @@ async fn build_router(
     base_dir: &std::path::Path,
     http_rx: Option<tokio::sync::mpsc::Receiver<pdp_core::Exchange>>,
     cli_mode: CliMode,
+    webhook_store: std::sync::Arc<webhooks::WebhookStore>,
 ) -> Result<pdp_core::Router> {
     let store = match pdp_trace::TraceStore::new(&config.elasticsearch.url).await {
         Ok(s) => std::sync::Arc::new(s),
@@ -794,11 +807,13 @@ async fn build_router(
                 builder = add_emission_processors(
                     builder, config, route_config, &store,
                     &annuaire_client, &partner_directory, &annuaire_service, &intra_pdp_tx,
+                    &webhook_store,
                 );
             }
             pdp_config::PipelineMode::Reception => {
                 builder = add_reception_processors(
                     builder, config, route_config, &store, &annuaire_service,
+                    &webhook_store,
                 );
             }
         }
@@ -1003,7 +1018,7 @@ async fn build_router(
                 validate: true,
                 generate_cdar: true,
                 cdar_receiver: None,
-            }, &store, &annuaire_service);
+            }, &store, &annuaire_service, &webhook_store);
 
             // Error handler avec alertes
             let http_error_dir = alert_config
@@ -1068,7 +1083,7 @@ async fn build_router(
             validate: true,
             generate_cdar: true,
             cdar_receiver: None,
-        }, &store, &annuaire_service);
+        }, &store, &annuaire_service, &webhook_store);
 
         let intra_error_dir = alert_config
             .map(|a| a.error_dir.clone())
@@ -1241,6 +1256,7 @@ fn add_emission_processors(
     partner_directory: &Option<pdp_client::PartnerDirectory>,
     annuaire_service: &Option<std::sync::Arc<pdp_annuaire::AnnuaireService>>,
     _intra_pdp_tx: &tokio::sync::mpsc::Sender<pdp_core::Exchange>,
+    webhook_store: &std::sync::Arc<webhooks::WebhookStore>,
 ) -> pdp_core::RouteBuilder {
     // Validation
     if route_config.validate {
@@ -1254,12 +1270,24 @@ fn add_emission_processors(
                 true,
             )))
             .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+
+        // Webhook flow.ack.updated dès que la facture est validée (ackStatus="Ok")
+        builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+            webhook_store.clone(),
+            "Out", // émission = direction Out
+        )));
     }
 
     // Validation annuaire PPF (G1.63) — vendeur + acheteur
     builder = builder.process(Box::new(pdp_annuaire::AnnuaireValidationProcessor::new(
         annuaire_service.clone(),
         pdp_annuaire::ValidationMode::Emission,
+    )));
+
+    // Webhook flow.ack.updated après validation annuaire (signale erreur si vendeur/acheteur inconnu)
+    builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+        webhook_store.clone(),
+        "Out",
     )));
 
     // Flux 1 PPF (TOUJOURS en émission — données réglementaires)
@@ -1319,6 +1347,7 @@ fn add_reception_processors(
     route_config: &pdp_config::model::RouteConfig,
     store: &std::sync::Arc<pdp_trace::TraceStore>,
     annuaire_service: &Option<std::sync::Arc<pdp_annuaire::AnnuaireService>>,
+    webhook_store: &std::sync::Arc<webhooks::WebhookStore>,
 ) -> pdp_core::RouteBuilder {
     // Validation
     if route_config.validate {
@@ -1332,12 +1361,24 @@ fn add_reception_processors(
                 true,
             )))
             .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+
+        // Webhook flow.ack.updated (réception → direction "In")
+        builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+            webhook_store.clone(),
+            "In",
+        )));
     }
 
     // Validation annuaire PPF (G1.63) — vendeur uniquement en réception
     builder = builder.process(Box::new(pdp_annuaire::AnnuaireValidationProcessor::new(
         annuaire_service.clone(),
         pdp_annuaire::ValidationMode::Reception,
+    )));
+
+    // Webhook après validation annuaire
+    builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+        webhook_store.clone(),
+        "In",
     )));
 
     // PAS de Flux 1 PPF — la PDP émettrice l'a déjà fait
