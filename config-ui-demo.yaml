@@ -11,7 +11,10 @@ pdp:
 elasticsearch:
   url: "http://localhost:9200"
 
-# Pas de section `database` — désactive l'annuaire PostgreSQL
+# PostgreSQL pour l'annuaire PPF (démo : 500 entreprises chargées via F14)
+database:
+  url: "postgresql://pdp:pdp@localhost:5432/pdp"
+  max_connections: 5
 
 validation:
   specs_dir: ./specs
