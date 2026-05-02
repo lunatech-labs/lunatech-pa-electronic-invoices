@@ -3,7 +3,60 @@
 Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 
 **Dernière mise à jour** : 2026-05-02
-**Tests** : 1091 tests workspace, 0 échec, 9 ignorés
+**Tests** : 1095 tests workspace, 0 échec, 9 ignorés
+
+## Vue d'ensemble — conformité AFNOR
+
+| Spec | Score | Manque principal |
+|------|-------|------------------|
+| **XP Z12-012** (Formats & Profils) | 97% | Multi-vendeurs §4.5.4, Flux 11 (V1.3 annuaire publiable) |
+| **XP Z12-013** (APIs Flow/Directory) | 95% | Plomberie de production seulement |
+| **XP Z12-014** (Cas d'usage B2B) | 69% | 13 cas partiels (notes de frais, escomptes TVA, compensations, régimes de marge) |
+| **DSE AIFE** (Specifications externes) | 96% | Orchestration cron F13/F14 (briques OK) |
+
+## Restes consolidés (par bloc)
+
+### Annuaire — orchestration manquante (briques livrées)
+Voir [§5](#5-annuaire-ppf--copie-locale-flux-1413) :
+- Configuration `PpfReturnConsumerConfig.paths` avec chemin SAS retrait F14 dédié
+- Cron / déclencheur métier qui appelle le F13 generator (onboarding, changement de PA)
+- Application du flux différentiel quotidien
+
+### E-reporting — boucle prod
+Voir [§11](#11-e-reporting-flux-10-) :
+- CLI `generate102 / generate104` (paiements — source DB métier client requise)
+- Cron scheduler pour génération mensuelle automatique
+- Envoi SFTP automatique via `PpfSftpProducer` avec `FFE1025A`
+
+### Réception inter-PDP — affinage
+Voir [§3](#3-réception-inter-pdp--affinage) :
+- Livraison au bon tenant (`{siren}/out/` selon SIREN acheteur)
+- Notification acheteur (webhook, email, polling)
+- Relais CDV retour acheteur→vendeur (CDV 204, 210)
+
+### Codes IRR pièces jointes
+Voir [§4](#4-codes-irr-pièces-jointes-cdv-501) — bloqué par : pas encore de support PJ dans le pipeline.
+
+### Sécurité / multi-tenant
+- Voir [§9](#9-autorisation-et-déclaration-des-tenants) — habilitation, mandat signé, F13 onboarding
+- Voir [§10](#10-rate-limiting-http-) — rate limit par tenant
+- Vérification clé serveur SSH en prod (actuellement désactivée en dev)
+
+### Architecture / qualité
+- Voir [§8](#8-document-darchitecture-globale) — vision cible, déploiement
+- Voir [§12](#12-abstraction-object-store) — S3/MinIO
+- Voir [§13](#13-convention-de-nommage-fichiers-cdar-et-factures)
+- Renommage **PDP→PA** / **OD→SC** (terminologie V1.2)
+
+### Conformité réglementaire restante (XP Z12-012/014)
+- **Multi-vendeurs** §4.5.4 — sub-lines / multi-seller invoices
+- **Flux 11** (NOUVEAU V1.3) — annuaire publiable PPF→PA→utilisateurs
+- **13 cas d'usage partiels** XP Z12-014 (notes de frais, escomptes TVA, compensations, régimes de marge)
+
+### Gros chantiers produit
+- Voir [§3bis](#3bis-interface-web-de-suivi-des-factures) — interface web (4 phases)
+- Voir [§14](#14-réécriture-oxalis-access-point-peppol-en-rust) — Peppol AS4 en Rust
+- Voir [§15](#15-factur-x-basic-wl--structuré) — Factur-X BASIC WL
 
 ---
 
@@ -275,6 +328,42 @@ Créer un vrai document d'architecture système (pas juste la liste des crates).
 - [ ] Diagrammes de flux de données
 - [ ] Séparation des responsabilités
 
+### 8bis. Conformité réglementaire restante (XP Z12-012 / 014)
+
+Items pondérés "haute priorité" pour finir la conformité aux normes AFNOR.
+
+#### Multi-vendeurs (XP Z12-012 §4.5.4)
+- [ ] Modèle InvoiceData : support sub-lines / multi-seller
+- [ ] Parsers UBL/CII : extraction des plusieurs vendeurs par facture
+- [ ] CDV : émission par vendeur ou agrégée selon spec
+- [ ] Tests avec fixtures multi-vendeurs
+
+#### Flux 11 — Annuaire publiable (NOUVEAU V1.3)
+- [ ] Spec : annuaire publiable PPF → PA → utilisateurs
+- [ ] Code interface PPF (à confirmer dans la spec V1.3)
+- [ ] Producer/Consumer + parser
+- [ ] Tests
+
+#### Cas d'usage partiels XP Z12-014 (13 cas restants)
+Voir détail dans `rapport-conformite-pdp.md` §3.2 :
+- [ ] Notes de frais (cas 35-37)
+- [ ] Escomptes TVA (cas 38)
+- [ ] Compensations (cas 39-40)
+- [ ] Régimes de marge — calcul bénéfice (cas 33)
+- [ ] TVA déjà collectée B2C → B2B (cas 30, lien rétrospectif)
+- [ ] Factures mixtes — routage (cas 31)
+- [ ] Cas avancés et spécialisés (35-42 partiels)
+
+### 8ter. Renommage terminologie V1.2 (PDP→PA, OD→SC)
+
+XP Z12-012 V1.2 introduit les termes officiels « Plateforme Agréée » (PA-E
+émettrice / PA-R réceptrice) et « Service de Conformité » (SC, ex-OD).
+
+- [ ] Audit des occurrences "PDP" et "OD" dans le code et la doc
+- [ ] Renommage progressif (compatibilité ascendante via `pub use`)
+- [ ] Mise à jour CLI, configs, logs, propriétés Exchange
+- [ ] Mise à jour README, docs/*.md, exemples
+
 ## Moyenne priorité
 
 ### 9. Autorisation et déclaration des tenants
@@ -285,6 +374,13 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [ ] Vérification de l'habilitation avant traitement
 - [ ] Enregistrement dans l'annuaire PPF (F13) lors de l'onboarding
 - [ ] Workflow de changement de PDP (clôture des lignes de l'ancienne PA)
+
+### 9bis. Sécurité SFTP — vérification clé serveur
+
+- [ ] Activer la vérification de la clé serveur SSH en prod (actuellement
+      désactivée en dev pour faciliter les tests)
+- [ ] Configuration `known_hosts` par tenant ou globale
+- [ ] Documentation procédure de rotation des clés
 
 ### 10. Rate limiting HTTP ✅
 
