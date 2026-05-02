@@ -734,8 +734,30 @@ impl TraceStore {
     ) -> PdpResult<Vec<ExchangeSummary>> {
         let index = Self::index_name(siren);
         let mut must: Vec<serde_json::Value> = Vec::new();
+        let mut must_not: Vec<serde_json::Value> = Vec::new();
+        // Filtre status logique :
+        //  - "ok" / "DISTRIBUÉ" : flux distribués sans erreur
+        //  - "erreur" / "ERREUR" : error_count > 0 OU status terminal d'échec
+        //  - "attente" / "EN_ATTENTE" : ni distribué ni en erreur
+        //  - autre : term match exact (compatibilité)
         if let Some(s) = status {
-            must.push(serde_json::json!({ "term": { "status": s } }));
+            match s.to_uppercase().as_str() {
+                "OK" | "DISTRIBUÉ" | "DISTRIBUE" => {
+                    must.push(serde_json::json!({ "term": { "status": "DISTRIBUÉ" } }));
+                    must.push(serde_json::json!({ "term": { "error_count": 0 } }));
+                }
+                "ERREUR" | "ERROR" => {
+                    // error_count > 0 (la dedup et la validation incrémentent ce compteur)
+                    must.push(serde_json::json!({ "range": { "error_count": { "gt": 0 } } }));
+                }
+                "EN_ATTENTE" | "ATTENTE" | "PENDING" => {
+                    must.push(serde_json::json!({ "term": { "error_count": 0 } }));
+                    must_not.push(serde_json::json!({ "term": { "status": "DISTRIBUÉ" } }));
+                }
+                other => {
+                    must.push(serde_json::json!({ "term": { "status": other } }));
+                }
+            }
         }
         let mut range = serde_json::Map::new();
         if let Some(f) = from_date { range.insert("gte".into(), serde_json::Value::String(f.into())); }
@@ -743,10 +765,17 @@ impl TraceStore {
         if !range.is_empty() {
             must.push(serde_json::json!({ "range": { "issue_date": range } }));
         }
-        let query = if must.is_empty() {
+        let query = if must.is_empty() && must_not.is_empty() {
             serde_json::json!({ "match_all": {} })
         } else {
-            serde_json::json!({ "bool": { "must": must } })
+            let mut bool_q = serde_json::Map::new();
+            if !must.is_empty() {
+                bool_q.insert("must".into(), serde_json::Value::Array(must));
+            }
+            if !must_not.is_empty() {
+                bool_q.insert("must_not".into(), serde_json::Value::Array(must_not));
+            }
+            serde_json::json!({ "bool": bool_q })
         };
 
         let from = page * page_size;

@@ -208,6 +208,16 @@ dl.kv dd { color: #1a1a2e; }
     font-weight: 600;
     white-space: nowrap;
 }
+.err-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 12px;
+    background: #ffebee;
+    color: #d32f2f;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
 .siret-sub { color: #999; font-size: 0.75rem; margin-top: 0.1rem; }
 .dir-tag {
     display: inline-block;
@@ -252,6 +262,8 @@ fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> Str
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title} — Ferrite</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="apple-touch-icon" href="/favicon.png">
     <style>{css}</style>
 </head>
 <body>
@@ -522,6 +534,15 @@ pub async fn handle_flows_list(
                         } else {
                             ""
                         };
+                        // Badge erreur ou cellule vide
+                        let errors_cell = if e.error_count == 0 {
+                            r#"<span style="color:#bbb">—</span>"#.to_string()
+                        } else {
+                            format!(
+                                r#"<span class="err-badge" title="{n} erreur(s)">⚠️ {n}</span>"#,
+                                n = e.error_count
+                            )
+                        };
                         let seller_cell = format!(
                             r#"<div>{name}</div><div class="siret-sub">SIRET {siret}</div>"#,
                             name = html_escape(e.seller_name.as_deref().unwrap_or("—")),
@@ -551,7 +572,7 @@ pub async fn handle_flows_list(
                             badge = status_badge(&e.status),
                             status = html_escape(&e.status),
                             pj = pj_cell,
-                            errors = e.error_count,
+                            errors = errors_cell,
                             date = html_escape(&e.created_at[..e.created_at.len().min(10)]),
                         )
                     })
@@ -1097,14 +1118,22 @@ pub async fn handle_download_attachment(
 // ============================================================
 
 const FERRITE_ICON_PNG: &[u8] = include_bytes!("../../../assets/ferrite_icon_dark_512.png");
+const FERRITE_FAVICON: &[u8] = include_bytes!("../../../assets/ferrite_icon_light_192.png");
 
-/// GET /ui/static/ferrite-logo.svg
-/// (route nommée `.svg` pour rétrocompatibilité, le contenu est PNG)
+/// GET /ui/static/ferrite-icon.png
 pub async fn handle_logo() -> impl IntoResponse {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("content-type", "image/png".parse().unwrap());
     headers.insert("cache-control", "public, max-age=86400".parse().unwrap());
     (StatusCode::OK, headers, FERRITE_ICON_PNG).into_response()
+}
+
+/// GET /favicon.ico (alias /favicon.png)
+pub async fn handle_favicon() -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "image/png".parse().unwrap());
+    headers.insert("cache-control", "public, max-age=604800".parse().unwrap());
+    (StatusCode::OK, headers, FERRITE_FAVICON).into_response()
 }
 
 // ============================================================
