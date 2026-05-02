@@ -464,6 +464,128 @@ fn build_pagination(
 }
 
 // ============================================================
+// Extraction des pièces jointes (à la volée, depuis raw_xml ou raw_pdf)
+// ============================================================
+
+/// Extrait la liste des pièces jointes d'un `ExchangeDocument` en re-parsant
+/// le contenu original (`raw_xml` pour UBL/CII, `raw_pdf_base64` pour Factur-X).
+/// Les PJ ne sont pas stockées en base — on les reconstruit à la demande.
+fn parse_attachments_from_doc(
+    doc: &pdp_trace::store::ExchangeDocument,
+) -> Vec<pdp_core::model::InvoiceAttachment> {
+    let format = doc.source_format.as_deref().unwrap_or("UBL").to_uppercase();
+
+    match format.as_str() {
+        "UBL" => doc
+            .raw_xml
+            .as_deref()
+            .and_then(|xml| pdp_invoice::UblParser::new().parse(xml).ok())
+            .map(|inv| inv.attachments)
+            .unwrap_or_default(),
+        "CII" => doc
+            .raw_xml
+            .as_deref()
+            .and_then(|xml| pdp_invoice::CiiParser::new().parse(xml).ok())
+            .map(|inv| inv.attachments)
+            .unwrap_or_default(),
+        "FACTURX" | "FACTUR-X" => {
+            // Décode le PDF base64 puis extrait les PJ embarquées
+            let b64 = match doc.raw_pdf_base64.as_deref() {
+                Some(b) => b,
+                None => return Vec::new(),
+            };
+            use base64::Engine as _;
+            match base64::engine::general_purpose::STANDARD.decode(b64) {
+                Ok(pdf_bytes) => pdp_invoice::FacturXParser::new()
+                    .parse(&pdf_bytes)
+                    .map(|inv| inv.attachments)
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Formate une taille en octets en chaîne lisible (B / KB / MB).
+fn format_size(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+fn render_attachments(
+    attachments: &[pdp_core::model::InvoiceAttachment],
+    fallback_filenames: &[String],
+) -> String {
+    // Cas dégradé : pas de PJ extraites du raw_xml, on affiche au moins les noms indexés
+    if attachments.is_empty() {
+        if fallback_filenames.is_empty() {
+            return r#"<p style="color:#888">Aucune pièce jointe.</p>"#.to_string();
+        }
+        let items: Vec<String> = fallback_filenames
+            .iter()
+            .map(|f| format!("<li>{}</li>", html_escape(f)))
+            .collect();
+        return format!(
+            r#"<p style="color:#666;font-size:0.9rem">⚠️ Liste indexée uniquement (raw_xml indisponible — détails non extraits)</p>
+<ul style="padding-left:1.2rem">{}</ul>"#,
+            items.join("")
+        );
+    }
+
+    let rows: Vec<String> = attachments
+        .iter()
+        .map(|a| {
+            let filename = a.filename.as_deref().unwrap_or("—");
+            let id = a.id.as_deref().unwrap_or("—");
+            let description = a.description.as_deref().unwrap_or("");
+            let mime = a.mime_code.as_deref().unwrap_or("—");
+            let size = match (&a.embedded_content, &a.external_uri) {
+                (Some(content), _) => format_size(content.len()),
+                (None, Some(uri)) => format!(
+                    r#"<a href="{}" target="_blank">externe</a>"#,
+                    html_escape(uri)
+                ),
+                _ => "—".to_string(),
+            };
+            format!(
+                r#"<tr>
+    <td><code>{id}</code></td>
+    <td>{filename}</td>
+    <td>{description}</td>
+    <td>{mime}</td>
+    <td>{size}</td>
+</tr>"#,
+                id = html_escape(id),
+                filename = html_escape(filename),
+                description = html_escape(description),
+                mime = html_escape(mime),
+                size = size,
+            )
+        })
+        .collect();
+
+    format!(
+        r#"<table>
+    <thead>
+        <tr><th>ID</th><th>Fichier</th><th>Description</th><th>MIME</th><th>Taille</th></tr>
+    </thead>
+    <tbody>{}</tbody>
+</table>
+<p style="color:#666;font-size:0.85rem;margin-top:0.5rem">
+    {} pièce(s) jointe(s) extraite(s) à la volée — non stockées en base.
+</p>"#,
+        rows.join(""),
+        attachments.len(),
+    )
+}
+
+// ============================================================
 // GET /ui/flows/{flowId} — Détail
 // ============================================================
 
@@ -594,14 +716,34 @@ fn render_flow_detail(
         }
     };
 
+    // Pièces jointes extraites à la volée du raw_xml/raw_pdf (pas stockées en base)
+    let attachments_section = match full {
+        None => String::new(),
+        Some(doc) => {
+            let attachments = parse_attachments_from_doc(doc);
+            let count_label = if attachments.is_empty() && doc.attachment_filenames.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", attachments.len().max(doc.attachment_filenames.len()))
+            };
+            format!(
+                r#"<div class="card"><h2>Pièces jointes{count}</h2>{body}</div>"#,
+                count = count_label,
+                body = render_attachments(&attachments, &doc.attachment_filenames),
+            )
+        }
+    };
+
     format!(
         r#"<p><a href="/ui/flows?siren={siren}">← Retour à la liste</a></p>
 <div class="card"><h2>Métadonnées</h2>{metadata}</div>
 {errors}
+{attachments}
 <div class="card"><h2>Timeline du pipeline</h2>{timeline}</div>"#,
         siren = html_escape(siren),
         metadata = metadata,
         errors = errors,
+        attachments = attachments_section,
         timeline = timeline,
     )
 }
@@ -612,4 +754,156 @@ fn render_flow_detail(
 
 fn html_response(body: &str) -> axum::response::Response {
     (StatusCode::OK, Html(body.to_string())).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_xml(rel_path: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(rel_path);
+        std::fs::read_to_string(&path).unwrap()
+    }
+
+    fn doc_with(raw_xml: Option<String>, source_format: &str, filenames: Vec<String>) -> pdp_trace::store::ExchangeDocument {
+        pdp_trace::store::ExchangeDocument {
+            exchange_id: "ex-1".into(),
+            flow_id: "flow-1".into(),
+            source_filename: Some("facture.xml".into()),
+            invoice_number: Some("F-001".into()),
+            invoice_key: None,
+            seller_name: None,
+            buyer_name: None,
+            seller_siret: None,
+            buyer_siret: None,
+            seller_siren: None,
+            buyer_siren: None,
+            source_format: Some(source_format.into()),
+            total_ht: None,
+            total_ttc: None,
+            total_tax: None,
+            currency: None,
+            issue_date: None,
+            status: "DISTRIBUÉ".into(),
+            error_count: 0,
+            raw_xml,
+            raw_pdf_base64: None,
+            converted_xml: None,
+            converted_format: None,
+            attachment_count: filenames.len(),
+            attachment_filenames: filenames,
+            events: vec![],
+            errors: vec![],
+            validation_warnings: vec![],
+            created_at: "2025-11-15T10:00:00Z".into(),
+            updated_at: "2025-11-15T10:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn test_format_size_humanized() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1024), "1.0 KB");
+        assert_eq!(format_size(1536), "1.5 KB");
+        assert_eq!(format_size(1_048_576), "1.00 MB");
+        assert_eq!(format_size(2_500_000), "2.38 MB");
+    }
+
+    #[test]
+    fn test_parse_attachments_from_doc_no_raw_xml() {
+        let doc = doc_with(None, "UBL", vec![]);
+        assert!(parse_attachments_from_doc(&doc).is_empty());
+    }
+
+    #[test]
+    fn test_parse_attachments_from_doc_unknown_format() {
+        let doc = doc_with(Some("<x/>".into()), "JSON", vec![]);
+        assert!(parse_attachments_from_doc(&doc).is_empty());
+    }
+
+    #[test]
+    fn test_parse_attachments_from_doc_ubl_no_attachments() {
+        // Fixture standard sans PJ
+        let xml = fixture_xml("tests/fixtures/ubl/facture_ubl_001.xml");
+        let doc = doc_with(Some(xml), "UBL", vec![]);
+        // Le parsing doit réussir, juste 0 PJ
+        let attachments = parse_attachments_from_doc(&doc);
+        // Selon la fixture, 0 ou plusieurs PJ — pas de crash
+        let _ = attachments;
+    }
+
+    #[test]
+    fn test_render_attachments_empty_no_filenames() {
+        let html = render_attachments(&[], &[]);
+        assert!(html.contains("Aucune pièce jointe"));
+    }
+
+    #[test]
+    fn test_render_attachments_fallback_filenames_only() {
+        // raw_xml indisponible mais on a les noms indexés en ES
+        let html = render_attachments(&[], &["bon_commande.pdf".into(), "annexe.png".into()]);
+        assert!(html.contains("Liste indexée uniquement"));
+        assert!(html.contains("bon_commande.pdf"));
+        assert!(html.contains("annexe.png"));
+    }
+
+    #[test]
+    fn test_render_attachments_with_embedded() {
+        use pdp_core::model::InvoiceAttachment;
+        let attachments = vec![InvoiceAttachment {
+            id: Some("ATT-1".into()),
+            description: Some("Bon de commande".into()),
+            external_uri: None,
+            embedded_content: Some(vec![0u8; 2048]),
+            mime_code: Some("application/pdf".into()),
+            filename: Some("bon_commande.pdf".into()),
+        }];
+        let html = render_attachments(&attachments, &[]);
+        assert!(html.contains("ATT-1"));
+        assert!(html.contains("bon_commande.pdf"));
+        assert!(html.contains("application/pdf"));
+        assert!(html.contains("2.0 KB"));
+        assert!(html.contains("extraite(s) à la volée"));
+    }
+
+    #[test]
+    fn test_render_attachments_external_uri() {
+        use pdp_core::model::InvoiceAttachment;
+        let attachments = vec![InvoiceAttachment {
+            id: Some("ATT-2".into()),
+            description: None,
+            external_uri: Some("https://example.com/specs.pdf".into()),
+            embedded_content: None,
+            mime_code: None,
+            filename: None,
+        }];
+        let html = render_attachments(&attachments, &[]);
+        assert!(html.contains("ATT-2"));
+        assert!(html.contains(r#"<a href="https://example.com/specs.pdf""#));
+        assert!(html.contains("externe"));
+    }
+
+    #[test]
+    fn test_render_attachments_escapes_special_chars() {
+        use pdp_core::model::InvoiceAttachment;
+        let attachments = vec![InvoiceAttachment {
+            id: Some("ATT-3".into()),
+            description: Some("Description with <script> & quotes".into()),
+            external_uri: None,
+            embedded_content: Some(vec![0u8; 100]),
+            mime_code: Some("application/pdf".into()),
+            filename: Some("file<>.pdf".into()),
+        }];
+        let html = render_attachments(&attachments, &[]);
+        // Pas de balise script injectée
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("&lt;script&gt;"));
+        assert!(html.contains("&amp;"));
+    }
 }

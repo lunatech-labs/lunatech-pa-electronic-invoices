@@ -67,11 +67,16 @@ Exemples d'URLs :
 
 ### Détail `/ui/flows/{flowId}?siren={SIREN}`
 
-Trois sections :
+Quatre sections :
 
 1. **Métadonnées** — flowId, exchangeId, n° facture, vendeur/acheteur (nom + SIRET), format (UBL/CII/Factur-X), totaux HT/TVA/TTC, devise, date émission, statut (badge), date de réception
 2. **Erreurs** (si `error_count > 0`) — liste step + message
-3. **Timeline du pipeline** — événements horodatés par route et statut
+3. **Pièces jointes** — extraites **à la volée** depuis `raw_xml` (UBL/CII)
+   ou `raw_pdf_base64` (Factur-X). Affiche un tableau ID · Fichier · Description ·
+   MIME · Taille. Si `raw_xml` indisponible, fallback sur la liste indexée
+   (`attachment_filenames`). **Les PJ ne sont pas stockées en base** —
+   l'extraction est faite par les parsers UBL/CII/Factur-X au moment de l'affichage.
+4. **Timeline du pipeline** — événements horodatés par route et statut
 
 Le `flow_id` est accepté ou son alias `exchange_id`.
 
@@ -104,6 +109,7 @@ crates/pdp-trace/src/store.rs  — list_exchanges() + get_stats_for_siren()
 | `TraceStore::get_stats_for_siren()` | Dashboard counters |
 | `TraceStore::list_exchanges()` | Liste paginée avec filtres |
 | `TraceStore::get_exchange()` | Détail facture (ExchangeDocument complet) |
+| `parse_attachments_from_doc()` (ui.rs) | PJ extraites à la volée — `UblParser` / `CiiParser` / `FacturXParser` selon `source_format`. Pas de stockage des PJ en base. |
 
 ## Captures (référence)
 

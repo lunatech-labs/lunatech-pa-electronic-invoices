@@ -218,16 +218,20 @@ de vie (CDV), et les éventuelles erreurs/rejets.
 - [x] `GET /ui` — Dashboard avec 4 KPIs (total / distribués / en attente / en erreur)
 - [x] `GET /ui/flows` — Liste paginée avec filtres (statut, dates) + 50/page
 - [x] `GET /ui/flows/{flowId}` — Détail facture (métadonnées, totaux) + timeline pipeline
+- [x] **Pièces jointes** : extraites à la volée du `raw_xml` (UBL/CII) ou
+      `raw_pdf_base64` (Factur-X) — pas stockées en base. Tableau
+      ID/Fichier/Description/MIME/Taille avec fallback sur `attachment_filenames`
+      indexés si `raw_xml` indisponible.
 - [x] Style CSS inline cohérent avec `/annuaire`, badges colorés par statut
 - [x] Multi-tenant via `?siren=` (sélecteur SIREN si paramètre absent)
 - [x] `TraceStore::list_exchanges()` + `get_stats_for_siren()`
-- [x] 6 tests HTTP (no-siren, no-trace-store, html-skeleton, public-routes)
+- [x] 15 tests (HTTP routes UI + helpers PJ extraction/render/escape)
 
 #### Écrans utilisateur (par tenant) — phases suivantes
 
 - [ ] **Liste factures reçues** vs émises : actuellement liste mixte, ajouter filtre direction
-- [ ] **Pièces jointes** : afficher dans le détail (`attachment_filenames`)
-- [ ] **Téléchargement** : XML facture, PDF Factur-X, CDV individuels
+- [ ] **Téléchargement** : XML facture, PDF Factur-X, CDV individuels (les PJ
+      sont déjà parseables — il reste à exposer un endpoint de download)
 - [ ] **Soumission de factures** : upload UBL/CII/Factur-X via formulaire web
       (pour fournisseurs sans intégration API)
 - [ ] **Émission de CDV manuels** : pour acheteurs (CDV 204/205/207/210, etc.)
