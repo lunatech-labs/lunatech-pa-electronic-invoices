@@ -53,6 +53,11 @@ impl PartnerDirectory {
         self.partners.get(matricule).map(|(_, url)| url.as_str())
     }
 
+    /// Liste les matricules de toutes les PDP partenaires connues
+    pub fn matricules(&self) -> Vec<String> {
+        self.partners.keys().cloned().collect()
+    }
+
     /// Enrichit une RoutingResolution avec l'URL du Flow Service si connue
     pub fn enrich_resolution(&self, mut resolution: RoutingResolution) -> RoutingResolution {
         if resolution.flow_service_url.is_none() {
@@ -429,6 +434,13 @@ impl RoutingValidationProcessor {
     ) -> Self {
         Self {
             known_matricules: afnor_producers.keys().cloned().collect(),
+        }
+    }
+
+    /// Construit depuis un `PartnerDirectory` (annuaire local des PDP partenaires)
+    pub fn from_partner_directory(directory: &PartnerDirectory) -> Self {
+        Self {
+            known_matricules: directory.matricules(),
         }
     }
 }

@@ -34,6 +34,12 @@ impl AnnuaireService {
         Self { store }
     }
 
+    /// Accès direct au store (pour les processors qui en ont besoin,
+    /// par exemple `AnnuaireImportProcessor`).
+    pub fn store(&self) -> &AnnuaireStore {
+        &self.store
+    }
+
     /// Vérifie si un SIREN existe dans l'annuaire
     pub async fn exists_siren(&self, siren: &str) -> Result<bool, DbError> {
         self.store

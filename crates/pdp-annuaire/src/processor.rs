@@ -195,16 +195,16 @@ impl Processor for AnnuaireValidationProcessor {
 /// Code interface PPF : `FFE1435A`
 /// Spécifications externes DSE AIFE V3.1, §3.4 (Flux 14 — export annuaire).
 pub struct AnnuaireImportProcessor {
-    store: Option<Arc<crate::AnnuaireStore>>,
+    service: Option<Arc<crate::AnnuaireService>>,
     /// Si `Some`, vérifie que l'horodate du F14 correspond à la valeur attendue
     /// (utile pour les imports différentiels successifs).
     expect_horodate: Option<String>,
 }
 
 impl AnnuaireImportProcessor {
-    pub fn new(store: Option<Arc<crate::AnnuaireStore>>) -> Self {
+    pub fn new(service: Option<Arc<crate::AnnuaireService>>) -> Self {
         Self {
-            store,
+            service,
             expect_horodate: None,
         }
     }
@@ -231,17 +231,17 @@ impl Processor for AnnuaireImportProcessor {
             return Ok(exchange);
         }
 
-        // Skip si pas de store
-        let store = match &self.store {
+        // Skip si pas de service
+        let service = match &self.service {
             Some(s) => s.clone(),
             None => {
                 tracing::warn!(
                     exchange_id = %exchange.id,
-                    "F14 reçu mais aucun AnnuaireStore configuré — ingestion ignorée"
+                    "F14 reçu mais aucun AnnuaireService configuré — ingestion ignorée"
                 );
                 exchange.set_property(
                     "annuaire.import.error",
-                    "AnnuaireStore non configuré",
+                    "AnnuaireService non configuré",
                 );
                 return Ok(exchange);
             }
@@ -262,7 +262,7 @@ impl Processor for AnnuaireImportProcessor {
             "Ingestion F14 reçu du PPF"
         );
 
-        match crate::ingest::ingest_f14(reader, &store, self.expect_horodate.as_deref()).await {
+        match crate::ingest::ingest_f14(reader, service.store(), self.expect_horodate.as_deref()).await {
             Ok(stats) => {
                 tracing::info!(
                     unites_legales = stats.unites_legales,
@@ -394,7 +394,7 @@ mod tests {
         let result = processor.process(exchange).await.unwrap();
         assert_eq!(
             result.get_property("annuaire.import.error").map(|s| s.as_str()),
-            Some("AnnuaireStore non configuré")
+            Some("AnnuaireService non configuré")
         );
         // Pas d'erreur fatale — on continue le pipeline (par ex. archivage du flux)
         assert!(!result.has_errors());

@@ -1034,10 +1034,8 @@ async fn build_router(
                 ).with_strategy(strategy)));
             }
 
-            // CDAR émission (CDV 200)
-            builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(pdp_id, pdp_name)));
-
-            // Résolution de routage (avec détection intra-PDP)
+            // Résolution de routage (avec détection intra-PDP) — AVANT CdarProcessor
+            // pour permettre la génération de CDV 221 si la destination est invalide.
             if let (Some(ref annuaire), Some(ref partner_dir)) = (&annuaire_client, &partner_directory) {
                 let mut resolver = pdp_client::RoutingResolverProcessor::new(
                     annuaire.clone(),
@@ -1047,7 +1045,13 @@ async fn build_router(
                     resolver = resolver.with_our_matricule(matricule);
                 }
                 builder = builder.process(Box::new(resolver));
+                builder = builder.process(Box::new(
+                    pdp_client::RoutingValidationProcessor::from_partner_directory(partner_dir),
+                ));
             }
+
+            // CDAR émission (CDV 200, 213 ou 221 selon les erreurs)
+            builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(pdp_id, pdp_name)));
 
             // Destination + trace finale
             builder = builder
@@ -1217,7 +1221,12 @@ async fn build_router(
                     "ppf-return",
                 )))
                 .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
-                .process(Box::new(pdp_cdar::CdvReceptionProcessor::new()));
+                .process(Box::new(pdp_cdar::CdvReceptionProcessor::new()))
+                // Auto-import du F14 (export annuaire) reçu sur le SAS retrait
+                // si un AnnuaireService est configuré (PostgreSQL).
+                .process(Box::new(pdp_annuaire::AnnuaireImportProcessor::new(
+                    annuaire_service.clone(),
+                )));
 
             let error_dir = alert_config
                 .map(|a| a.error_dir.clone())
@@ -1399,15 +1408,8 @@ fn add_emission_processors(
             .process(Box::new(pdp_trace::TraceProcessor::transformed(store.clone())));
     }
 
-    // CDAR émission (CDV 200 "Déposée" ou 213 "Rejetée")
-    if route_config.generate_cdar {
-        builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(
-            &config.pdp.id,
-            &config.pdp.name,
-        )));
-    }
-
-    // Résolution de routage (avec détection intra-PDP)
+    // Résolution de routage (avec détection intra-PDP) — AVANT le CdarProcessor
+    // pour que ce dernier puisse générer un CDV 221 si la destination est invalide.
     if route_config.destination.endpoint_type == "ppf" {
         if let (Some(ref annuaire), Some(ref partner_dir)) = (annuaire_client, partner_directory) {
             let mut resolver = pdp_client::RoutingResolverProcessor::new(
@@ -1418,7 +1420,22 @@ fn add_emission_processors(
                 resolver = resolver.with_our_matricule(matricule);
             }
             builder = builder.process(Box::new(resolver));
+
+            // Vérifie qu'un producer AFNOR existe pour le matricule destinataire.
+            // Si non → add_error("routage", ...) → CdarProcessor générera CDV 221.
+            builder = builder.process(Box::new(
+                pdp_client::RoutingValidationProcessor::from_partner_directory(partner_dir),
+            ));
         }
+    }
+
+    // CDAR émission (CDV 200 "Déposée", 213 "Rejetée", ou 221 "Erreur routage")
+    // Doit s'exécuter APRÈS le routage pour décider entre 200/213/221.
+    if route_config.generate_cdar {
+        builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(
+            &config.pdp.id,
+            &config.pdp.name,
+        )));
     }
 
     builder
