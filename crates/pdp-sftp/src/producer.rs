@@ -18,19 +18,40 @@ impl SftpProducer {
             config,
         }
     }
-}
 
-#[async_trait]
-impl Producer for SftpProducer {
-    fn name(&self) -> &str {
-        &self.name
+    /// Envoie un exchange vers un répertoire SFTP spécifique (override de `config.remote_path`).
+    ///
+    /// Utilisé par `PpfSftpProducer` pour router les flux vers des sous-dossiers SAS
+    /// différents selon le code interface (F1, F6, F10, F13).
+    ///
+    /// L'exchange peut aussi définir une propriété `sftp.remote_path` pour surcharger
+    /// le chemin par défaut sans utiliser cette méthode.
+    pub async fn send_to_path(
+        &self,
+        exchange: Exchange,
+        remote_path: &str,
+    ) -> PdpResult<Exchange> {
+        self.send_internal(exchange, Some(remote_path)).await
     }
 
-    async fn send(&self, exchange: Exchange) -> PdpResult<Exchange> {
+    async fn send_internal(
+        &self,
+        exchange: Exchange,
+        remote_path_override: Option<&str>,
+    ) -> PdpResult<Exchange> {
+        // Résolution du chemin distant : argument explicite > propriété exchange > config
+        let remote_path: &str = remote_path_override
+            .or_else(|| {
+                exchange
+                    .get_property("sftp.remote_path")
+                    .map(|s| s.as_str())
+            })
+            .unwrap_or(&self.config.remote_path);
+
         tracing::info!(
             producer = %self.name,
             host = %self.config.host,
-            path = %self.config.remote_path,
+            path = %remote_path,
             exchange_id = %exchange.id,
             "Envoi SFTP"
         );
@@ -95,7 +116,7 @@ impl Producer for SftpProducer {
             .as_deref()
             .unwrap_or(&id_string);
 
-        let remote_file = format!("{}/{}", self.config.remote_path, filename);
+        let remote_file = format!("{}/{}", remote_path.trim_end_matches('/'), filename);
 
         // Écrire le fichier
         sftp.write(&remote_file, &exchange.body)
@@ -111,6 +132,17 @@ impl Producer for SftpProducer {
         );
 
         Ok(exchange)
+    }
+}
+
+#[async_trait]
+impl Producer for SftpProducer {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn send(&self, exchange: Exchange) -> PdpResult<Exchange> {
+        self.send_internal(exchange, None).await
     }
 }
 

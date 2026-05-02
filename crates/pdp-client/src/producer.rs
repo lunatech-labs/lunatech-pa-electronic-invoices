@@ -28,6 +28,15 @@ pub struct PpfSftpProducerConfig {
     /// Profil F1 par défaut (Base ou Full)
     #[serde(default = "default_profil")]
     pub default_profil: String,
+    /// Chemin SAS de dépôt par défaut (PDP → PPF). Si `None`, le `remote_path`
+    /// du `SftpConfig` sous-jacent est utilisé.
+    #[serde(default)]
+    pub default_depot_path: Option<String>,
+    /// Mapping code interface (`FFE0111A`, `FFE0614A`, …) → chemin SAS de dépôt spécifique.
+    /// Permet d'envoyer chaque type de flux dans un sous-dossier SAS différent quand le PPF
+    /// l'impose. Surcharge `default_depot_path`.
+    #[serde(default)]
+    pub depot_paths: std::collections::HashMap<String, String>,
 }
 
 fn default_profil() -> String {
@@ -46,6 +55,12 @@ pub struct PpfSftpProducer {
     name: String,
     pub(crate) flux_config: PpfFluxConfig,
     default_profil: ProfilF1,
+    /// Chemin SAS de dépôt par défaut (PDP → PPF). Surcharge `sftp_config.remote_path`
+    /// si présent.
+    default_depot_path: Option<String>,
+    /// Mapping code interface → chemin SAS de dépôt spécifique. Surcharge
+    /// `default_depot_path` quand le code interface du flux y figure.
+    depot_paths: std::collections::HashMap<String, String>,
     /// Compteur de séquence atomique pour générer des identifiants de flux uniques
     sequence_counter: AtomicU64,
     /// Producer SFTP sous-jacent pour le transport
@@ -73,6 +88,8 @@ impl PpfSftpProducer {
             name: name.to_string(),
             flux_config,
             default_profil,
+            default_depot_path: config.default_depot_path,
+            depot_paths: config.depot_paths,
             sequence_counter: AtomicU64::new(initial_sequence),
             sftp_producer: pdp_sftp::SftpProducer::new(
                 &format!("{}-sftp", name),
@@ -80,6 +97,16 @@ impl PpfSftpProducer {
             ),
             sequence_file: None,
         })
+    }
+
+    /// Résout le chemin SAS de dépôt pour un code interface donné.
+    /// Ordre de résolution : `depot_paths[code]` → `default_depot_path` → `None`
+    /// (le `SftpProducer` retombe alors sur son `config.remote_path`).
+    pub fn resolve_depot_path(&self, code_interface: CodeInterface) -> Option<&str> {
+        if let Some(p) = self.depot_paths.get(code_interface.as_str()) {
+            return Some(p.as_str());
+        }
+        self.default_depot_path.as_deref()
     }
 
     /// Constructeur avec fichier de persistance du numéro de séquence.
@@ -235,11 +262,15 @@ impl Producer for PpfSftpProducer {
         let tar_gz = build_tar_gz(&flux_files)
             .map_err(|e| PdpError::RoutingError(format!("Construction tar.gz: {}", e)))?;
 
+        // Résoudre le chemin SAS de dépôt selon le code interface
+        let depot_path = self.resolve_depot_path(code_interface);
+
         tracing::info!(
             exchange_id = %exchange.id,
             envelope = %envelope_name,
             inner_file = %inner_name,
             code_interface = %code_interface,
+            depot_path = depot_path.unwrap_or("(default)"),
             tar_gz_size = tar_gz.len(),
             "Dépôt flux PPF via SFTP"
         );
@@ -249,11 +280,21 @@ impl Producer for PpfSftpProducer {
             .with_filename(&envelope_name)
             .with_flow_id(exchange.flow_id);
 
-        // Envoyer via SFTP
-        self.sftp_producer
-            .send(sftp_exchange)
-            .await
-            .map_err(|e| PdpError::SftpError(format!("Dépôt SFTP PPF: {}", e)))?;
+        // Envoyer via SFTP, en routant vers le bon sous-dossier SAS si configuré
+        match depot_path {
+            Some(path) => {
+                self.sftp_producer
+                    .send_to_path(sftp_exchange, path)
+                    .await
+                    .map_err(|e| PdpError::SftpError(format!("Dépôt SFTP PPF ({}): {}", path, e)))?;
+            }
+            None => {
+                self.sftp_producer
+                    .send(sftp_exchange)
+                    .await
+                    .map_err(|e| PdpError::SftpError(format!("Dépôt SFTP PPF: {}", e)))?;
+            }
+        }
 
         tracing::info!(
             exchange_id = %exchange.id,
@@ -267,6 +308,9 @@ impl Producer for PpfSftpProducer {
         result.set_property("ppf.code_interface", code_interface.as_str());
         result.set_property("ppf.sequence", &sequence);
         result.set_property("ppf.deposit.status", "OK");
+        if let Some(path) = depot_path {
+            result.set_property("ppf.depot_path", path);
+        }
 
         Ok(result)
     }

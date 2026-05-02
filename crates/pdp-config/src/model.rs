@@ -330,7 +330,18 @@ pub struct PpfConfig {
     pub initial_sequence: Option<u64>,
 }
 
-/// Configuration SFTP du PPF (Système d'Échange)
+/// Configuration SFTP du PPF (Système d'Échange).
+///
+/// Le SAS PPF distingue deux directions :
+/// - **dépôt** : flux PDP → PPF (F1, F6 émis, F10, F13)
+/// - **retrait** : flux PPF → PDP (F6 retour CDV 500/501, F14 export annuaire)
+///
+/// Chaque direction supporte un chemin par défaut (`depot_path` / `retrait_path`)
+/// et un mapping optionnel par code interface (`depot_paths` / `retrait_paths`)
+/// pour s'adapter aux différents layouts SAS imposés par le PPF ou l'hébergeur.
+///
+/// Le champ historique `remote_path` reste accepté et sert de fallback pour
+/// `depot_path` quand celui-ci est absent (rétrocompatibilité).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PpfSftpConfigYaml {
     /// Nom d'hôte du serveur SFTP PPF
@@ -342,15 +353,88 @@ pub struct PpfSftpConfigYaml {
     pub username: String,
     /// Chemin vers la clé privée RSA X509v3
     pub private_key_path: String,
-    /// Répertoire distant de dépôt
+    /// Répertoire distant de dépôt PDP → PPF (compat ; alias historique de `depot_path`).
     #[serde(default = "default_sftp_remote_path")]
     pub remote_path: String,
+    /// Répertoire SAS de dépôt PDP → PPF (par défaut, utilisé pour tous les codes interface
+    /// non listés dans `depot_paths`). Si absent, `remote_path` est utilisé.
+    #[serde(default)]
+    pub depot_path: Option<String>,
+    /// Mapping code interface → chemin de dépôt SAS spécifique.
+    /// Permet de router les flux F1/F6/F10/F13 vers des sous-dossiers différents si le PPF l'impose.
+    /// Exemple : `{"FFE0111A": "/sas/depot/F1", "FFE0614A": "/sas/depot/F6"}`
+    #[serde(default)]
+    pub depot_paths: HashMap<String, String>,
+    /// Répertoire SAS de retrait PPF → PDP (par défaut). Si absent, le consumer de retour
+    /// n'est pas activé sauf si `retrait_paths` est renseigné.
+    #[serde(default)]
+    pub retrait_path: Option<String>,
+    /// Mapping code interface → chemin de retrait SAS spécifique (PPF → PDP).
+    /// Exemple : `{"FFE0614A": "/sas/retrait/F6", "FFE1435A": "/sas/retrait/F14"}`
+    #[serde(default)]
+    pub retrait_paths: HashMap<String, String>,
+    /// Intervalle de polling (secondes) du consumer SAS de retrait PPF.
+    /// Si absent, on utilise `polling.interval_secs` global.
+    #[serde(default)]
+    pub retrait_polling_interval_secs: Option<u64>,
+    /// Répertoire d'archivage SAS pour les fichiers retirés (optionnel).
+    /// Si présent, les enveloppes consommées sont déplacées ici sur le SAS.
+    #[serde(default)]
+    pub retrait_archive_path: Option<String>,
+    /// Supprime les enveloppes consommées du SAS retrait après lecture.
+    /// Ignoré si `retrait_archive_path` est défini.
+    #[serde(default)]
+    pub retrait_delete_after_read: bool,
     /// Chemin vers le fichier known_hosts (optionnel)
     #[serde(default)]
     pub known_hosts_path: Option<String>,
     /// Fichier de persistance du numéro de séquence PPF (optionnel)
     #[serde(default)]
     pub sequence_file: Option<String>,
+}
+
+impl PpfSftpConfigYaml {
+    /// Résout le chemin de dépôt SAS pour un code interface donné.
+    ///
+    /// Ordre de résolution : `depot_paths[code]` → `depot_path` → `remote_path`.
+    pub fn depot_path_for(&self, code_interface: &str) -> &str {
+        if let Some(p) = self.depot_paths.get(code_interface) {
+            return p;
+        }
+        if let Some(ref p) = self.depot_path {
+            return p;
+        }
+        &self.remote_path
+    }
+
+    /// Résout le chemin de retrait SAS pour un code interface donné.
+    ///
+    /// Retourne `None` si aucun chemin n'est configuré ni dans `retrait_paths[code]`
+    /// ni dans `retrait_path`.
+    pub fn retrait_path_for(&self, code_interface: &str) -> Option<&str> {
+        if let Some(p) = self.retrait_paths.get(code_interface) {
+            return Some(p);
+        }
+        self.retrait_path.as_deref()
+    }
+
+    /// Liste de tous les chemins distincts à surveiller pour le retrait PPF.
+    /// Concatène `retrait_path` (si présent) et toutes les valeurs uniques de `retrait_paths`.
+    pub fn all_retrait_paths(&self) -> Vec<String> {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        if let Some(ref p) = self.retrait_path {
+            if seen.insert(p.clone()) {
+                out.push(p.clone());
+            }
+        }
+        for p in self.retrait_paths.values() {
+            if seen.insert(p.clone()) {
+                out.push(p.clone());
+            }
+        }
+        out
+    }
 }
 
 fn default_sftp_port() -> u16 {

@@ -52,6 +52,7 @@ Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 - [x] `lookup_etablissement_by_siret()` ajouté à `AnnuaireStore`
 - [x] Codes erreur : vendeur absent → REJ_COH, acheteur absent → DEST_INC
 - [x] `classify_error_reason` : mapping pour les erreurs annuaire
+- [x] Intégration dans `main.rs` : `build_annuaire_service` + câblage émission/réception (routes principales, tenants, http-inbound, intra-pdp)
 
 ### Relais CDV → PPF (Flux 6)
 
@@ -63,17 +64,20 @@ Liste des tâches restantes et améliorations prévues, par ordre de priorité.
 
 ## Haute priorité
 
-### 1. Intégration `AnnuaireValidationProcessor` dans le pipeline
+### 1. Tests d'intégration `AnnuaireValidationProcessor` ✅
 
-Le processor est créé et testé, mais pas encore wiré dans `main.rs` :
+Le processor est wiré dans `main.rs` (helper `build_annuaire_service`, câblé sur
+toutes les routes émission/réception, tenants, http-inbound, intra-pdp).
 
-- [ ] Créer un `AnnuaireService` dans `build_router()` si `config.database` configuré
-- [ ] Passer `Option<Arc<AnnuaireService>>` aux helpers `add_emission/reception_processors`
-- [ ] Ajouter `AnnuaireValidationProcessor::new(svc, Emission)` dans le pipeline émission
-  (après validation, avant Flux 1)
-- [ ] Ajouter `AnnuaireValidationProcessor::new(svc, Reception)` dans le pipeline réception
-- [ ] Tests intégration avec PostgreSQL (vendeur/acheteur connu/inconnu/inactif)
-- [ ] Tests pipeline complet : facture avec vendeur inconnu → CDV 213 REJ_COH
+- [x] Tests intégration avec PostgreSQL via testcontainers
+      (10 tests, vendeur/acheteur connu/inconnu/inactif, modes Emission/Reception).
+- [x] Tests pipeline complet AnnuaireValidation → CdarProcessor (5 tests) :
+      vendeur connu → CDV 200, vendeur inconnu → CDV 213/REJ_COH, acheteur
+      inconnu → CDV 213/DEST_INC, réception OK → CDV 202, réception vendeur
+      inconnu → CDV 213/REJ_COH.
+
+> Ces 15 tests d'intégration tournent à chaque `cargo test` — prérequis :
+> Docker ou Podman démarré sur la machine.
 
 ### 2. Workflows complets documentés
 

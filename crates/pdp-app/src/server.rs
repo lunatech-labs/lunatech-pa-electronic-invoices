@@ -410,6 +410,49 @@ pub struct FlowsQueryParams {
     pub status: Option<String>,
 }
 
+/// Paramètres de requête pour GET /v1/flows/{flowId}
+///
+/// Conforme à AFNOR XP Z12-013 §6.1.3 — paramètre `docType` :
+/// - `Metadata` (défaut) : métadonnées JSON du flux
+/// - `Original` : document XML original tel que reçu
+/// - `Converted` : document XML converti par la PDP réceptrice
+/// - `ReadableView` : rendu PDF lisible humain
+#[derive(Debug, Deserialize, Default)]
+pub struct GetFlowQueryParams {
+    /// Type de document à retourner (`Metadata`, `Original`, `Converted`, `ReadableView`).
+    /// Insensible à la casse. Si absent → `Metadata`.
+    /// Conforme à AFNOR XP Z12-013 §6.1.3 : paramètre nommé `docType`.
+    #[serde(rename = "docType")]
+    pub doc_type: Option<String>,
+}
+
+/// Variantes de `docType` acceptées sur `GET /v1/flows/{flowId}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GetFlowDocType {
+    Metadata,
+    Original,
+    Converted,
+    ReadableView,
+}
+
+impl GetFlowDocType {
+    fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value {
+            None => Ok(Self::Metadata),
+            Some(s) => match s.to_ascii_lowercase().as_str() {
+                "metadata" => Ok(Self::Metadata),
+                "original" => Ok(Self::Original),
+                "converted" => Ok(Self::Converted),
+                "readableview" => Ok(Self::ReadableView),
+                _ => Err(format!(
+                    "Valeur 'docType={}' non supportée (attendu : Metadata, Original, Converted, ReadableView)",
+                    s
+                )),
+            },
+        }
+    }
+}
+
 /// Réponse détaillée pour la consultation d'un flux
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -442,11 +485,32 @@ pub struct StatsResponse {
     pub total_distributed: i64,
 }
 
-/// GET /v1/flows/{flowId} — Consultation d'un flux via le TraceStore
+/// GET /v1/flows/{flowId}?docType={Metadata|Original|Converted|ReadableView}
+///
+/// Implémente AFNOR XP Z12-013 §6.1.3 :
+/// - **Metadata** (défaut) : métadonnées JSON du flux (FlowDetailResponse)
+/// - **Original** : XML original tel que reçu (Content-Type: application/xml)
+/// - **Converted** : XML converti par la PDP (UBL↔CII), si transformation effectuée
+/// - **ReadableView** : rendu PDF (Factur-X PDF/A-3 ou PDF visuel) avec Content-Type: application/pdf
 async fn handle_get_flow(
     State(state): State<Arc<AppState>>,
     Path(flow_id): Path<String>,
+    Query(params): Query<GetFlowQueryParams>,
 ) -> impl IntoResponse {
+    let doc_type = match GetFlowDocType::parse(params.doc_type.as_deref()) {
+        Ok(dt) => dt,
+        Err(message) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "BAD_REQUEST",
+                    "message": message,
+                })),
+            )
+                .into_response();
+        }
+    };
+
     let trace_store = match &state.trace_store {
         Some(store) => store,
         None => {
@@ -460,31 +524,116 @@ async fn handle_get_flow(
         }
     };
 
-    tracing::debug!(flow_id = %flow_id, "Consultation flux");
+    tracing::debug!(flow_id = %flow_id, doc_type = ?doc_type, "Consultation flux");
 
     match trace_store.get_exchange(&flow_id, None).await {
-        Ok(Some(doc)) => {
-            let errors: Vec<FlowErrorEntry> = doc.errors.iter().map(|e| FlowErrorEntry {
-                step: e.step.clone(),
-                message: e.message.clone(),
-                detail: e.detail.clone(),
-                timestamp: e.timestamp.clone(),
-            }).collect();
+        Ok(Some(doc)) => match doc_type {
+            GetFlowDocType::Metadata => {
+                let errors: Vec<FlowErrorEntry> = doc.errors.iter().map(|e| FlowErrorEntry {
+                    step: e.step.clone(),
+                    message: e.message.clone(),
+                    detail: e.detail.clone(),
+                    timestamp: e.timestamp.clone(),
+                }).collect();
 
-            (
-                StatusCode::OK,
-                Json(serde_json::to_value(FlowDetailResponse {
-                    exchange_id: doc.exchange_id,
-                    flow_id: doc.flow_id,
-                    status: doc.status,
-                    invoice_number: doc.invoice_number,
-                    seller_siret: doc.seller_siret,
-                    buyer_siret: doc.buyer_siret,
-                    created_at: doc.created_at,
-                    errors,
-                }).unwrap_or_default()),
-            ).into_response()
-        }
+                (
+                    StatusCode::OK,
+                    Json(serde_json::to_value(FlowDetailResponse {
+                        exchange_id: doc.exchange_id,
+                        flow_id: doc.flow_id,
+                        status: doc.status,
+                        invoice_number: doc.invoice_number,
+                        seller_siret: doc.seller_siret,
+                        buyer_siret: doc.buyer_siret,
+                        created_at: doc.created_at,
+                        errors,
+                    }).unwrap_or_default()),
+                ).into_response()
+            }
+            GetFlowDocType::Original => match doc.raw_xml {
+                Some(xml) => (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", "application/xml; charset=utf-8"),
+                        ("Content-Disposition", "inline"),
+                    ],
+                    xml,
+                ).into_response(),
+                None => (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "error": "NOT_FOUND",
+                        "message": format!(
+                            "Aucun document XML original archivé pour le flux '{}'",
+                            flow_id
+                        )
+                    })),
+                ).into_response(),
+            },
+            GetFlowDocType::Converted => match doc.converted_xml {
+                Some(xml) => (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", "application/xml; charset=utf-8"),
+                        ("Content-Disposition", "inline"),
+                        (
+                            "X-Converted-Format",
+                            doc.converted_format.as_deref().unwrap_or("unknown"),
+                        ),
+                    ],
+                    xml,
+                ).into_response(),
+                None => (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "error": "NOT_FOUND",
+                        "message": format!(
+                            "Le flux '{}' n'a pas été converti (pas de transformation UBL↔CII enregistrée)",
+                            flow_id
+                        )
+                    })),
+                ).into_response(),
+            },
+            GetFlowDocType::ReadableView => match doc.raw_pdf_base64 {
+                Some(b64) => match {
+                    use base64::Engine as _;
+                    base64::engine::general_purpose::STANDARD.decode(&b64)
+                } {
+                    Ok(pdf_bytes) => (
+                        StatusCode::OK,
+                        [
+                            ("Content-Type", "application/pdf"),
+                            ("Content-Disposition", "inline"),
+                        ],
+                        pdf_bytes,
+                    ).into_response(),
+                    Err(e) => {
+                        tracing::error!(
+                            flow_id = %flow_id,
+                            error = %e,
+                            "Décodage base64 du PDF archivé échoué"
+                        );
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({
+                                "error": "INTERNAL_ERROR",
+                                "message": "PDF archivé corrompu (décodage base64 impossible)"
+                            })),
+                        ).into_response()
+                    }
+                },
+                None => (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "error": "NOT_FOUND",
+                        "message": format!(
+                            "Aucun PDF lisible (Factur-X) archivé pour le flux '{}'",
+                            flow_id
+                        )
+                    })),
+                ).into_response(),
+            },
+        },
         Ok(None) => {
             (
                 StatusCode::NOT_FOUND,
@@ -1850,6 +1999,124 @@ mod tests {
         let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(json["error"], "NOT_IMPLEMENTED");
+    }
+
+    // ---------------------------------------------------------------
+    // Tests AFNOR XP Z12-013 §6.1.3 — paramètre docType
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_get_flow_doc_type_parse_default() {
+        assert_eq!(
+            GetFlowDocType::parse(None).unwrap(),
+            GetFlowDocType::Metadata,
+            "Sans paramètre, doit retourner Metadata par défaut"
+        );
+    }
+
+    #[test]
+    fn test_get_flow_doc_type_parse_all_variants() {
+        assert_eq!(
+            GetFlowDocType::parse(Some("Metadata")).unwrap(),
+            GetFlowDocType::Metadata
+        );
+        assert_eq!(
+            GetFlowDocType::parse(Some("Original")).unwrap(),
+            GetFlowDocType::Original
+        );
+        assert_eq!(
+            GetFlowDocType::parse(Some("Converted")).unwrap(),
+            GetFlowDocType::Converted
+        );
+        assert_eq!(
+            GetFlowDocType::parse(Some("ReadableView")).unwrap(),
+            GetFlowDocType::ReadableView
+        );
+    }
+
+    #[test]
+    fn test_get_flow_doc_type_parse_case_insensitive() {
+        // La spec n'impose pas la casse — on accepte tout
+        assert_eq!(
+            GetFlowDocType::parse(Some("ORIGINAL")).unwrap(),
+            GetFlowDocType::Original
+        );
+        assert_eq!(
+            GetFlowDocType::parse(Some("readableview")).unwrap(),
+            GetFlowDocType::ReadableView
+        );
+        assert_eq!(
+            GetFlowDocType::parse(Some("MetaData")).unwrap(),
+            GetFlowDocType::Metadata
+        );
+    }
+
+    #[test]
+    fn test_get_flow_doc_type_parse_rejects_invalid() {
+        let err = GetFlowDocType::parse(Some("InvalidType")).unwrap_err();
+        assert!(err.contains("InvalidType"));
+        assert!(err.contains("Metadata"));
+        assert!(err.contains("Original"));
+        assert!(err.contains("Converted"));
+        assert!(err.contains("ReadableView"));
+    }
+
+    #[tokio::test]
+    async fn test_get_flow_invalid_doc_type_returns_400() {
+        // Une valeur de docType invalide doit être rejetée AVANT
+        // toute consultation du TraceStore (validation en amont).
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/flows/some-flow-id?docType=Garbage")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["error"], "BAD_REQUEST");
+        assert!(
+            json["message"].as_str().unwrap_or("").contains("Garbage"),
+            "Le message d'erreur doit citer la valeur invalide"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_flow_with_doctype_metadata_no_trace_store() {
+        // docType=Metadata explicite : même comportement que sans paramètre (501 sans store)
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/flows/some-flow-id?docType=Metadata")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn test_get_flow_with_doctype_original_no_trace_store() {
+        // docType=Original sans store → 501 (pas 200/404 — la validation docType
+        // a réussi, c'est le store qui manque)
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/flows/some-flow-id?docType=Original")
+            .method("GET")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
     }
 
     #[tokio::test]

@@ -632,6 +632,9 @@ async fn build_router(
     let ppf_producer = build_ppf_producer(config)?;
     let (annuaire_client, partner_directory, afnor_producers) = build_afnor_clients(config)?;
 
+    // Service annuaire PPF local (validation G1.63 BR-FR-10/11) — optionnel
+    let annuaire_service = build_annuaire_service(config).await;
+
     // Construire le AlertErrorHandler depuis la config
     let alert_config = config.alerts.as_ref();
 
@@ -788,12 +791,12 @@ async fn build_router(
             pdp_config::PipelineMode::Emission => {
                 builder = add_emission_processors(
                     builder, config, route_config, &store,
-                    &annuaire_client, &partner_directory, &intra_pdp_tx,
+                    &annuaire_client, &partner_directory, &annuaire_service, &intra_pdp_tx,
                 );
             }
             pdp_config::PipelineMode::Reception => {
                 builder = add_reception_processors(
-                    builder, config, route_config, &store,
+                    builder, config, route_config, &store, &annuaire_service,
                 );
             }
         }
@@ -914,6 +917,12 @@ async fn build_router(
                 )))
                 .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
 
+            // Validation annuaire PPF (G1.63) — vendeur + acheteur
+            builder = builder.process(Box::new(pdp_annuaire::AnnuaireValidationProcessor::new(
+                annuaire_service.clone(),
+                pdp_annuaire::ValidationMode::Emission,
+            )));
+
             // Flux 1 PPF (TOUJOURS en émission)
             if let Some(ppf) = tenant_ppf {
                 let strategy = pdp_transform::Flux1ProfileStrategy::from_config(&ppf.flux1_profile);
@@ -992,7 +1001,7 @@ async fn build_router(
                 validate: true,
                 generate_cdar: true,
                 cdar_receiver: None,
-            }, &store);
+            }, &store, &annuaire_service);
 
             // Error handler avec alertes
             let http_error_dir = alert_config
@@ -1057,7 +1066,7 @@ async fn build_router(
             validate: true,
             generate_cdar: true,
             cdar_receiver: None,
-        }, &store);
+        }, &store, &annuaire_service);
 
         let intra_error_dir = alert_config
             .map(|a| a.error_dir.clone())
@@ -1077,7 +1086,113 @@ async fn build_router(
         tracing::info!("Route 'intra-pdp-reception' ajoutée");
     }
 
+    // Route PPF retour : ingestion des flux PPF → PDP via SAS retrait SFTP
+    // (CDV F6 200/501, exports F14, etc.). Activée si la config PPF SFTP
+    // déclare au moins un chemin de retrait.
+    if cli_mode.should_run_reception() {
+        if let Some(ppf_return_consumer) = build_ppf_return_consumer(config) {
+            let archive_dir = config
+                .ppf
+                .as_ref()
+                .map(|p| format!("{}/retrait", p.flux1_output_dir.trim_end_matches('/')))
+                .unwrap_or_else(|| "output/ppf-retrait".to_string());
+
+            let _ = std::fs::create_dir_all(&archive_dir);
+
+            let archive_producer: Box<dyn pdp_core::endpoint::Producer> =
+                Box::new(pdp_core::endpoint::FileEndpoint::output(
+                    "ppf-retrait-archive",
+                    &archive_dir,
+                ));
+
+            let mut builder = pdp_core::RouteBuilder::new("ppf-sftp-return")
+                .description("Route réception des flux PPF → PDP via SAS retrait SFTP")
+                .from_source(Box::new(ppf_return_consumer));
+
+            builder = builder
+                .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
+                .process(Box::new(pdp_core::processor::LogProcessor::info(
+                    "ppf-return",
+                )))
+                .process(Box::new(pdp_cdar::DocumentTypeRouter::new()))
+                .process(Box::new(pdp_cdar::CdvReceptionProcessor::new()));
+
+            let error_dir = alert_config
+                .map(|a| a.error_dir.clone())
+                .unwrap_or_else(|| "errors/ppf-return".to_string());
+            let alert_handler = pdp_core::AlertErrorHandler::new(
+                std::path::PathBuf::from(&error_dir),
+            );
+
+            builder = builder
+                .to_destination(archive_producer)
+                .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
+                .on_error(Box::new(alert_handler));
+
+            let route = builder.build()?;
+            router.add_route(route)?;
+
+            tracing::info!(
+                archive_dir = %archive_dir,
+                "Route 'ppf-sftp-return' ajoutée (ingestion SAS retrait PPF)"
+            );
+        }
+    }
+
     Ok(router)
+}
+
+/// Construit le consumer SFTP de retour PPF (PPF → PDP) si la config
+/// `ppf.sftp` déclare au moins un chemin de retrait (`retrait_path` ou
+/// `retrait_paths`). Renvoie `None` sinon.
+fn build_ppf_return_consumer(
+    config: &pdp_config::PdpConfig,
+) -> Option<pdp_client::PpfReturnConsumer> {
+    let ppf = config.ppf.as_ref()?;
+    let sftp = ppf.sftp.as_ref()?;
+
+    let paths = sftp.all_retrait_paths();
+    if paths.is_empty() {
+        return None;
+    }
+
+    let sftp_config = pdp_sftp::SftpConfig {
+        host: sftp.host.clone(),
+        port: sftp.port,
+        username: sftp.username.clone(),
+        password: None,
+        private_key_path: Some(sftp.private_key_path.clone()),
+        // remote_path est ignoré par PpfReturnConsumer (un chemin par path)
+        remote_path: paths[0].clone(),
+        file_pattern: "*.tar.gz".to_string(),
+        archive_path: sftp.retrait_archive_path.clone(),
+        delete_after_read: sftp.retrait_archive_path.is_none()
+            && sftp.retrait_delete_after_read,
+        timeout_secs: 30,
+        stable_delay_ms: 1000,
+        known_hosts_path: sftp.known_hosts_path.clone(),
+    };
+
+    let consumer_config = pdp_client::PpfReturnConsumerConfig {
+        sftp: sftp_config,
+        paths,
+        code_interface_by_path: sftp.retrait_paths.clone(),
+        archive_path: sftp.retrait_archive_path.clone(),
+        delete_after_read: sftp.retrait_delete_after_read,
+    };
+
+    tracing::info!(
+        host = %sftp.host,
+        paths_count = consumer_config.paths.len(),
+        archive = ?consumer_config.archive_path,
+        "PPF SFTP retrait configuré ({} chemin(s))",
+        consumer_config.paths.len()
+    );
+
+    Some(pdp_client::PpfReturnConsumer::new(
+        "ppf-sftp-return",
+        consumer_config,
+    ))
 }
 
 /// Processors communs à tous les pipelines (émission et réception) :
@@ -1122,6 +1237,7 @@ fn add_emission_processors(
     store: &std::sync::Arc<pdp_trace::TraceStore>,
     annuaire_client: &Option<std::sync::Arc<pdp_client::annuaire::AnnuaireClient>>,
     partner_directory: &Option<pdp_client::PartnerDirectory>,
+    annuaire_service: &Option<std::sync::Arc<pdp_annuaire::AnnuaireService>>,
     _intra_pdp_tx: &tokio::sync::mpsc::Sender<pdp_core::Exchange>,
 ) -> pdp_core::RouteBuilder {
     // Validation
@@ -1137,6 +1253,12 @@ fn add_emission_processors(
             )))
             .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
     }
+
+    // Validation annuaire PPF (G1.63) — vendeur + acheteur
+    builder = builder.process(Box::new(pdp_annuaire::AnnuaireValidationProcessor::new(
+        annuaire_service.clone(),
+        pdp_annuaire::ValidationMode::Emission,
+    )));
 
     // Flux 1 PPF (TOUJOURS en émission — données réglementaires)
     if let Some(ref ppf) = config.ppf {
@@ -1194,6 +1316,7 @@ fn add_reception_processors(
     config: &pdp_config::PdpConfig,
     route_config: &pdp_config::model::RouteConfig,
     store: &std::sync::Arc<pdp_trace::TraceStore>,
+    annuaire_service: &Option<std::sync::Arc<pdp_annuaire::AnnuaireService>>,
 ) -> pdp_core::RouteBuilder {
     // Validation
     if route_config.validate {
@@ -1208,6 +1331,12 @@ fn add_reception_processors(
             )))
             .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
     }
+
+    // Validation annuaire PPF (G1.63) — vendeur uniquement en réception
+    builder = builder.process(Box::new(pdp_annuaire::AnnuaireValidationProcessor::new(
+        annuaire_service.clone(),
+        pdp_annuaire::ValidationMode::Reception,
+    )));
 
     // PAS de Flux 1 PPF — la PDP émettrice l'a déjà fait
 
@@ -1237,6 +1366,36 @@ fn add_reception_processors(
     // PAS de résolution de routage — la facture est livrée directement à l'acheteur
 
     builder
+}
+
+/// Construit le service annuaire PPF local si la base PostgreSQL est configurée
+/// et accessible. Renvoie `None` (avec un warning) si la connexion échoue, pour
+/// que l'application reste fonctionnelle sans annuaire local.
+async fn build_annuaire_service(
+    config: &pdp_config::PdpConfig,
+) -> Option<std::sync::Arc<pdp_annuaire::AnnuaireService>> {
+    let db_config = config.database.as_ref()?;
+    match sqlx::postgres::PgPoolOptions::new()
+        .max_connections(db_config.max_connections)
+        .connect(&db_config.url)
+        .await
+    {
+        Ok(pool) => {
+            let store = pdp_annuaire::AnnuaireStore::new(pool);
+            if let Err(e) = store.migrate().await {
+                tracing::warn!(error = %e, "Migration annuaire échouée");
+            }
+            tracing::info!("Service annuaire PPF (G1.63 BR-FR-10/11) activé");
+            Some(std::sync::Arc::new(pdp_annuaire::AnnuaireService::new(store)))
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Impossible de connecter PostgreSQL — validation annuaire G1.63 désactivée"
+            );
+            None
+        }
+    }
 }
 
 /// Construit le producer PPF SFTP si la configuration PPF est présente
@@ -1273,9 +1432,28 @@ fn build_ppf_producer(
         }
     };
 
+    // Reprendre la config SAS dépôt depuis le YAML (ppf.sftp).
+    // - `depot_path` (ou `remote_path` historique) → fallback global
+    // - `depot_paths[code_interface]` → mapping fin par type de flux
+    let (default_depot_path, depot_paths) = match &ppf.sftp {
+        Some(sftp) => {
+            let default = sftp.depot_path.clone().or_else(|| {
+                if sftp.remote_path.is_empty() {
+                    None
+                } else {
+                    Some(sftp.remote_path.clone())
+                }
+            });
+            (default, sftp.depot_paths.clone())
+        }
+        None => (None, std::collections::HashMap::new()),
+    };
+
     let producer_config = pdp_client::PpfSftpProducerConfig {
         code_application: ppf.code_application_piste.clone(),
         default_profil: ppf.flux1_profile.clone(),
+        default_depot_path,
+        depot_paths,
     };
 
     let initial_sequence = ppf.initial_sequence.unwrap_or(0);

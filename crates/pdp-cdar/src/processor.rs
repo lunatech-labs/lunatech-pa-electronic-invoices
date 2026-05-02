@@ -135,10 +135,11 @@ impl Processor for DocumentTypeRouter {
                     }
                 }
 
-                // Si le CDV indique un rejet, ajouter une erreur
-                if cdv.is_rejected() {
+                // Si le CDV indique un rejet (213) ou une irrecevabilité (501),
+                // ajouter une erreur à l'exchange pour qu'elle remonte au pipeline.
+                if cdv.is_rejected() || cdv.is_irrecevable() {
                     let error = PdpError::CdarError(format!(
-                        "Facture {} rejetée (code {}): {}",
+                        "Facture {} en échec (code {}): {}",
                         invoice_id, status_code, process_condition
                     ));
                     exchange.add_error("CdvReception", &error);
@@ -203,11 +204,28 @@ fn determine_cdar_source(exchange: &Exchange) -> String {
         return "afnor".to_string();
     }
 
-    // PPF (code interface FFE06*)
+    // PPF — protocole SFTP retour (PPF → PDP) ou nom de fichier reconnu
+    let source_protocol = exchange
+        .get_header("source.protocol")
+        .map(|s| s.as_str());
+    if matches!(
+        source_protocol,
+        Some("ppf-sftp-return") | Some("ppf-sftp") | Some("ppf")
+    ) {
+        return "ppf".to_string();
+    }
+    // Code interface FFE06* dans le nom de fichier ou propriété ppf.code_interface
     if let Some(ref filename) = exchange.source_filename {
         if filename.starts_with("FFE06") || filename.starts_with("CFE") {
             return "ppf".to_string();
         }
+    }
+    if exchange
+        .get_property("ppf.code_interface")
+        .map(|s| s.starts_with("FFE06"))
+        .unwrap_or(false)
+    {
+        return "ppf".to_string();
     }
 
     // Par défaut : client local
@@ -418,10 +436,11 @@ impl Processor for CdvReceptionProcessor {
             }
         }
 
-        // Si le CDV indique un rejet, ajouter une erreur à l'exchange
-        if cdv.is_rejected() {
+        // Si le CDV indique un rejet (213) ou une irrecevabilité (501),
+        // ajouter une erreur à l'exchange.
+        if cdv.is_rejected() || cdv.is_irrecevable() {
             let error = PdpError::CdarError(format!(
-                "Facture {} rejetée (code {}): {}",
+                "Facture {} en échec (code {}): {}",
                 invoice_id, status_code, process_condition
             ));
             exchange.add_error("CdvReception", &error);
@@ -890,9 +909,12 @@ mod tests {
     #[tokio::test]
     async fn test_cdv_reception_all_error_statuses() {
         // Rejets → Rejected
+        // 210 Refusée par l'acheteur : pas une irrecevabilité, pas d'erreur ajoutée
         assert_processor_status("cdv_210_refusee.xml", FlowStatus::Rejected, false).await;
+        // 213 Rejetée et 501 Irrecevable doivent ajouter une erreur à l'exchange
+        // pour faire remonter l'échec au pipeline (alertes, retry, etc.)
         assert_processor_status("cdv_213_rejetee.xml", FlowStatus::Rejected, true).await;
-        assert_processor_status("cdv_501_irrecevable.xml", FlowStatus::Rejected, false).await;
+        assert_processor_status("cdv_501_irrecevable.xml", FlowStatus::Rejected, true).await;
         // Erreurs techniques → Error
         assert_processor_status("cdv_221_erreur_routage.xml", FlowStatus::Error, false).await;
     }

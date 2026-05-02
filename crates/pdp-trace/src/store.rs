@@ -44,10 +44,20 @@ pub struct ExchangeDocument {
     pub issue_date: Option<String>,
     pub status: String,
     pub error_count: i32,
-    /// XML brut de la facture (stocké tel quel, searchable)
+    /// XML brut de la facture (stocké tel quel, searchable).
+    /// Contient toujours le document **original** tel que reçu, indépendamment
+    /// d'une éventuelle transformation effectuée par la PDP.
     pub raw_xml: Option<String>,
     /// PDF en base64 (Factur-X ou PDF visuel)
     pub raw_pdf_base64: Option<String>,
+    /// XML **converti** par la PDP réceptrice (si une transformation UBL↔CII a eu lieu).
+    /// Renseigné automatiquement quand l'exchange porte le header `transform.target`.
+    /// Permet de servir `GET /v1/flows/{flowId}?docType=Converted` (XP Z12-013 §6.1.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub converted_xml: Option<String>,
+    /// Format de la conversion (`UBL`, `CII`, `Factur-X`) si `converted_xml` est présent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub converted_format: Option<String>,
     pub attachment_count: usize,
     pub attachment_filenames: Vec<String>,
     pub events: Vec<EventEntry>,
@@ -213,6 +223,8 @@ impl TraceStore {
                     "error_count": { "type": "integer" },
                     "raw_xml": { "type": "text", "index": true },
                     "raw_pdf_base64": { "type": "binary" },
+                    "converted_xml": { "type": "text", "index": true },
+                    "converted_format": { "type": "keyword" },
                     "attachment_count": { "type": "integer" },
                     "attachment_filenames": { "type": "keyword" },
                     "events": {
@@ -284,6 +296,26 @@ impl TraceStore {
             .and_then(|i| i.raw_pdf.as_ref())
             .map(|pdf| base64::engine::general_purpose::STANDARD.encode(pdf));
 
+        // Si une transformation a eu lieu (TransformProcessor pose le header
+        // `transform.target`), capturer le contenu converti depuis `exchange.body`
+        // pour pouvoir le servir via `GET /v1/flows/{flowId}?docType=Converted`.
+        let (converted_xml, converted_format) = match (
+            exchange.get_header("transform.target"),
+            std::str::from_utf8(&exchange.body),
+        ) {
+            (Some(target), Ok(body_str)) if !body_str.is_empty() => {
+                // Ne stocker que si le body est différent du raw_xml original
+                // (sinon TransformProcessor a court-circuité car formats identiques).
+                let is_distinct = raw_xml.as_deref() != Some(body_str);
+                if is_distinct {
+                    (Some(body_str.to_string()), Some(target.clone()))
+                } else {
+                    (None, None)
+                }
+            }
+            _ => (None, None),
+        };
+
         let attachment_filenames: Vec<String> = invoice
             .map(|i| {
                 i.attachments.iter()
@@ -341,6 +373,8 @@ impl TraceStore {
             error_count: exchange.errors.len() as i32,
             raw_xml,
             raw_pdf_base64,
+            converted_xml,
+            converted_format,
             attachment_count: attachment_filenames.len(),
             attachment_filenames,
             events: Vec::new(),
