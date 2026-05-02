@@ -12,12 +12,14 @@
 //!
 //! Ce serveur implémente le rôle de "PDP réceptrice" dans l'architecture AFNOR.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use axum::{
     Router,
-    extract::{Multipart, Path, Query, State},
+    extract::{ConnectInfo, Multipart, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
@@ -25,6 +27,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tracing;
 
 // ============================================================
@@ -54,6 +57,57 @@ impl Default for Metrics {
     }
 }
 
+/// Rate limiter à fenêtre fixe de 60 secondes, par identifiant client (Bearer ou IP).
+///
+/// Au-delà de `max_per_minute` requêtes dans une fenêtre de 60s, les requêtes
+/// suivantes sont refusées avec `429 Too Many Requests` et le header
+/// `Retry-After` indiquant les secondes avant la prochaine fenêtre
+/// (XP Z12-013 §5.5).
+pub struct RateLimiter {
+    max_per_minute: u32,
+    inner: Mutex<HashMap<String, RateLimitEntry>>,
+}
+
+struct RateLimitEntry {
+    window_start: Instant,
+    count: u32,
+}
+
+impl RateLimiter {
+    pub fn new(max_per_minute: u32) -> Self {
+        Self {
+            max_per_minute,
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Tente de consommer un crédit pour `key`.
+    /// Retourne `Ok(())` si autorisé, `Err(retry_after_secs)` sinon.
+    pub async fn check(&self, key: &str) -> Result<(), u64> {
+        let mut map = self.inner.lock().await;
+        let now = Instant::now();
+        let entry = map.entry(key.to_string()).or_insert_with(|| RateLimitEntry {
+            window_start: now,
+            count: 0,
+        });
+
+        // Réinitialise la fenêtre si > 60s
+        if now.duration_since(entry.window_start) >= Duration::from_secs(60) {
+            entry.window_start = now;
+            entry.count = 0;
+        }
+
+        if entry.count >= self.max_per_minute {
+            let elapsed = now.duration_since(entry.window_start).as_secs();
+            let retry_after = 60u64.saturating_sub(elapsed).max(1);
+            return Err(retry_after);
+        }
+
+        entry.count += 1;
+        Ok(())
+    }
+}
+
 /// État partagé du serveur HTTP
 pub struct AppState {
     /// Nom de la PDP
@@ -74,6 +128,12 @@ pub struct AppState {
     pub annuaire_store: Option<pdp_annuaire::AnnuaireStore>,
     /// Store des webhooks (in-memory, partagé)
     pub webhook_store: Arc<crate::webhooks::WebhookStore>,
+    /// Taille max acceptée pour un flux entrant (octets) — au-delà : 413
+    pub max_flow_size_bytes: usize,
+    /// Timeout par requête (au-delà : 408 Request Timeout)
+    pub request_timeout: Duration,
+    /// Rate limiter optionnel (None = désactivé)
+    pub rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 /// Flux entrant reçu via l'API HTTP
@@ -205,6 +265,14 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             state.clone(),
             auth_middleware,
         ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            timeout_middleware,
+        ))
         .with_state(state.clone());
 
     // Endpoints publics (healthcheck, métriques Prometheus, interface annuaire)
@@ -266,6 +334,86 @@ async fn auth_middleware(
             }),
         )
             .into_response(),
+    }
+}
+
+/// Middleware de timeout par requête (XP Z12-013 §5.5).
+///
+/// Au-delà de `state.request_timeout`, retourne `408 Request Timeout`.
+async fn timeout_middleware(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    match tokio::time::timeout(state.request_timeout, next.run(req)).await {
+        Ok(response) => response,
+        Err(_) => {
+            tracing::warn!(
+                timeout_secs = state.request_timeout.as_secs(),
+                "Requête HTTP en timeout"
+            );
+            (
+                StatusCode::REQUEST_TIMEOUT,
+                Json(ErrorResponse {
+                    error: "REQUEST_TIMEOUT".to_string(),
+                    message: format!(
+                        "Délai dépassé ({}s)",
+                        state.request_timeout.as_secs()
+                    ),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Middleware de rate limiting (XP Z12-013 §5.5).
+///
+/// Identifie le client par Bearer token si présent, sinon par IP. Au-delà du
+/// quota par minute, retourne `429 Too Many Requests` avec `Retry-After`.
+async fn rate_limit_middleware(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let limiter = match &state.rate_limiter {
+        Some(l) => l.clone(),
+        None => return next.run(req).await,
+    };
+
+    // ConnectInfo n'est disponible que si le serveur est lancé via
+    // `into_make_service_with_connect_info` (faux dans certains tests).
+    let ip_fallback = req
+        .extensions()
+        .get::<ConnectInfo<std::net::SocketAddr>>()
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let key = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .filter(|h| h.starts_with("Bearer "))
+        .map(|h| format!("bearer:{}", &h[7..]))
+        .unwrap_or_else(|| format!("ip:{}", ip_fallback));
+
+    match limiter.check(&key).await {
+        Ok(()) => next.run(req).await,
+        Err(retry_after) => {
+            let mut headers = axum::http::HeaderMap::new();
+            if let Ok(v) = axum::http::HeaderValue::from_str(&retry_after.to_string()) {
+                headers.insert("Retry-After", v);
+            }
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                headers,
+                Json(ErrorResponse {
+                    error: "RATE_LIMITED".to_string(),
+                    message: format!("Quota dépassé, réessayer dans {} secondes", retry_after),
+                }),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -379,6 +527,28 @@ async fn handle_receive_flow(
             ).into_response();
         }
     };
+
+    // Limite de taille (XP Z12-013 §5.5) — 413 Payload Too Large
+    if content.len() > state.max_flow_size_bytes {
+        state.metrics.flows_rejected.fetch_add(1, Ordering::Relaxed);
+        tracing::warn!(
+            tracking_id = %flow_info.tracking_id,
+            size = content.len(),
+            max = state.max_flow_size_bytes,
+            "Flux refusé : taille dépasse la limite"
+        );
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ErrorResponse {
+                error: "PAYLOAD_TOO_LARGE".to_string(),
+                message: format!(
+                    "Taille du flux ({} octets) dépasse la limite autorisée ({} octets)",
+                    content.len(),
+                    state.max_flow_size_bytes
+                ),
+            }),
+        ).into_response();
+    }
 
     let filename = filename.unwrap_or_else(|| flow_info.name.clone());
 
@@ -1422,9 +1592,12 @@ pub async fn start_server(
         "Serveur HTTP API AFNOR démarré"
     );
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     tracing::info!("Serveur HTTP arrêté proprement");
     Ok(())
@@ -1506,6 +1679,9 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
         })
     }
 
@@ -1522,6 +1698,9 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
         })
     }
 
@@ -1538,6 +1717,9 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
         });
         (state, rx)
     }
@@ -1555,6 +1737,9 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
         })
     }
 
@@ -2040,6 +2225,9 @@ mod tests {
                 metrics: Metrics::default(),
                 annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
             });
             (state, rx)
         };
@@ -2103,6 +2291,9 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
         });
         let app = build_api_router(state);
 
@@ -2569,6 +2760,9 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
         });
         let app = build_api_router(state);
 
@@ -3032,5 +3226,212 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ============================================================
+    // Codes HTTP fins XP Z12-013 §5.5 : 413, 408, 429
+    // ============================================================
+
+    fn test_app_state_with_limit(
+        max_size: usize,
+    ) -> (Arc<AppState>, tokio::sync::mpsc::Receiver<InboundFlow>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let state = Arc::new(AppState {
+            pdp_name: "PDP Test".to_string(),
+            pdp_matricule: "9999".to_string(),
+            flow_sender: tx,
+            webhook_secret: None,
+            trace_store: None,
+            bearer_tokens: None,
+            metrics: Metrics::default(),
+            annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: max_size,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: None,
+        });
+        (state, rx)
+    }
+
+    fn test_app_state_with_timeout(secs: u64) -> Arc<AppState> {
+        let (tx, _rx) = tokio::sync::mpsc::channel(10);
+        Arc::new(AppState {
+            pdp_name: "PDP Test".to_string(),
+            pdp_matricule: "9999".to_string(),
+            flow_sender: tx,
+            webhook_secret: None,
+            trace_store: None,
+            bearer_tokens: None,
+            metrics: Metrics::default(),
+            annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(secs),
+            rate_limiter: None,
+        })
+    }
+
+    fn test_app_state_with_rate_limit(per_minute: u32) -> Arc<AppState> {
+        let (tx, _rx) = tokio::sync::mpsc::channel(10);
+        Arc::new(AppState {
+            pdp_name: "PDP Test".to_string(),
+            pdp_matricule: "9999".to_string(),
+            flow_sender: tx,
+            webhook_secret: None,
+            trace_store: None,
+            bearer_tokens: None,
+            metrics: Metrics::default(),
+            annuaire_store: None,
+            webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            max_flow_size_bytes: 100 * 1024 * 1024,
+            request_timeout: std::time::Duration::from_secs(30),
+            rate_limiter: Some(Arc::new(RateLimiter::new(per_minute))),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_413_payload_too_large() {
+        // Limite à 1 KB, on envoie 2 KB → 413
+        let (state, _rx) = test_app_state_with_limit(1024);
+        let app = build_api_router(state);
+
+        let big_content = vec![b'x'; 2048];
+        let flow_info = valid_flow_info_json();
+        let (content_type, body) = build_multipart_body(&flow_info, &big_content, "big.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["error"], "PAYLOAD_TOO_LARGE");
+    }
+
+    #[tokio::test]
+    async fn test_413_under_limit_passes() {
+        // Limite à 1 MB, on envoie 100 octets → 202
+        let (state, _rx) = test_app_state_with_limit(1024 * 1024);
+        let app = build_api_router(state);
+
+        let small_content = b"<Invoice>tiny</Invoice>";
+        let flow_info = valid_flow_info_json();
+        let (content_type, body) = build_multipart_body(&flow_info, small_content, "tiny.xml");
+
+        let req = Request::builder()
+            .uri("/v1/flows")
+            .method("POST")
+            .header("Content-Type", &content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn test_408_request_timeout() {
+        // Handler qui dépasse le timeout — on monte un mini-router qui sleep
+        // plus longtemps que le timeout configuré.
+        use axum::routing::get;
+        let state = test_app_state_with_timeout(1);
+
+        async fn slow_handler() -> &'static str {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            "ok"
+        }
+
+        let app = Router::new()
+            .route("/slow", get(slow_handler))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                timeout_middleware,
+            ))
+            .with_state(state);
+
+        let req = Request::builder()
+            .uri("/slow")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::REQUEST_TIMEOUT);
+        let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["error"], "REQUEST_TIMEOUT");
+    }
+
+    #[tokio::test]
+    async fn test_408_under_timeout_passes() {
+        let state = test_app_state_with_timeout(5);
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/v1/healthcheck")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_429_rate_limit_exceeded() {
+        // 2 req/min — la 3e doit être 429.
+        // On utilise GET /v1/webhooks qui retourne 200 (liste vide) sans dépendance.
+        let state = test_app_state_with_rate_limit(2);
+        let app = build_api_router(state);
+
+        let make_req = || {
+            Request::builder()
+                .uri("/v1/webhooks")
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        let r1 = app.clone().oneshot(make_req()).await.unwrap();
+        assert_eq!(r1.status(), StatusCode::OK);
+
+        let r2 = app.clone().oneshot(make_req()).await.unwrap();
+        assert_eq!(r2.status(), StatusCode::OK);
+
+        let r3 = app.clone().oneshot(make_req()).await.unwrap();
+        assert_eq!(r3.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(r3.headers().get("Retry-After").is_some());
+
+        let body_bytes = r3.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["error"], "RATE_LIMITED");
+    }
+
+    #[tokio::test]
+    async fn test_429_disabled_when_no_limiter() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        // 5 requêtes — toutes doivent passer car rate_limiter = None
+        for _ in 0..5 {
+            let req = Request::builder()
+                .uri("/v1/webhooks")
+                .body(Body::empty())
+                .unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_per_key_isolation() {
+        // Avec deux Bearer tokens distincts, chaque token a son propre quota
+        let limiter = RateLimiter::new(1);
+        assert!(limiter.check("bearer:tokenA").await.is_ok());
+        assert!(limiter.check("bearer:tokenA").await.is_err()); // quota épuisé pour A
+        // tokenB n'est pas affecté
+        assert!(limiter.check("bearer:tokenB").await.is_ok());
     }
 }

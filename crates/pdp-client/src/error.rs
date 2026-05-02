@@ -32,6 +32,9 @@ pub enum ClientError {
     #[error("Service indisponible (503): {0}")]
     ServiceUnavailable(String),
 
+    #[error("Endpoint non implémenté (501): {0}")]
+    NotImplemented(String),
+
     #[error("Erreur HTTP {status}: {message}")]
     HttpError { status: u16, message: String },
 
@@ -78,6 +81,7 @@ impl ClientError {
                 message: context,
                 retry_after,
             },
+            501 => Self::NotImplemented(context),
             503 => Self::ServiceUnavailable(context),
             _ => Self::HttpError {
                 status,
@@ -99,3 +103,69 @@ impl ClientError {
 }
 
 pub type ClientResult<T> = Result<T, ClientError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_http_response_404() {
+        let err = ClientError::from_http_response(404, "not found", "get_flow", None);
+        assert!(matches!(err, ClientError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_from_http_response_408() {
+        let err = ClientError::from_http_response(408, "timeout", "post_flow", None);
+        assert!(matches!(err, ClientError::RequestTimeout(_)));
+    }
+
+    #[test]
+    fn test_from_http_response_413() {
+        let err = ClientError::from_http_response(413, "too big", "post_flow", None);
+        assert!(matches!(err, ClientError::PayloadTooLarge(_)));
+    }
+
+    #[test]
+    fn test_from_http_response_429_with_retry_after() {
+        let err = ClientError::from_http_response(429, "throttled", "post_flow", Some(30));
+        match err {
+            ClientError::RateLimited { retry_after, .. } => assert_eq!(retry_after, Some(30)),
+            _ => panic!("Expected RateLimited"),
+        }
+    }
+
+    #[test]
+    fn test_from_http_response_501() {
+        let err = ClientError::from_http_response(501, "not impl", "search", None);
+        assert!(matches!(err, ClientError::NotImplemented(_)));
+    }
+
+    #[test]
+    fn test_from_http_response_unknown() {
+        let err = ClientError::from_http_response(418, "teapot", "x", None);
+        match err {
+            ClientError::HttpError { status, .. } => assert_eq!(status, 418),
+            _ => panic!("Expected HttpError"),
+        }
+    }
+
+    #[test]
+    fn test_is_retryable() {
+        // Retryables (temporaires)
+        assert!(ClientError::TokenExpired.is_retryable());
+        assert!(ClientError::RateLimited {
+            message: "x".into(),
+            retry_after: None
+        }
+        .is_retryable());
+        assert!(ClientError::RequestTimeout("x".into()).is_retryable());
+        assert!(ClientError::ServiceUnavailable("x".into()).is_retryable());
+
+        // Non-retryables (permanents)
+        assert!(!ClientError::NotFound("x".into()).is_retryable());
+        assert!(!ClientError::PayloadTooLarge("x".into()).is_retryable());
+        assert!(!ClientError::NotImplemented("x".into()).is_retryable());
+        assert!(!ClientError::UnprocessableEntity("x".into()).is_retryable());
+    }
+}

@@ -58,6 +58,19 @@ pub struct HttpServerConfig {
     /// Chemin vers la clé privée TLS (optionnel)
     #[serde(default)]
     pub tls_key_path: Option<String>,
+    /// Taille max d'un flux entrant en octets (POST /v1/flows). Défaut : 100 MB.
+    /// Au-delà, le serveur retourne `413 Payload Too Large` (XP Z12-013 §5.5).
+    #[serde(default = "default_max_flow_size_bytes")]
+    pub max_flow_size_bytes: usize,
+    /// Timeout par requête en secondes (défaut : 30s).
+    /// Au-delà, le serveur retourne `408 Request Timeout`.
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+    /// Limite de requêtes par minute par client (Bearer token ou IP).
+    /// `None` ou 0 → rate limiting désactivé. Au-delà : `429 Too Many Requests`
+    /// avec header `Retry-After` (XP Z12-013 §5.5).
+    #[serde(default)]
+    pub rate_limit_per_minute: Option<u32>,
 }
 
 fn default_http_host() -> String {
@@ -66,6 +79,14 @@ fn default_http_host() -> String {
 
 fn default_http_port() -> u16 {
     8080
+}
+
+fn default_max_flow_size_bytes() -> usize {
+    100 * 1024 * 1024 // 100 MB
+}
+
+fn default_request_timeout_secs() -> u64 {
+    30
 }
 
 /// Identité de la PDP

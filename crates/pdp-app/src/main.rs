@@ -234,6 +234,12 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             metrics: server::Metrics::default(),
             annuaire_store,
             webhook_store: webhook_store.clone(),
+            max_flow_size_bytes: http_config.max_flow_size_bytes,
+            request_timeout: std::time::Duration::from_secs(http_config.request_timeout_secs),
+            rate_limiter: http_config
+                .rate_limit_per_minute
+                .filter(|n| *n > 0)
+                .map(|n| std::sync::Arc::new(server::RateLimiter::new(n))),
         });
 
         let server_config = server::ServerConfig {

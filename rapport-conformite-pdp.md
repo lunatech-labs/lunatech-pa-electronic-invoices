@@ -170,12 +170,12 @@ Les 9 chemins de conversion sont implémentés. Les pièces jointes (BG-24) sont
 
 | Code | Statut | Détails |
 |------|--------|---------|
-| 401 TokenExpired | ✅ | Géré spécifiquement |
-| 404 Not Found | ❌ | Pas de traitement spécifique |
-| 408 Request Timeout | ❌ | — |
-| 413 Payload Too Large | ❌ | — |
-| 429 Rate Limiting | ❌ | — |
-| 501 Not Implemented | ❌ | — |
+| 401 TokenExpired | ✅ | Re-authentification automatique |
+| 404 Not Found | ✅ | `ClientError::NotFound`, non retryable |
+| 408 Request Timeout | ✅ | Client : `RequestTimeout` retryable. Serveur : `timeout_middleware` (config `request_timeout_secs`) |
+| 413 Payload Too Large | ✅ | Client : `PayloadTooLarge`. Serveur : limite `max_flow_size_bytes` sur POST /v1/flows |
+| 429 Rate Limiting | ✅ | Client : `RateLimited` avec `retry_after`. Serveur : `rate_limit_middleware` par Bearer/IP avec header `Retry-After` (config `rate_limit_per_minute`) |
+| 501 Not Implemented | ✅ | Client : `NotImplemented`, non retryable |
 
 ---
 
