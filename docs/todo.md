@@ -471,21 +471,29 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [x] 9 tests Phase B (login OK / KO, cookie roundtrip, isolation cross-
       tenant via cookie, logout, headers de sécurité, annuaire public)
 
-**Reste à faire (Phase B.5+)** :
+**Phase B.5 livrée** :
 
-#### Renforcement auth (Phase B.5)
+- [x] **argon2id** pour les passwords stockés. Backward-compat plaintext
+      (warn au démarrage). CLI `pdp tools hash-password "..."` pour
+      générer le hash, `pdp tools gen-session-secret` pour le secret.
+- [x] **Invalidation de session côté serveur** au logout
+      (`RevocationList` in-memory bornée 5000 entrées avec purge
+      paresseuse des entrées expirées). Test : un cookie rejoué après
+      logout retourne 303 → /login.
+- [x] **Cookie `Secure`** quand `X-Forwarded-Proto: https` est présent
+      (proxy nginx/traefik). Omis en HTTP local pour que le navigateur
+      envoie le cookie sur la démo.
 
-- [ ] **argon2** pour les passwords stockés (actuellement plaintext en
-      config — même profil que les Bearer tokens, mais bonne pratique
-      à terme)
+**Reste à faire (Phase B.6+)** :
+
 - [ ] **2FA TOTP** optionnel sur les comptes `tenant_admin` / `pdp_*`
+      (nécessite stockage du secret partagé par user + UI d'enrôlement)
 - [ ] **OIDC / OAuth2** en plus du login local (Keycloak, Auth0,
       FranceConnect+ Pro pour les assujettis)
-- [ ] **Invalidation de session côté serveur** au logout (actuellement
-      stateless : un cookie volé reste valide jusqu'à expiration)
-- [ ] **Cookie `Secure`** quand le proxy injecte `X-Forwarded-Proto: https`
 - [ ] **CSRF token** sur les actions POST (Phase 2 UI : soumission
       factures, émission CDV)
+- [ ] **Revocation list persistée** (Postgres) — la liste est aujourd'hui
+      en mémoire et perdue au redémarrage
 
 #### Modèle d'autorisation (RBAC)
 

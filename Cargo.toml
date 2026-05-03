@@ -94,6 +94,9 @@ base64 = "0.22"
 sha2 = "0.10"
 md5 = "0.7"
 
+# Password hashing (argon2id) pour le login web (Phase B.5)
+argon2 = "0.5"
+
 # Archive (tar.gz for PPF flux, zip for general archiving)
 tar = "0.4"
 flate2 = "1.0"

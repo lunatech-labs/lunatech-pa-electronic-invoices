@@ -101,6 +101,27 @@ enum Commands {
         #[command(subcommand)]
         action: DemoCommands,
     },
+
+    /// Petits outils en ligne de commande (hash de password, génération
+    /// de secret, etc.).
+    Tools {
+        #[command(subcommand)]
+        action: ToolsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolsCommands {
+    /// Génère un hash argon2id pour un mot de passe (à coller dans la
+    /// config `users[].password`). Lit le mot de passe en argument
+    /// ou sur stdin si l'argument est `-`.
+    HashPassword {
+        /// Mot de passe en clair (ou `-` pour lire stdin).
+        password: String,
+    },
+    /// Génère un secret aléatoire 32 octets (base64) pour
+    /// `http_server.session_secret`.
+    GenSessionSecret,
 }
 
 #[derive(Subcommand)]
@@ -233,7 +254,37 @@ async fn main() -> Result<()> {
         Commands::Annuaire { action } => cmd_annuaire(&cli.config, action).await,
         Commands::Ereporting { action } => cmd_ereporting(&cli.config, action).await,
         Commands::Demo { action } => cmd_demo(action).await,
+        Commands::Tools { action } => cmd_tools(action).await,
     }
+}
+
+async fn cmd_tools(action: ToolsCommands) -> Result<()> {
+    match action {
+        ToolsCommands::HashPassword { password } => {
+            let plaintext = if password == "-" {
+                use std::io::Read;
+                let mut s = String::new();
+                std::io::stdin().read_to_string(&mut s)?;
+                s.trim_end_matches(['\n', '\r']).to_string()
+            } else {
+                password
+            };
+            if plaintext.is_empty() {
+                anyhow::bail!("mot de passe vide");
+            }
+            let hash = pdp_app::session::hash_password(&plaintext)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("{hash}");
+        }
+        ToolsCommands::GenSessionSecret => {
+            use base64::Engine as _;
+            let secret = pdp_app::session::random_secret();
+            // Padding pour atteindre au moins 32 octets visiblement.
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&secret);
+            println!("{b64}");
+        }
+    }
+    Ok(())
 }
 
 async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> {
@@ -359,6 +410,7 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
         }
 
         let users = http_config.users.clone().unwrap_or_default();
+        pdp_app::session::warn_plaintext_passwords(&users);
         let session_secret = http_config
             .session_secret
             .clone()
@@ -382,6 +434,7 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             users,
             session_secret,
             session_ttl_secs: http_config.session_ttl_secs,
+            revocations: std::sync::Arc::new(pdp_app::session::RevocationList::new()),
             trace_store,
             metrics: server::Metrics::default(),
             annuaire_store,

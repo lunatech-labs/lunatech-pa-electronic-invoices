@@ -41,10 +41,13 @@ http_server:
   session_secret: "<32+ octets aléatoires, gardé secret>"
   session_ttl_secs: 28800   # 8h par défaut
 
-  # Comptes pour le login web
+  # Comptes pour le login web. Le `password` peut être :
+  #  - un hash argon2id : `$argon2id$v=19$m=19456,t=2,p=1$...`
+  #    (recommandé — généré via `pdp tools hash-password "..."`)
+  #  - un mot de passe en clair (legacy v1, log un warning au démarrage)
   users:
     - email: "alice@techconseil.fr"
-      password: "..."           # plaintext en v1 ; argon2 prévu Phase B.5
+      password: "$argon2id$v=19$m=19456,t=2,p=1$WGarTI..."
       principal: "alice@tc"
       allowed_sirens: ["123456789"]
       role: tenant
@@ -79,6 +82,35 @@ Tous les responses portent (ajoutés par `security_headers_middleware`) :
 - `X-Frame-Options: DENY`
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
+
+### Outils CLI
+
+```bash
+# Génère un hash argon2id pour un mot de passe (à coller dans users[].password)
+pdp tools hash-password "monMotDePasse"
+$argon2id$v=19$m=19456,t=2,p=1$WGarTI...
+
+# Lit le mot de passe sur stdin (pour ne pas l'avoir dans l'historique shell)
+echo -n "secret" | pdp tools hash-password -
+
+# Génère un secret de session aléatoire (32 octets, base64) pour `session_secret`
+pdp tools gen-session-secret
+z6qZ/9XHRyuyOKL/cnuFu5nGpTgRzWzuNFEeLff+jtM=
+```
+
+### Détails session (Phase B.5)
+
+- **Cookie HMAC-signé** stateless : `<principal_b64>.<expires_at>.<sig>`,
+  signé avec `session_secret` (32+ octets).
+- **`Secure` flag** posé automatiquement quand le proxy injecte
+  `X-Forwarded-Proto: https`. En HTTP brut (démo locale), le flag est
+  omis pour que le navigateur envoie quand même le cookie.
+- **Logout server-side** : `POST /logout` ajoute la signature à une
+  *revocation list* in-memory (`Mutex<HashMap<sig, expires_at>>`,
+  bornée à 5000 entrées). Toute requête ultérieure qui rejouerait la
+  signature est rejetée jusqu'à expiration naturelle. La liste est
+  perdue au redémarrage (acceptable : les cookies expirent aussi car
+  un `session_secret` non-fixe change toutes les sessions).
 
 Côté store, [`TraceBackend::get_exchange`](../crates/pdp-trace/src/backend.rs)
 ajoute un filtre `seller_siren = X OR buyer_siren = X` au lookup par

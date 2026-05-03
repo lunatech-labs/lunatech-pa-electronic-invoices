@@ -266,7 +266,7 @@ impl StateBuilder {
             dev_open: self.dev_open,
             users: self.users,
             session_secret: b"test-session-secret-32-bytes-padding-padding".to_vec(),
-            session_ttl_secs: 3600,
+            session_ttl_secs: 3600, revocations: std::sync::Arc::new(pdp_app::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: Arc::new(WebhookStore::new()),
@@ -517,6 +517,108 @@ async fn session_cookie_blocks_cross_tenant() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn cookie_marked_secure_when_x_forwarded_proto_https() {
+    // Quand un proxy HTTPS injecte X-Forwarded-Proto: https, le cookie
+    // doit porter le flag `Secure` pour éviter qu'il soit envoyé en clair
+    // si l'utilisateur tape `http://...`.
+    let state = StateBuilder::new()
+        .user("alice@tc", "pwd", "alice", &["123456789"], Role::Tenant)
+        .build();
+    let app = build_api_router(state);
+    let req = Request::builder()
+        .uri("/login")
+        .method("POST")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("X-Forwarded-Proto", "https")
+        .body(Body::from("email=alice%40tc&password=pwd".to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        cookie.contains("Secure"),
+        "cookie doit porter `Secure` derrière HTTPS, got {cookie}"
+    );
+}
+
+#[tokio::test]
+async fn cookie_not_marked_secure_in_plain_http() {
+    // Sans signal HTTPS (cas démo locale), le cookie ne doit PAS être
+    // Secure (sinon le navigateur ne le renvoie pas).
+    let state = StateBuilder::new()
+        .user("alice@tc", "pwd", "alice", &["123456789"], Role::Tenant)
+        .build();
+    let resp = post_form(state, "/login", "email=alice%40tc&password=pwd").await;
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        !cookie.contains("Secure"),
+        "en HTTP la flag Secure ne doit pas être posée"
+    );
+}
+
+#[tokio::test]
+async fn cookie_invalidated_after_logout_even_if_replayed() {
+    // Logout server-side : un attaquant qui rejoue le cookie après /logout
+    // ne doit PAS pouvoir accéder à /ui (la signature est dans la
+    // revocation list jusqu'à expiration naturelle).
+    let state = StateBuilder::new()
+        .user("alice@tc", "pwd", "alice", &["123456789"], Role::Tenant)
+        .build();
+    let resp =
+        post_form(state.clone(), "/login", "email=alice%40tc&password=pwd").await;
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    // 1. Cookie valide → 200
+    let app = build_api_router(state.clone());
+    let req = Request::builder()
+        .uri("/ui/flows?siren=123456789")
+        .header("Cookie", cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(app.oneshot(req).await.unwrap().status(), StatusCode::OK);
+
+    // 2. Logout avec ce cookie
+    let app = build_api_router(state.clone());
+    let req = Request::builder()
+        .uri("/logout")
+        .method("POST")
+        .header("Cookie", cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    // 3. Replay du même cookie → doit être rejeté (303 → /login)
+    let app = build_api_router(state);
+    let req = Request::builder()
+        .uri("/ui/flows?siren=123456789")
+        .header("Cookie", cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::SEE_OTHER,
+        "cookie révoqué doit redirige vers /login (rejected)"
+    );
 }
 
 #[tokio::test]

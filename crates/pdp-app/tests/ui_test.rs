@@ -260,7 +260,7 @@ fn build_state(backend: Arc<dyn TraceBackend>) -> Arc<AppState> {
         flow_sender: tx,
         webhook_secret: None,
         trace_store: Some(backend),
-        tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+        tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(pdp_app::session::RevocationList::new()),
         metrics: Metrics::default(),
         annuaire_store: None,
         webhook_store: Arc::new(WebhookStore::new()),

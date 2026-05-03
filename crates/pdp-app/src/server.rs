@@ -135,6 +135,9 @@ pub struct AppState {
     pub session_secret: Vec<u8>,
     /// TTL d'une session web en secondes.
     pub session_ttl_secs: u64,
+    /// Liste des signatures de cookies révoquées (logout server-side).
+    /// Partagée entre toutes les requêtes via `Arc`.
+    pub revocations: Arc<crate::session::RevocationList>,
     /// Métriques Prometheus
     pub metrics: Metrics,
     /// Store annuaire PPF (optionnel — nécessite PostgreSQL)
@@ -355,8 +358,8 @@ async fn auth_middleware(
     next.run(req).await
 }
 
-/// Lit le cookie `ferrite_session`, vérifie sa signature, et retourne le
-/// `SecurityContext` correspondant si le user existe toujours dans la conf.
+/// Lit le cookie `ferrite_session`, vérifie sa signature ET sa non-révocation,
+/// et retourne le `SecurityContext` correspondant si le user existe toujours.
 fn resolve_from_cookie(
     state: &AppState,
     req: &axum::extract::Request,
@@ -366,8 +369,11 @@ fn resolve_from_cookie(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())?;
     let value = parse_cookie(cookie_header, crate::session::SESSION_COOKIE)?;
-    let principal = crate::session::verify_cookie(&state.session_secret, &value).ok()?;
-    crate::session::user_to_context(&state.users, &principal)
+    let session = crate::session::verify_cookie(&state.session_secret, &value).ok()?;
+    if state.revocations.is_revoked(&session.signature) {
+        return None;
+    }
+    crate::session::user_to_context(&state.users, &session.principal)
 }
 
 fn resolve_from_bearer(
@@ -459,12 +465,12 @@ struct LoginForm {
 /// redirige vers `next` (ou `/ui` par défaut).
 async fn handle_login_submit(
     State(state): State<Arc<AppState>>,
+    headers_in: axum::http::HeaderMap,
     axum::Form(form): axum::Form<LoginForm>,
 ) -> axum::response::Response {
     let user = match crate::session::authenticate(&state.users, &form.email, &form.password) {
         Some(u) => u,
         None => {
-            // Renvoie le formulaire avec un message d'erreur (HTML inline).
             let html = include_str!("../static/login.html").replace(
                 "<!--ERR-->",
                 r#"<div class="err">Email ou mot de passe incorrect.</div>"#,
@@ -488,27 +494,58 @@ async fn handle_login_submit(
         .as_deref()
         .filter(|n| n.starts_with('/') && !n.starts_with("//"))
         .unwrap_or("/ui");
-    // Cookie HttpOnly, SameSite=Lax. `Secure` uniquement si on a un signal
-    // qu'on est derrière HTTPS — pour la démo locale on ne peut pas
-    // l'imposer (sinon le cookie n'est pas envoyé en HTTP). En prod,
-    // mettre un proxy HTTPS qui ajoute `X-Forwarded-Proto: https`.
-    let cookie = format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
-        crate::session::SESSION_COOKIE,
-        cookie_value,
-        state.session_ttl_secs,
-    );
+    let cookie = build_session_cookie(&cookie_value, state.session_ttl_secs, &headers_in);
 
-    (
-        StatusCode::SEE_OTHER,
-        [("set-cookie", cookie.as_str()), ("location", target)],
-        "",
-    )
-        .into_response()
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("set-cookie", cookie.parse().unwrap());
+    headers.insert("location", target.parse().unwrap());
+    (StatusCode::SEE_OTHER, headers, "").into_response()
 }
 
-/// `POST /logout` — efface le cookie de session et redirige vers `/login`.
-async fn handle_logout() -> axum::response::Response {
+/// Construit la valeur `Set-Cookie` pour la session.
+///
+/// Le flag `Secure` est ajouté si la requête arrive sur HTTPS — détecté
+/// via le header `X-Forwarded-Proto: https` (cas typique : proxy
+/// nginx/traefik en frontal). En HTTP brut (`localhost`), on ne pose pas
+/// `Secure` car le navigateur n'enverrait pas le cookie.
+fn build_session_cookie(value: &str, ttl_secs: u64, headers: &axum::http::HeaderMap) -> String {
+    let secure_flag = if is_https(headers) { "; Secure" } else { "" };
+    format!(
+        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}{}",
+        crate::session::SESSION_COOKIE,
+        value,
+        ttl_secs,
+        secure_flag,
+    )
+}
+
+fn is_https(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.eq_ignore_ascii_case("https"))
+        .unwrap_or(false)
+}
+
+/// `POST /logout` — efface le cookie de session et l'inscrit dans la
+/// revocation list (server-side invalidation : la signature reste rejetée
+/// jusqu'à expiration naturelle, même si un attaquant rejouait le cookie).
+async fn handle_logout(
+    State(state): State<Arc<AppState>>,
+    headers_in: axum::http::HeaderMap,
+) -> axum::response::Response {
+    // Si on a un cookie de session valide, on l'inscrit dans la revocation
+    // list. Sans cookie / cookie invalide, on continue (idempotent).
+    if let Some(cookie_header) = headers_in
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(value) = parse_cookie(cookie_header, crate::session::SESSION_COOKIE) {
+            if let Ok(session) = crate::session::verify_cookie(&state.session_secret, &value) {
+                state.revocations.revoke(&session.signature, session.expires_at);
+            }
+        }
+    }
     let cookie = format!(
         "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
         crate::session::SESSION_COOKIE
@@ -1931,7 +1968,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1950,7 +1987,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1969,7 +2006,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1990,7 +2027,7 @@ mod tests {
             webhook_secret: None,
             trace_store: None,
             tokens: legacy_admin_tokens(&["valid-token-123", "valid-token-456"]),
-            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2479,7 +2516,7 @@ mod tests {
                 webhook_secret: None,
                 trace_store: None,
                 tokens: legacy_admin_tokens(&["my-secret-token"]),
-                dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+                dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
                 metrics: Metrics::default(),
                 annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2547,7 +2584,7 @@ mod tests {
             pdp_matricule: "9999".to_string(),
             flow_sender: tx,
             webhook_secret: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             trace_store: None,
             metrics: Metrics::default(),
             annuaire_store: None,
@@ -3018,7 +3055,7 @@ mod tests {
             webhook_secret: Some("e2e-secret".to_string()),
             trace_store: None,
             tokens: legacy_admin_tokens(&["e2e-token-valid"]),
-            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3504,7 +3541,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3523,7 +3560,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3541,7 +3578,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
