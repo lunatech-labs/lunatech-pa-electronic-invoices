@@ -53,6 +53,7 @@ Voir [§4](#4-codes-irr-pièces-jointes-cdv-501) — bloqué par : pas encore de
 - **Multi-vendeurs** §4.5.4 — sub-lines / multi-seller invoices
 - **Flux 11** (NOUVEAU V1.3) — annuaire publiable PPF→PA→utilisateurs
 - **13 cas d'usage partiels** XP Z12-014 (notes de frais, escomptes TVA, compensations, régimes de marge)
+- **Adresses électroniques** — voir [§Adresses électroniques](#adresses-électroniques-bt-34--bt-49)
 
 ### Gros chantiers produit
 - Voir [§3bis](#3bis-interface-web-de-suivi-des-factures) — interface web (4 phases)
@@ -556,6 +557,33 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [ ] Rotation des clés JWT, des secrets HMAC webhook, des credentials
       SFTP — procédures documentées et testables.
 
+### 9quater. Adresses électroniques (BT-34 / BT-49)
+
+Tableau de conformité détaillé : [docs/conformite-adresses-electroniques.md](conformite-adresses-electroniques.md).
+
+**Manques identifiés** :
+
+- [ ] **BR-FR-21** (BT-49 = SIREN+0225 en B2B BAR) — actuellement
+      uniquement en Schematron, donc désactivé en démo et désactivable
+      en prod. Porter en Rust dans `pdp-invoice/src/validator.rs` pour
+      garantir l'application même Schematron off.
+- [ ] **BR-FR-22** (idem BT-34 en autofacture) — même situation.
+- [ ] **Lookup annuaire de l'EndpointID acheteur** (DEST_INC) —
+      l'`AnnuaireValidationProcessor` (mode `Emission`) vérifie
+      l'existence du SIREN acheteur dans l'annuaire mais pas la
+      concordance avec une ligne d'annuaire active (couple
+      `(SIRET, routing_code)`). Étendre pour appeler
+      `lookup_code_routage` et émettre `DEST_INC` si absent.
+- [ ] **Tests Rust nommés `test_br_fr_21_*` / `test_br_fr_22_*`**
+      (actuellement aucun) — au minimum un cas accepté + un cas rejeté
+      par règle.
+- [ ] **Synchronisation EAS list** — actuellement 41 valeurs codées en
+      dur dans `pdp-invoice/src/validator.rs:334`. Le code list CEF est
+      mis à jour ~2x/an. Ajouter `scripts/sync-eas-list.py` qui
+      télécharge le fichier officiel et regénère le tableau Rust.
+- [ ] **`docs/spec-driven.md` rendre canonique** — voir aussi le
+      chantier transverse §16ter.
+
 ### 10. Rate limiting HTTP ✅
 
 - [x] Limiter le nombre de requêtes par tenant/token (clé Bearer / IP)
@@ -625,3 +653,57 @@ admin/exploitation au-delà du suivi facture.
 - [ ] Suivi des alertes critiques
 - [ ] Métriques Prometheus visualisées (Grafana ou intégré)
 - [ ] Configuration runtime (sans redémarrage de la PDP)
+
+### 16ter. Chantier spec-driven — généraliser à tout le projet
+
+Convention rédigée dans [docs/spec-driven.md](spec-driven.md). Premier
+exemple complet : [conformite-adresses-electroniques.md](conformite-adresses-electroniques.md).
+
+L'ambition : **chaque domaine fonctionnel** doit avoir son tableau de
+conformité (Règle / Source spec / Implémentation file:line / Tests / État).
+Cela permet : (a) à un auditeur AFNOR de remonter une règle au code, (b)
+à nous de détecter les manques, (c) à un nouveau dev de comprendre
+pourquoi telle ligne existe.
+
+État actuel par domaine :
+
+| Domaine | Doc conformité | État |
+|---|---|---|
+| Adresses électroniques (BT-34 / BT-49) | [conformite-adresses-electroniques.md](conformite-adresses-electroniques.md) | ✅ livré (avec 5 manques identifiés cf §9quater) |
+| Acteurs CDV / CDAR (CDV 200-299) | [cdar.md](cdar.md) (existant, pas formaté en tableau) | ⚠️ à reformater |
+| Codes IRR (CDV 501) | (sections dispersées dans cdar.md) | ❌ à créer |
+| E-reporting Flux 10 (BR-FR-MAP-*) | [ereporting.md](ereporting.md) | ⚠️ à reformater |
+| Annuaire F13/F14 (G1.63, contrôles SIREN) | [annuaire.md](annuaire.md) | ⚠️ à reformater |
+| Pipeline réception (REC-01..REC-05, BR-FR-19) | (commentaires dans `pdp-core/src/reception.rs`) | ❌ à créer |
+| Validation EN16931 (BR-* / BR-CO-* / BR-CL-*) | (Schematron dans `specs/`) | ❌ pas de tableau récap |
+| Validation BR-FR (XP Z12-012) | (Schematron + Rust dispersés) | ❌ à consolider |
+| Transformation UBL ↔ CII | [docs/api.md](api.md) (partiel) | ⚠️ à compléter |
+| Factur-X (PDF/A-3 + XML embarqué) | [facturx.md](facturx.md) | ⚠️ à reformater |
+| HTTP API (XP Z12-013 §5) | [http-api.md](http-api.md) | ⚠️ à reformater |
+| Webhooks (XP Z12-013 §5.4) | [webhooks.md](webhooks.md) | ⚠️ à reformater |
+| Auth / RBAC / sécurité | [docs/ui.md](ui.md) (partiel) | ⚠️ à reformater (référencer NIST/OWASP) |
+| PEPPOL AS4 / Oxalis | [peppol.md](peppol.md) | ⚠️ à reformater |
+| Multi-tenant / isolation | (dispersé dans ui.md + todo §9ter) | ❌ à créer |
+
+**Tâches** :
+
+- [ ] Reformater chaque doc existant en utilisant le **template de
+      tableau** de [spec-driven.md §3](spec-driven.md). Une PR par
+      domaine, lien vers la spec source à chaque ligne.
+- [ ] Créer les docs manquants (`conformite-codes-irr.md`,
+      `conformite-reception.md`, `conformite-en16931.md`,
+      `conformite-isolation-tenant.md`).
+- [ ] **Vérifier le naming des tests** : tous les tests qui valident une
+      règle de spec doivent porter le `rule_id` dans leur nom (cf.
+      convention §4 de spec-driven.md). Audit + renommage.
+- [ ] **Rule_id dans tous les messages d'erreur** : actuellement
+      certaines erreurs ne portent pas leur code (ex. "TVA incohérente"
+      sans `BR-CO-15`). Audit + correction.
+- [ ] **Outil `pdp tools schematron-rules`** (CLI) qui parse les `.sch`
+      de `specs/` et liste toutes les règles + indique si un test Rust
+      les couvre (recherche par grep sur `rule_id`).
+- [ ] **CI check** : un test bloquant qui vérifie que chaque `rule_id`
+      qui apparaît dans le code Rust correspond à une entrée connue
+      dans un tableau de conformité (anti-typo).
+- [ ] **Ajouter le check spec→test dans le README** : "comment
+      contribuer une règle".
