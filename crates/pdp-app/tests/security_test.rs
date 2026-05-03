@@ -23,6 +23,7 @@ use tower::ServiceExt;
 use pdp_app::security::{Role, SecurityContext};
 use pdp_app::server::{build_api_router, AppState, Metrics};
 use pdp_app::webhooks::WebhookStore;
+use pdp_config::model::UserConfig;
 use pdp_core::error::PdpResult;
 use pdp_trace::store::{
     EventEntry, ExchangeDocument, ExchangeSummary, TraceStats,
@@ -196,6 +197,7 @@ fn doc_for(seller_siren: &str, buyer_siren: &str, invoice: &str) -> ExchangeDocu
 struct StateBuilder {
     dev_open: bool,
     tokens: HashMap<String, SecurityContext>,
+    users: Vec<UserConfig>,
     docs: Vec<ExchangeDocument>,
 }
 
@@ -204,11 +206,23 @@ impl StateBuilder {
         Self {
             dev_open: false,
             tokens: HashMap::new(),
+            users: Vec::new(),
             docs: vec![
                 doc_for("123456789", "987654321", "INV-A"),
                 doc_for("999999999", "888888888", "INV-B"),
             ],
         }
+    }
+
+    fn user(mut self, email: &str, password: &str, principal: &str, sirens: &[&str], role: Role) -> Self {
+        self.users.push(UserConfig {
+            email: email.into(),
+            password: password.into(),
+            principal: principal.into(),
+            allowed_sirens: sirens.iter().map(|s| s.to_string()).collect(),
+            role,
+        });
+        self
     }
 
     fn dev_open(mut self) -> Self {
@@ -250,6 +264,9 @@ impl StateBuilder {
             trace_store: Some(Arc::new(InMemBackend(self.docs))),
             tokens: self.tokens,
             dev_open: self.dev_open,
+            users: self.users,
+            session_secret: b"test-session-secret-32-bytes-padding-padding".to_vec(),
+            session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: Arc::new(WebhookStore::new()),
@@ -277,16 +294,25 @@ async fn send(state: Arc<AppState>, uri: &str, bearer: Option<&str>) -> (StatusC
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn no_token_rejected_when_dev_open_false() {
+async fn no_token_redirects_to_login_on_ui() {
+    // Phase B : routes UI sans auth → 303 vers /login (au lieu de 401 brut).
     let state = StateBuilder::new().tenant_token("tok-a", &["123456789"]).build();
     let (status, _) = send(state, "/ui/flows?siren=123456789", None).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(status, StatusCode::SEE_OTHER);
 }
 
 #[tokio::test]
-async fn unknown_token_rejected() {
+async fn unknown_token_redirects_to_login_on_ui() {
     let state = StateBuilder::new().tenant_token("tok-a", &["123456789"]).build();
     let (status, _) = send(state, "/ui/flows?siren=123456789", Some("tok-zzz")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn no_token_rejected_with_401_on_api() {
+    // L'API garde 401 JSON (pas de redirect — clients non navigateur).
+    let state = StateBuilder::new().tenant_token("tok-a", &["123456789"]).build();
+    let (status, _) = send(state, "/v1/stats?siren=123456789", None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -371,6 +397,169 @@ async fn get_exchange_visible_to_owner() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("INV-A"));
+}
+
+// ---------------------------------------------------------------------------
+// Phase B : login web + session cookie
+// ---------------------------------------------------------------------------
+
+async fn post_form(state: Arc<AppState>, uri: &str, body: &str) -> axum::response::Response {
+    let app = build_api_router(state);
+    let req = Request::builder()
+        .uri(uri)
+        .method("POST")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    app.oneshot(req).await.unwrap()
+}
+
+#[tokio::test]
+async fn login_page_is_public() {
+    let state = StateBuilder::new().build();
+    let (status, body) = send(state, "/login", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("<form"));
+    assert!(body.contains("Se connecter"));
+}
+
+#[tokio::test]
+async fn login_with_valid_credentials_sets_cookie_and_redirects() {
+    let state = StateBuilder::new()
+        .user("alice@tc", "pwd123", "alice", &["123456789"], Role::Tenant)
+        .build();
+    let resp = post_form(state, "/login", "email=alice%40tc&password=pwd123").await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        cookie.starts_with("ferrite_session="),
+        "doit poser le cookie ferrite_session, got {}",
+        cookie
+    );
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Lax"));
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(location, "/ui");
+}
+
+#[tokio::test]
+async fn login_with_wrong_password_returns_401_with_form() {
+    let state = StateBuilder::new()
+        .user("alice@tc", "pwd123", "alice", &["123"], Role::Tenant)
+        .build();
+    let resp = post_form(state, "/login", "email=alice%40tc&password=WRONG").await;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8_lossy(&bytes);
+    assert!(body.contains("Email ou mot de passe incorrect"));
+}
+
+#[tokio::test]
+async fn session_cookie_authenticates_ui_request() {
+    // 1. Login pour récupérer un cookie valide.
+    let state = StateBuilder::new()
+        .user("alice@tc", "pwd", "alice", &["123456789"], Role::Tenant)
+        .build();
+    let resp =
+        post_form(state.clone(), "/login", "email=alice%40tc&password=pwd").await;
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    // 2. Requête UI avec le cookie : doit passer (200), pas de redirect.
+    let app = build_api_router(state);
+    let req = Request::builder()
+        .uri("/ui/flows?siren=123456789")
+        .header("Cookie", cookie.clone())
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn session_cookie_blocks_cross_tenant() {
+    // Le cookie d'alice ne donne accès qu'à 123456789 — siren foreign → 403.
+    let state = StateBuilder::new()
+        .user("alice@tc", "pwd", "alice", &["123456789"], Role::Tenant)
+        .build();
+    let resp =
+        post_form(state.clone(), "/login", "email=alice%40tc&password=pwd").await;
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let app = build_api_router(state);
+    let req = Request::builder()
+        .uri("/ui/flows?siren=999999999")
+        .header("Cookie", cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn logout_clears_cookie_and_redirects() {
+    let state = StateBuilder::new().build();
+    let resp = post_form(state, "/logout", "").await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(cookie.starts_with("ferrite_session="));
+    assert!(cookie.contains("Max-Age=0"));
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(location, "/login");
+}
+
+#[tokio::test]
+async fn security_headers_present_on_all_responses() {
+    let state = StateBuilder::new().dev_open().build();
+    let app = build_api_router(state);
+    let req = Request::builder().uri("/ui").body(Body::empty()).unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let h = resp.headers();
+    assert!(h.contains_key("content-security-policy"));
+    assert!(h.contains_key("strict-transport-security"));
+    assert_eq!(h.get("x-frame-options").unwrap(), "DENY");
+    assert_eq!(h.get("x-content-type-options").unwrap(), "nosniff");
+    assert!(h.contains_key("referrer-policy"));
+}
+
+#[tokio::test]
+async fn annuaire_remains_public() {
+    // Confirmation qu'on n'a pas régressé : `/annuaire` doit rester accessible
+    // sans token et sans cookie (choix produit explicite).
+    let state = StateBuilder::new().build();
+    let (status, _) = send(state, "/annuaire", None).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

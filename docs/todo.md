@@ -453,22 +453,39 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [x] 11 tests d'isolation tenant sans Elasticsearch
       ([tests/security_test.rs](../crates/pdp-app/tests/security_test.rs))
 
-**Reste à faire** :
+**Phase B livrée** ([crates/pdp-app/src/session.rs](../crates/pdp-app/src/session.rs)) :
 
-#### Authentification utilisateur
+- [x] Headers de sécurité posés sur **toutes** les réponses (CSP, HSTS,
+      X-Frame-Options, X-Content-Type-Options, Referrer-Policy)
+- [x] Module `session` : cookie HMAC-SHA256 signé, TTL configurable,
+      pas de stockage serveur (stateless)
+- [x] Config `users:` (email + password + principal + allowed_sirens +
+      role) ; `session_secret` et `session_ttl_secs` configurables
+- [x] Pages `/login` (GET form, POST handler) et `/logout`
+- [x] Cookie `ferrite_session` (HttpOnly, SameSite=Lax, Max-Age)
+- [x] `auth_middleware` accepte cookie OU Bearer (priorité cookie pour
+      l'UI). UI sans auth → redirect 303 vers `/login?next=...`. API
+      sans auth → 401 JSON.
+- [x] L'annuaire (`/annuaire`, `/v1/annuaire/search`) reste public — choix
+      produit
+- [x] 9 tests Phase B (login OK / KO, cookie roundtrip, isolation cross-
+      tenant via cookie, logout, headers de sécurité, annuaire public)
 
-- [ ] Authentification web (login + session) sur `/ui/*` — actuellement
-      seuls les endpoints `/v1/*` supportent un Bearer optionnel. Choix
-      à faire : OIDC/OAuth2 (Keycloak, Auth0, FranceConnect+ Pro pour les
-      assujettis) vs login local (email + mot de passe + 2FA TOTP).
-- [ ] Session côté serveur (cookie HttpOnly+Secure+SameSite=Lax) ou JWT
-      court avec refresh — éviter le LocalStorage pour le token.
-- [ ] Logout + invalidation côté serveur, durée de session configurable.
-- [ ] CSRF token sur les actions POST (Phase 2 : soumission factures,
-      émission CDV).
-- [ ] Headers de sécurité : `Content-Security-Policy`,
-      `X-Frame-Options: DENY`, `Strict-Transport-Security`,
-      `Referrer-Policy: strict-origin`.
+**Reste à faire (Phase B.5+)** :
+
+#### Renforcement auth (Phase B.5)
+
+- [ ] **argon2** pour les passwords stockés (actuellement plaintext en
+      config — même profil que les Bearer tokens, mais bonne pratique
+      à terme)
+- [ ] **2FA TOTP** optionnel sur les comptes `tenant_admin` / `pdp_*`
+- [ ] **OIDC / OAuth2** en plus du login local (Keycloak, Auth0,
+      FranceConnect+ Pro pour les assujettis)
+- [ ] **Invalidation de session côté serveur** au logout (actuellement
+      stateless : un cookie volé reste valide jusqu'à expiration)
+- [ ] **Cookie `Secure`** quand le proxy injecte `X-Forwarded-Proto: https`
+- [ ] **CSRF token** sur les actions POST (Phase 2 UI : soumission
+      factures, émission CDV)
 
 #### Modèle d'autorisation (RBAC)
 

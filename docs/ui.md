@@ -6,27 +6,79 @@ l'API HTTP directement. Phase 1 = lecture seule (dashboard + liste + détail).
 
 ## Authentification & isolation tenant
 
-L'UI est désormais **protégée par l'`auth_middleware`** (cf.
-[crates/pdp-app/src/security.rs](../crates/pdp-app/src/security.rs)). Deux modes :
+L'UI est protégée par l'`auth_middleware` (cf.
+[crates/pdp-app/src/security.rs](../crates/pdp-app/src/security.rs)). Trois
+voies d'authentification, dans l'ordre de résolution du middleware :
 
-- **`dev_open: true`** (config-ui-demo.yaml) — pas de token requis, le
-  middleware injecte un contexte `PdpAdmin` de complaisance. Utile pour la
-  démo locale et les screenshots. **Ne JAMAIS activer en prod.**
-- **Mode normal** — le header `Authorization: Bearer <token>` est obligatoire ;
-  chaque token est lié à un porteur (`principal`), une liste de SIRENs
-  autorisés (`allowed_sirens`) et un rôle (`tenant` / `pdp_operator` /
-  `pdp_admin`).
+1. **`dev_open: true`** (config-ui-demo.yaml) — aucun header / cookie requis,
+   le middleware injecte un contexte `PdpAdmin` de complaisance. Utile pour
+   la démo locale et les screenshots. **Ne JAMAIS activer en prod.**
+2. **Cookie de session** `ferrite_session` (Phase B) — issu du formulaire
+   `/login`. Le cookie est HMAC-signé (HttpOnly, SameSite=Lax) et porte
+   le `principal` du user + une expiration. Le `SecurityContext` est
+   reconstruit à partir de `state.users` à chaque requête (lookup
+   in-memory, pas de DB). TTL configurable (`session_ttl_secs`, défaut 8h).
+3. **Bearer token** (clients API) — header `Authorization: Bearer <token>`,
+   cherché dans `state.tokens` (table en mémoire alimentée par la config
+   `http_server.tokens:`).
 
 Tout `?siren=X` passé en query est validé par l'extractor `AuthorizedSiren`
 contre le `SecurityContext` du porteur :
 
-| Cas | Réponse |
-|---|---|
-| Pas de header `Authorization` (mode normal) | `401 MISSING_TOKEN` |
-| Token inconnu | `401 INVALID_TOKEN` |
-| `?siren=` absent sur route obligatoire (`/v1/stats`, `/v1/flows`, downloads) | `400 SIREN_REQUIRED` |
-| `?siren=X` hors `allowed_sirens` (rôle `tenant`) | `403 SIREN_NOT_AUTHORIZED` |
-| Rôle `pdp_operator` ou `pdp_admin` | passe quel que soit le SIREN |
+| Cas | Route UI (`/ui/*`) | Route API (`/v1/*`) |
+|---|---|---|
+| Pas d'auth (mode normal) | `303 → /login?next=...` | `401 MISSING_TOKEN` |
+| Cookie / token invalide | `303 → /login` | `401` |
+| `?siren=` absent sur route obligatoire | `400 SIREN_REQUIRED` | `400 SIREN_REQUIRED` |
+| `?siren=X` hors `allowed_sirens` (rôle `tenant`) | `403 SIREN_NOT_AUTHORIZED` | `403` |
+| Rôle `pdp_operator` ou `pdp_admin` | passe quel que soit le SIREN | idem |
+
+### Configuration tokens / users
+
+```yaml
+http_server:
+  dev_open: false
+  session_secret: "<32+ octets aléatoires, gardé secret>"
+  session_ttl_secs: 28800   # 8h par défaut
+
+  # Comptes pour le login web
+  users:
+    - email: "alice@techconseil.fr"
+      password: "..."           # plaintext en v1 ; argon2 prévu Phase B.5
+      principal: "alice@tc"
+      allowed_sirens: ["123456789"]
+      role: tenant
+
+  # Tokens Bearer pour les clients API
+  tokens:
+    - token: "tok-techconseil-prod"
+      principal: "techconseil-app"
+      allowed_sirens: ["123456789"]
+      role: tenant
+    - token: "tok-pdp-support"
+      principal: "support-team"
+      role: pdp_operator
+```
+
+### Routes publiques (hors auth)
+
+- `/v1/healthcheck`, `/metrics` — supervision
+- `/login`, `/logout` — formulaire de connexion (sinon impossible de
+  se logger…)
+- `/annuaire`, `/v1/annuaire/search` — choix produit explicite : la
+  recherche annuaire reste accessible à tous (un assujetti consulte
+  un fournisseur potentiel sans connexion)
+- `/favicon.ico`, `/favicon.png`, `/ui/static/*` — assets
+
+### Headers de sécurité
+
+Tous les responses portent (ajoutés par `security_headers_middleware`) :
+
+- `Content-Security-Policy: default-src 'self'; …; frame-ancestors 'none'`
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains`
+- `X-Frame-Options: DENY`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
 
 Côté store, [`TraceBackend::get_exchange`](../crates/pdp-trace/src/backend.rs)
 ajoute un filtre `seller_siren = X OR buyer_siren = X` au lookup par
