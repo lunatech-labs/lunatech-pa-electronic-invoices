@@ -430,11 +430,30 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 
 ### 9ter. Authentification, sécurité & isolation tenant
 
-L'UI `/ui/*` est actuellement **publique** (pas de Bearer requis, voir
-[docs/ui.md](ui.md)) et un utilisateur peut consulter n'importe quel
-SIREN simplement en passant `?siren=...`. C'est acceptable pour la démo
-locale ou un déploiement « admin only » derrière un reverse-proxy
-authentifié, mais pas pour un usage multi-tenant en prod.
+**Phase A livrée** ([crates/pdp-app/src/security.rs](../crates/pdp-app/src/security.rs)) :
+
+- [x] `SecurityContext` (principal + `allowed_sirens` + `Role`) injecté par
+      `auth_middleware` dans `Request::extensions`
+- [x] Config `tokens: Vec<TokenConfig>` (avec liaison
+      `principal`/`allowed_sirens`/`role`) ; `bearer_tokens:` deprecated
+      avec migration douce vers `PdpAdmin`
+- [x] Mode `dev_open: true` réservé à la démo locale (assume admin sans
+      token) ; fail-closed en prod
+- [x] Extractor `AuthorizedSiren` qui rejette en 403 tout `?siren=X`
+      hors scope du porteur
+- [x] Helper `authorize_optional_siren` pour les pages UI qui acceptent
+      un siren absent (sélecteur)
+- [x] UI `/ui/*` passe par `auth_middleware` (avant : routes publiques
+      sans aucun contrôle)
+- [x] API : `/v1/stats`, `/v1/flows?status=error`, `/v1/flows/{id}`
+      exigent `?siren=...` ET la propagent au store
+- [x] `TraceBackend::get_exchange` filtre désormais `seller_siren OR
+      buyer_siren = X` (avant : un mauvais siren retournait quand même
+      le document — ignoré)
+- [x] 11 tests d'isolation tenant sans Elasticsearch
+      ([tests/security_test.rs](../crates/pdp-app/tests/security_test.rs))
+
+**Reste à faire** :
 
 #### Authentification utilisateur
 

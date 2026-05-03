@@ -4,6 +4,39 @@ Ferrite expose une interface HTML server-rendered pour permettre aux clients
 et à l'administrateur PDP de consulter l'état des factures sans utiliser
 l'API HTTP directement. Phase 1 = lecture seule (dashboard + liste + détail).
 
+## Authentification & isolation tenant
+
+L'UI est désormais **protégée par l'`auth_middleware`** (cf.
+[crates/pdp-app/src/security.rs](../crates/pdp-app/src/security.rs)). Deux modes :
+
+- **`dev_open: true`** (config-ui-demo.yaml) — pas de token requis, le
+  middleware injecte un contexte `PdpAdmin` de complaisance. Utile pour la
+  démo locale et les screenshots. **Ne JAMAIS activer en prod.**
+- **Mode normal** — le header `Authorization: Bearer <token>` est obligatoire ;
+  chaque token est lié à un porteur (`principal`), une liste de SIRENs
+  autorisés (`allowed_sirens`) et un rôle (`tenant` / `pdp_operator` /
+  `pdp_admin`).
+
+Tout `?siren=X` passé en query est validé par l'extractor `AuthorizedSiren`
+contre le `SecurityContext` du porteur :
+
+| Cas | Réponse |
+|---|---|
+| Pas de header `Authorization` (mode normal) | `401 MISSING_TOKEN` |
+| Token inconnu | `401 INVALID_TOKEN` |
+| `?siren=` absent sur route obligatoire (`/v1/stats`, `/v1/flows`, downloads) | `400 SIREN_REQUIRED` |
+| `?siren=X` hors `allowed_sirens` (rôle `tenant`) | `403 SIREN_NOT_AUTHORIZED` |
+| Rôle `pdp_operator` ou `pdp_admin` | passe quel que soit le SIREN |
+
+Côté store, [`TraceBackend::get_exchange`](../crates/pdp-trace/src/backend.rs)
+ajoute un filtre `seller_siren = X OR buyer_siren = X` au lookup par
+`exchange_id` : un client qui devine un ID arbitraire mais ne porte pas le
+bon SIREN obtient `None` (`404` côté API), pas le document.
+
+Tests d'isolation : [crates/pdp-app/tests/security_test.rs](../crates/pdp-app/tests/security_test.rs)
+(11 tests, sans dépendance externe).
+
+
 ## URLs
 
 | Route | Description | Bearer requis |

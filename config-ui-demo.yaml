@@ -25,7 +25,25 @@ validation:
 http_server:
   host: "127.0.0.1"
   port: 8080
-  # Pas de bearer_tokens : auth désactivée pour la démo
+  # `dev_open: true` autorise toutes les requêtes sans Bearer token et leur
+  # donne un contexte admin. C'est ce qui permet à `pdp demo populate`,
+  # aux screenshots du README et à l'exploration locale de fonctionner sans
+  # configurer de tokens.
+  #
+  # ⚠️ NE JAMAIS activer `dev_open: true` en production : un client
+  # quelconque peut alors consulter n'importe quel SIREN sans
+  # authentification. En prod, mettre `dev_open: false` et configurer
+  # `tokens:` avec liaison `allowed_sirens` pour chaque porteur.
+  dev_open: true
+  # Exemple de configuration de tokens en mode prod :
+  # tokens:
+  #   - token: "tok-techconseil-readonly"
+  #     principal: "techconseil-app"
+  #     allowed_sirens: ["123456789"]
+  #     role: tenant
+  #   - token: "tok-pdp-support"
+  #     principal: "support-team"
+  #     role: pdp_operator
 
 routes: []
 

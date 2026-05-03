@@ -217,12 +217,17 @@ impl TraceBackend for InMemoryTraceBackend {
     async fn get_exchange(
         &self,
         exchange_id: &str,
-        _siren: Option<&str>,
+        siren: Option<&str>,
     ) -> PdpResult<Option<ExchangeDocument>> {
-        // Lookup par exchange_id seul : le SIREN n'est pas un filtre car
-        // une facture reçue est indexée sous l'index du vendeur, pas sous
-        // celui du tenant acheteur qui consulte la page détail.
-        let found = self.docs.iter().find(|d| d.exchange_id == exchange_id);
+        // Lookup par exchange_id ET vérification que le SIREN demandé est
+        // partie au flux (vendeur ou acheteur). Sans ce filtre, un user qui
+        // devine un exchange_id pourrait lire les factures d'un autre tenant.
+        let found = self.docs.iter().find(|d| {
+            d.exchange_id == exchange_id
+                && siren
+                    .map(|s| Self::matches_tenant(d, s))
+                    .unwrap_or(true)
+        });
         Ok(found.map(clone_doc))
     }
 
@@ -255,7 +260,7 @@ fn build_state(backend: Arc<dyn TraceBackend>) -> Arc<AppState> {
         flow_sender: tx,
         webhook_secret: None,
         trace_store: Some(backend),
-        bearer_tokens: None,
+        tokens: std::collections::HashMap::new(), dev_open: true,
         metrics: Metrics::default(),
         annuaire_store: None,
         webhook_store: Arc::new(WebhookStore::new()),
