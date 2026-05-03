@@ -36,6 +36,54 @@ pub struct PdpConfig {
     pub alerts: Option<AlertConfig>,
 }
 
+/// Rôle d'un porteur de token. Détermine la portée de ses droits.
+///
+/// Reproduit dans `pdp-config` (et non dans `pdp-app`) car c'est un type
+/// porté par le YAML de configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    /// Voit uniquement les SIRENs listés dans `allowed_sirens`.
+    Tenant,
+    /// Lecture multi-tenant (équipe support / debug).
+    PdpOperator,
+    /// Superuser : configuration, audit, rotation des clés.
+    PdpAdmin,
+}
+
+impl Default for Role {
+    fn default() -> Self {
+        Role::Tenant
+    }
+}
+
+/// Token Bearer associé à une identité et à une liste de SIRENs autorisés.
+///
+/// ```yaml
+/// http_server:
+///   tokens:
+///     - token: "tok-abc"
+///       principal: "techconseil-app"
+///       allowed_sirens: ["123456789"]
+///       role: tenant
+///     - token: "tok-support"
+///       principal: "support-team"
+///       role: pdp_operator
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenConfig {
+    /// Le token Bearer (chaîne opaque, comparé en clair).
+    pub token: String,
+    /// Libellé du porteur, utilisé pour l'audit log.
+    pub principal: String,
+    /// SIRENs accessibles. Pour `role: tenant`, vide = aucun.
+    /// Ignoré pour `pdp_operator` / `pdp_admin` qui voient tout.
+    #[serde(default)]
+    pub allowed_sirens: Vec<String>,
+    #[serde(default)]
+    pub role: Role,
+}
+
 /// Configuration du serveur HTTP API AFNOR
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerConfig {
@@ -48,10 +96,22 @@ pub struct HttpServerConfig {
     /// Secret HMAC pour la vérification des signatures webhook
     #[serde(default)]
     pub webhook_secret: Option<String>,
-    /// Tokens Bearer autorisés pour l'authentification API
-    /// Si absent ou vide, l'authentification est désactivée (mode dev)
+    /// Tokens avec liaison `principal` + `allowed_sirens` + `role`. C'est
+    /// le nouveau mode (recommandé) qui supporte l'isolation tenant.
+    /// Voir [`TokenConfig`].
+    #[serde(default)]
+    pub tokens: Option<Vec<TokenConfig>>,
+    /// **DEPRECATED** — ancienne liste de tokens sans liaison tenant.
+    /// Si présente, les tokens sont chargés avec `role: PdpAdmin` (compat
+    /// rétroactive) et un warning est émis au démarrage. À supprimer après
+    /// migration des configs vers `tokens:`.
     #[serde(default)]
     pub bearer_tokens: Option<Vec<String>>,
+    /// Mode développement : accepte les requêtes **sans token** et leur
+    /// donne un contexte `PdpAdmin`. Doit rester `false` en prod.
+    /// Activer uniquement pour la démo locale (config-ui-demo.yaml).
+    #[serde(default)]
+    pub dev_open: bool,
     /// Chemin vers le certificat TLS (optionnel)
     #[serde(default)]
     pub tls_cert_path: Option<String>,
