@@ -35,7 +35,7 @@ http_server:
   # authentification. En prod, mettre `dev_open: false` et configurer
   # `tokens:` avec liaison `allowed_sirens` pour chaque porteur.
   dev_open: true
-  # Exemple de configuration de tokens en mode prod :
+  # Exemple de configuration de tokens (clients API) en mode prod :
   # tokens:
   #   - token: "tok-techconseil-readonly"
   #     principal: "techconseil-app"
@@ -44,6 +44,16 @@ http_server:
   #   - token: "tok-pdp-support"
   #     principal: "support-team"
   #     role: pdp_operator
+  #
+  # Exemple d'utilisateurs (login web) :
+  # session_secret: "<32+ octets aléatoires, gardé secret>"
+  # session_ttl_secs: 28800
+  # users:
+  #   - email: "alice@techconseil.fr"
+  #     password: "..."
+  #     principal: "alice@tc"
+  #     allowed_sirens: ["123456789"]
+  #     role: tenant
 
 routes: []
 

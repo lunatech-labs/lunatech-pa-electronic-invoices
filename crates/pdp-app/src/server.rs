@@ -128,6 +128,13 @@ pub struct AppState {
     pub tokens: std::collections::HashMap<String, crate::security::SecurityContext>,
     /// Mode développement — voir `crate::security::SecurityContext::dev_open`.
     pub dev_open: bool,
+    /// Comptes utilisateurs pour le login web (Phase B). Liste plate
+    /// (re-clonée depuis la config) — pas de DB, pas d'index.
+    pub users: Vec<pdp_config::model::UserConfig>,
+    /// Secret HMAC pour signer les cookies de session.
+    pub session_secret: Vec<u8>,
+    /// TTL d'une session web en secondes.
+    pub session_ttl_secs: u64,
     /// Métriques Prometheus
     pub metrics: Metrics,
     /// Store annuaire PPF (optionnel — nécessite PostgreSQL)
@@ -295,9 +302,9 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state.clone());
 
-    // Endpoints **réellement** publics : healthcheck, métriques, assets.
-    // Pas d'auth ici — l'UI annuaire fait sa requête `/v1/annuaire/search`
-    // via JS, on garde donc cette route ouverte (Phase B verrouillera).
+    // Endpoints **réellement** publics : healthcheck, métriques, assets,
+    // login/logout (l'auth ne peut pas exiger un cookie pour le former).
+    // L'annuaire reste public par choix produit.
     let public_routes = Router::new()
         .route("/v1/healthcheck", get(handle_healthcheck))
         .route("/metrics", get(handle_metrics))
@@ -306,26 +313,30 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/ui/static/ferrite-icon.png", get(crate::ui::handle_logo))
         .route("/favicon.ico", get(crate::ui::handle_favicon))
         .route("/favicon.png", get(crate::ui::handle_favicon))
+        .route("/login", get(handle_login_page).post(handle_login_submit))
+        .route("/logout", post(handle_logout))
         .with_state(state);
 
     Router::new()
         .merge(protected_routes)
         .merge(ui_routes)
         .merge(public_routes)
+        // Headers de sécurité posés sur TOUTES les réponses (CSP, HSTS,
+        // X-Frame-Options, Referrer-Policy, X-Content-Type-Options).
+        .layer(middleware::from_fn(security_headers_middleware))
 }
 
-/// Middleware d'authentification Bearer token.
+/// Middleware d'authentification.
 ///
-/// Résolution du `SecurityContext` :
-/// - **`dev_open: true`** (config démo locale) : aucun header requis,
-///   contexte admin de complaisance.
-/// - Sinon : `Authorization: Bearer <token>` obligatoire. Le token est
-///   cherché dans `state.tokens` ; inconnu ou manquant → 401.
-///
-/// Le contexte résolu est inséré dans `Request::extensions` sous forme
-/// de `Arc<SecurityContext>` ; les handlers le récupèrent via l'extractor
-/// [`crate::security::AuthorizedSiren`] ou directement via
-/// `Extension<Arc<SecurityContext>>`.
+/// Résolution du `SecurityContext`, dans cet ordre :
+/// 1. **`dev_open: true`** (config démo) : aucun header requis,
+///    contexte admin de complaisance.
+/// 2. **Cookie de session** `ferrite_session` (login web Phase B) : si
+///    présent ET valide ET le `principal` existe encore dans
+///    `state.users`, on construit le `SecurityContext` à partir du user.
+/// 3. **`Authorization: Bearer <token>`** (clients API) : lookup dans
+///    `state.tokens`. Inconnu ou manquant → réponse selon le type de
+///    requête (UI = redirect 303 vers `/login`, API = 401 JSON).
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     mut req: axum::extract::Request,
@@ -333,40 +344,227 @@ async fn auth_middleware(
 ) -> axum::response::Response {
     let ctx = if state.dev_open {
         std::sync::Arc::new(crate::security::SecurityContext::dev_open())
+    } else if let Some(c) = resolve_from_cookie(&state, &req) {
+        std::sync::Arc::new(c)
+    } else if let Some(c) = resolve_from_bearer(&state, &req) {
+        std::sync::Arc::new(c)
     } else {
-        let auth_header = req
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok());
-        let token = match auth_header {
-            Some(h) if h.starts_with("Bearer ") => &h[7..],
-            _ => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(ErrorResponse {
-                        error: "MISSING_TOKEN".to_string(),
-                        message: "Header Authorization Bearer requis".to_string(),
-                    }),
-                )
-                    .into_response()
-            }
-        };
-        match state.tokens.get(token) {
-            Some(c) => std::sync::Arc::new(c.clone()),
-            None => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(ErrorResponse {
-                        error: "INVALID_TOKEN".to_string(),
-                        message: "Token invalide".to_string(),
-                    }),
-                )
-                    .into_response()
-            }
-        }
+        return unauthorized_response(&req);
     };
     req.extensions_mut().insert(ctx);
     next.run(req).await
+}
+
+/// Lit le cookie `ferrite_session`, vérifie sa signature, et retourne le
+/// `SecurityContext` correspondant si le user existe toujours dans la conf.
+fn resolve_from_cookie(
+    state: &AppState,
+    req: &axum::extract::Request,
+) -> Option<crate::security::SecurityContext> {
+    let cookie_header = req
+        .headers()
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())?;
+    let value = parse_cookie(cookie_header, crate::session::SESSION_COOKIE)?;
+    let principal = crate::session::verify_cookie(&state.session_secret, &value).ok()?;
+    crate::session::user_to_context(&state.users, &principal)
+}
+
+fn resolve_from_bearer(
+    state: &AppState,
+    req: &axum::extract::Request,
+) -> Option<crate::security::SecurityContext> {
+    let auth = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())?;
+    let token = auth.strip_prefix("Bearer ")?;
+    state.tokens.get(token).cloned()
+}
+
+fn parse_cookie(header: &str, name: &str) -> Option<String> {
+    for part in header.split(';') {
+        let part = part.trim();
+        if let Some(rest) = part.strip_prefix(&format!("{}=", name)) {
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+/// Choix de la réponse 401 :
+/// - Pour les routes UI (`/ui/*`) : redirection 303 vers `/login?next=...`
+///   pour l'expérience navigateur classique.
+/// - Pour les routes API (`/v1/*`) : JSON 401 avec `error: MISSING_TOKEN`.
+fn unauthorized_response(req: &axum::extract::Request) -> axum::response::Response {
+    let path = req.uri().path();
+    let is_ui = path.starts_with("/ui");
+    if is_ui {
+        let next = req
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/ui");
+        let location = format!("/login?next={}", urlencode(next));
+        (StatusCode::SEE_OTHER, [("location", location.as_str())], "")
+            .into_response()
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "MISSING_TOKEN".to_string(),
+                message: "Authentification requise".to_string(),
+            }),
+        )
+            .into_response()
+    }
+}
+
+fn urlencode(s: &str) -> String {
+    // Encodage minimal : seuls ?, &, # et espaces dans le path posent problème.
+    s.chars()
+        .map(|c| match c {
+            '?' => "%3F".to_string(),
+            '&' => "%26".to_string(),
+            '#' => "%23".to_string(),
+            ' ' => "%20".to_string(),
+            _ => c.to_string(),
+        })
+        .collect()
+}
+
+// ============================================================
+// Login / Logout (Phase B)
+// ============================================================
+
+/// `GET /login?next=/ui` — formulaire HTML.
+async fn handle_login_page() -> impl IntoResponse {
+    let html = include_str!("../static/login.html");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        html,
+    )
+}
+
+#[derive(serde::Deserialize)]
+struct LoginForm {
+    email: String,
+    password: String,
+    #[serde(default)]
+    next: Option<String>,
+}
+
+/// `POST /login` — vérifie email + password, pose le cookie de session,
+/// redirige vers `next` (ou `/ui` par défaut).
+async fn handle_login_submit(
+    State(state): State<Arc<AppState>>,
+    axum::Form(form): axum::Form<LoginForm>,
+) -> axum::response::Response {
+    let user = match crate::session::authenticate(&state.users, &form.email, &form.password) {
+        Some(u) => u,
+        None => {
+            // Renvoie le formulaire avec un message d'erreur (HTML inline).
+            let html = include_str!("../static/login.html").replace(
+                "<!--ERR-->",
+                r#"<div class="err">Email ou mot de passe incorrect.</div>"#,
+            );
+            return (
+                StatusCode::UNAUTHORIZED,
+                [("content-type", "text/html; charset=utf-8")],
+                html,
+            )
+                .into_response();
+        }
+    };
+
+    let cookie_value = crate::session::issue_cookie(
+        &state.session_secret,
+        &user.principal,
+        state.session_ttl_secs,
+    );
+    let target = form
+        .next
+        .as_deref()
+        .filter(|n| n.starts_with('/') && !n.starts_with("//"))
+        .unwrap_or("/ui");
+    // Cookie HttpOnly, SameSite=Lax. `Secure` uniquement si on a un signal
+    // qu'on est derrière HTTPS — pour la démo locale on ne peut pas
+    // l'imposer (sinon le cookie n'est pas envoyé en HTTP). En prod,
+    // mettre un proxy HTTPS qui ajoute `X-Forwarded-Proto: https`.
+    let cookie = format!(
+        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
+        crate::session::SESSION_COOKIE,
+        cookie_value,
+        state.session_ttl_secs,
+    );
+
+    (
+        StatusCode::SEE_OTHER,
+        [("set-cookie", cookie.as_str()), ("location", target)],
+        "",
+    )
+        .into_response()
+}
+
+/// `POST /logout` — efface le cookie de session et redirige vers `/login`.
+async fn handle_logout() -> axum::response::Response {
+    let cookie = format!(
+        "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+        crate::session::SESSION_COOKIE
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("set-cookie", cookie.parse().unwrap());
+    headers.insert("location", "/login".parse().unwrap());
+    (StatusCode::SEE_OTHER, headers, "").into_response()
+}
+
+/// Middleware ajoutant les headers HTTP de sécurité standard sur **toutes**
+/// les réponses (UI, API, downloads).
+///
+/// Choix conservateurs adaptés à une UI server-rendered :
+/// - **CSP** sans `script-src 'unsafe-inline'` mais autorise styles inline
+///   (le HTML rendu par `ui.rs` colle les styles dans `<style>` du shell ;
+///   il n'y a aucun JS embarqué pour le moment, l'annuaire qui en utilise
+///   passe par un fichier statique servi par le même origin).
+/// - **HSTS** posé inconditionnellement (les navigateurs l'ignorent en HTTP).
+///   `max-age=31536000; includeSubDomains` (1 an).
+/// - **X-Frame-Options: DENY** : bloque l'embedding dans une iframe
+///   (anti-clickjacking).
+/// - **Referrer-Policy: strict-origin-when-cross-origin** : limite la fuite
+///   d'URL contenant `?siren=...` vers des sites tiers.
+/// - **X-Content-Type-Options: nosniff** : empêche le content-type sniffing.
+async fn security_headers_middleware(
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let mut resp = next.run(req).await;
+    let headers = resp.headers_mut();
+    use axum::http::HeaderValue;
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'self'; \
+             style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; \
+             script-src 'self'; \
+             connect-src 'self'; \
+             frame-ancestors 'none'; \
+             base-uri 'self'; \
+             form-action 'self'",
+        ),
+    );
+    headers.insert(
+        "strict-transport-security",
+        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert(
+        "referrer-policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    resp
 }
 
 /// Middleware de timeout par requête (XP Z12-013 §5.5).
@@ -1733,7 +1931,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1752,7 +1950,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1771,7 +1969,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1792,7 +1990,7 @@ mod tests {
             webhook_secret: None,
             trace_store: None,
             tokens: legacy_admin_tokens(&["valid-token-123", "valid-token-456"]),
-            dev_open: false,
+            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2281,7 +2479,7 @@ mod tests {
                 webhook_secret: None,
                 trace_store: None,
                 tokens: legacy_admin_tokens(&["my-secret-token"]),
-                dev_open: false,
+                dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
                 metrics: Metrics::default(),
                 annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2334,7 +2532,10 @@ mod tests {
 
         let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(json["error"], "INVALID_TOKEN");
+        // Phase B : token invalide ET token absent retournent désormais le
+        // même message ("authentification requise") plutôt qu'une distinction
+        // qui aidait à l'énumération.
+        assert_eq!(json["error"], "MISSING_TOKEN");
     }
 
     #[tokio::test]
@@ -2346,7 +2547,7 @@ mod tests {
             pdp_matricule: "9999".to_string(),
             flow_sender: tx,
             webhook_secret: None,
-            tokens: std::collections::HashMap::new(), dev_open: true,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             trace_store: None,
             metrics: Metrics::default(),
             annuaire_store: None,
@@ -2817,7 +3018,7 @@ mod tests {
             webhook_secret: Some("e2e-secret".to_string()),
             trace_store: None,
             tokens: legacy_admin_tokens(&["e2e-token-valid"]),
-            dev_open: false,
+            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3303,7 +3504,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3322,7 +3523,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3340,7 +3541,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true,
+            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3631,9 +3832,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ui_routes_protected_by_auth_middleware() {
-        // Les pages UI passent maintenant par auth_middleware. Avec
-        // `dev_open: false` ET un token configuré, l'accès sans header
-        // doit retourner 401.
+        // Les pages UI passent par auth_middleware. Phase B : sans cookie
+        // et sans Bearer, on REDIRIGE vers /login (303) au lieu de retourner
+        // 401 brut — meilleure UX navigateur.
         let state = test_app_state_with_auth();
         let app = build_api_router(state);
 
@@ -3642,9 +3843,19 @@ mod tests {
             let resp = app.clone().oneshot(req).await.unwrap();
             assert_eq!(
                 resp.status(),
-                StatusCode::UNAUTHORIZED,
-                "UI path {} sans Bearer doit retourner 401",
+                StatusCode::SEE_OTHER,
+                "UI path {} sans cookie doit rediriger vers /login (303)",
                 path
+            );
+            let location = resp
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            assert!(
+                location.starts_with("/login"),
+                "redirection doit pointer vers /login, got {}",
+                location
             );
         }
     }

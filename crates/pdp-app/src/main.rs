@@ -358,6 +358,20 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             }
         }
 
+        let users = http_config.users.clone().unwrap_or_default();
+        let session_secret = http_config
+            .session_secret
+            .clone()
+            .map(|s| s.into_bytes())
+            .unwrap_or_else(|| {
+                let s = pdp_app::session::random_secret();
+                tracing::warn!(
+                    "`http_server.session_secret` non défini : un secret aléatoire \
+                     a été généré (les sessions seront invalidées au redémarrage)."
+                );
+                s
+            });
+
         let app_state = std::sync::Arc::new(server::AppState {
             pdp_name: config.pdp.name.clone(),
             pdp_matricule: config.pdp.matricule.clone().unwrap_or_default(),
@@ -365,6 +379,9 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             webhook_secret: http_config.webhook_secret.clone(),
             tokens: tokens_table,
             dev_open: http_config.dev_open,
+            users,
+            session_secret,
+            session_ttl_secs: http_config.session_ttl_secs,
             trace_store,
             metrics: server::Metrics::default(),
             annuaire_store,

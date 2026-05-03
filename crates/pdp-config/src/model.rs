@@ -57,6 +57,34 @@ impl Default for Role {
     }
 }
 
+/// Compte utilisateur pour le login web (`/login`). Comme les Bearer
+/// tokens, défini dans le YAML — donc à protéger comme un secret.
+///
+/// ```yaml
+/// http_server:
+///   users:
+///     - email: "alice@techconseil.fr"
+///       password: "..."           # plaintext (v1 MVP, argon2 prévu Phase B.5)
+///       principal: "alice@techconseil"
+///       allowed_sirens: ["123456789"]
+///       role: tenant
+/// ```
+///
+/// Les `users:` partagent le même type `Role` que `tokens:` ; un user et un
+/// token peuvent porter exactement le même `SecurityContext` runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserConfig {
+    pub email: String,
+    /// Mot de passe en clair. **Phase B v1 uniquement** : à remplacer par
+    /// un hash argon2 dans une release ultérieure.
+    pub password: String,
+    pub principal: String,
+    #[serde(default)]
+    pub allowed_sirens: Vec<String>,
+    #[serde(default)]
+    pub role: Role,
+}
+
 /// Token Bearer associé à une identité et à une liste de SIRENs autorisés.
 ///
 /// ```yaml
@@ -112,6 +140,20 @@ pub struct HttpServerConfig {
     /// Activer uniquement pour la démo locale (config-ui-demo.yaml).
     #[serde(default)]
     pub dev_open: bool,
+    /// Comptes utilisateurs pour le login web (Phase B). Voir [`UserConfig`].
+    /// Vide / absent = login désactivé (Phase A bearer-only).
+    #[serde(default)]
+    pub users: Option<Vec<UserConfig>>,
+    /// Secret HMAC utilisé pour signer les cookies de session (`/login`).
+    /// **Doit faire au moins 32 octets** et rester confidentiel. Si absent,
+    /// un secret aléatoire est généré au démarrage (les sessions sont alors
+    /// invalidées à chaque redémarrage — acceptable en dev, pas en prod
+    /// avec plusieurs instances).
+    #[serde(default)]
+    pub session_secret: Option<String>,
+    /// Durée de vie d'une session en secondes (défaut : 8 heures).
+    #[serde(default = "default_session_ttl_secs")]
+    pub session_ttl_secs: u64,
     /// Chemin vers le certificat TLS (optionnel)
     #[serde(default)]
     pub tls_cert_path: Option<String>,
@@ -147,6 +189,10 @@ fn default_max_flow_size_bytes() -> usize {
 
 fn default_request_timeout_secs() -> u64 {
     30
+}
+
+fn default_session_ttl_secs() -> u64 {
+    8 * 3600
 }
 
 /// Identité de la PDP
