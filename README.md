@@ -136,6 +136,54 @@ Voir [docs/ui.md](docs/ui.md) pour l'architecture (trait `TraceBackend`,
 mock in-memory pour les tests, sémantique des filtres et des statuts du
 pipeline).
 
+### Authentification & isolation tenant
+
+Trois voies d'authentification résolues par un middleware unique
+(cf. [crates/pdp-app/src/security.rs](crates/pdp-app/src/security.rs)) :
+
+| Voie | Usage | Routes |
+|---|---|---|
+| `dev_open: true` | Démo locale, screenshots — accepte tout sans auth | UI + API |
+| Cookie `ferrite_session` | Login web `/login` → cookie HMAC signé (HttpOnly, SameSite=Lax) | UI |
+| `Authorization: Bearer <tok>` | Clients API (`pdp demo populate`, intégrations) | API |
+
+Chaque token / user porte un `principal`, une liste `allowed_sirens` et un
+rôle (`tenant` / `pdp_operator` / `pdp_admin`). L'extractor
+`AuthorizedSiren` rejette en 403 toute requête `?siren=X` hors scope du
+porteur ; les endpoints API `/v1/stats`, `/v1/flows?status=error`,
+`/v1/flows/{id}` exigent un siren et le propagent au store.
+
+**Routes publiques** : `/v1/healthcheck`, `/metrics`, `/login`, `/logout`,
+`/annuaire` (recherche annuaire reste accessible sans connexion — choix
+produit).
+
+**Outils CLI** :
+
+```bash
+# Hash argon2id pour la config (users[].password)
+pdp tools hash-password "monMotDePasse"
+# → $argon2id$v=19$m=19456,t=2,p=1$...
+
+# Secret aléatoire 32 octets pour http_server.session_secret
+pdp tools gen-session-secret
+```
+
+**Headers de sécurité** posés sur toutes les réponses : CSP strict
+(frame-ancestors none), HSTS 1 an, X-Frame-Options DENY, X-Content-Type-Options
+nosniff, Referrer-Policy strict-origin-when-cross-origin.
+
+**Logout server-side** : la signature du cookie est inscrite dans une
+revocation list in-memory ; un cookie rejoué après `/logout` est rejeté
+jusqu'à expiration naturelle.
+
+Capture d'écran de la page `/login` :
+
+<p align="center"><img src="assets/screenshots/login.png" alt="Page de connexion Ferrite" width="500"></p>
+
+Voir [docs/ui.md](docs/ui.md#authentification--isolation-tenant) pour le
+modèle d'auth complet (table de réponses 401/400/403, exemples YAML
+`tokens:` / `users:`, headers de sécurité).
+
 ## Démarrage rapide
 
 ```bash
