@@ -866,19 +866,34 @@ impl TraceStore {
         Ok(Self::parse_summaries(&body))
     }
 
-    /// Récupère un document complet par exchange_id.
+    /// Récupère un document complet par exchange_id, en garantissant que le
+    /// SIREN demandé correspond effectivement à une partie du flux (vendeur ou
+    /// acheteur). Sans ça, un client connaissant un `exchange_id` arbitraire
+    /// pourrait lire les factures de n'importe quel tenant.
     ///
-    /// Le paramètre `siren` n'est plus utilisé pour scoper l'index (un même
-    /// exchange_id est unique sur tout le cluster) : la requête se fait
-    /// systématiquement sur le wildcard `pdp-*`. C'est nécessaire pour que la
-    /// page détail d'une facture **reçue** (consultée depuis l'UI du tenant
-    /// acheteur) trouve bien le document, qui est indexé sous l'index du
-    /// vendeur. Le paramètre est conservé pour compatibilité de signature.
-    pub async fn get_exchange(&self, exchange_id: &str, _siren: Option<&str>) -> PdpResult<Option<ExchangeDocument>> {
+    /// Si `siren` est `None` (cas admin / opérateur PDP cross-tenant), la
+    /// requête se fait sur tous les index sans filtre. Les handlers HTTP
+    /// publics ne doivent **jamais** passer `None` — uniquement les CLI
+    /// admin et les tests.
+    pub async fn get_exchange(&self, exchange_id: &str, siren: Option<&str>) -> PdpResult<Option<ExchangeDocument>> {
         let index = self.index_pattern();
 
+        let mut must: Vec<serde_json::Value> = vec![
+            serde_json::json!({ "term": { "exchange_id": exchange_id } }),
+        ];
+        if let Some(s) = siren {
+            must.push(serde_json::json!({
+                "bool": {
+                    "should": [
+                        { "term": { "seller_siren": s } },
+                        { "term": { "buyer_siren": s } }
+                    ],
+                    "minimum_should_match": 1
+                }
+            }));
+        }
         let search_body = serde_json::json!({
-            "query": { "term": { "exchange_id": exchange_id } },
+            "query": { "bool": { "must": must } },
             "size": 1
         });
 

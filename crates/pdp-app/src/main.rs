@@ -329,12 +329,42 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             None
         };
 
+        // Construction de la table de tokens à partir de la config :
+        //  - `tokens:` (nouveau) → liaison principal/SIRENs/role complète
+        //  - `bearer_tokens:` (deprecated) → chargé en `PdpAdmin` pour
+        //    backward-compat avec un warning explicite.
+        let mut tokens_table = http_config
+            .tokens
+            .as_ref()
+            .map(|list| pdp_app::security::build_token_table(list))
+            .unwrap_or_default();
+        if let Some(legacy) = &http_config.bearer_tokens {
+            if !legacy.is_empty() {
+                tracing::warn!(
+                    "`http_server.bearer_tokens` est déprécié : utilise `http_server.tokens:` \
+                     avec liaison `allowed_sirens`. Les {} token(s) sont chargés en PdpAdmin pour \
+                     compat rétroactive — aucune isolation tenant !",
+                    legacy.len()
+                );
+                for tok in legacy {
+                    tokens_table
+                        .entry(tok.clone())
+                        .or_insert_with(|| pdp_app::security::SecurityContext {
+                            principal: format!("legacy:{}", &tok[..tok.len().min(6)]),
+                            allowed_sirens: Vec::new(),
+                            role: pdp_app::security::Role::PdpAdmin,
+                        });
+                }
+            }
+        }
+
         let app_state = std::sync::Arc::new(server::AppState {
             pdp_name: config.pdp.name.clone(),
             pdp_matricule: config.pdp.matricule.clone().unwrap_or_default(),
             flow_sender: flow_tx.clone(),
             webhook_secret: http_config.webhook_secret.clone(),
-            bearer_tokens: http_config.bearer_tokens.clone(),
+            tokens: tokens_table,
+            dev_open: http_config.dev_open,
             trace_store,
             metrics: server::Metrics::default(),
             annuaire_store,

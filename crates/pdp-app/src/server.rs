@@ -121,8 +121,13 @@ pub struct AppState {
     /// Store pour la traçabilité (lecture). Indirection via `dyn TraceBackend`
     /// pour permettre de tester l'UI/API avec un mock 100% mémoire.
     pub trace_store: Option<Arc<dyn pdp_trace::TraceBackend>>,
-    /// Tokens Bearer autorisés pour l'authentification API (si None ou vide, pas d'auth)
-    pub bearer_tokens: Option<Vec<String>>,
+    /// Table de lookup `token → SecurityContext`. Vide = aucun token configuré.
+    /// Si `dev_open == true` ET la table est vide, le middleware injecte un
+    /// contexte admin de complaisance (mode démo). Sinon, toute requête
+    /// vers une route protégée est refusée en 401.
+    pub tokens: std::collections::HashMap<String, crate::security::SecurityContext>,
+    /// Mode développement — voir `crate::security::SecurityContext::dev_open`.
+    pub dev_open: bool,
     /// Métriques Prometheus
     pub metrics: Metrics,
     /// Store annuaire PPF (optionnel — nécessite PostgreSQL)
@@ -276,58 +281,80 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         ))
         .with_state(state.clone());
 
-    // Endpoints publics (healthcheck, métriques Prometheus, UI)
-    let public_routes = Router::new()
-        .route("/v1/healthcheck", get(handle_healthcheck))
-        .route("/metrics", get(handle_metrics))
-        .route("/annuaire", get(handle_annuaire_page))
-        .route("/v1/annuaire/search", get(handle_annuaire_search))
-        // Interface web de suivi des factures (phase 1 — lecture seule)
-        .route("/ui/static/ferrite-icon.png", get(crate::ui::handle_logo))
-        .route("/favicon.ico", get(crate::ui::handle_favicon))
-        .route("/favicon.png", get(crate::ui::handle_favicon))
+    // Interface web — protégée par auth_middleware (avec dev_open: true en
+    // démo, l'utilisateur est implicitement admin et peut consulter n'importe
+    // quel SIREN ; en prod le middleware exige un Bearer token et
+    // l'extractor `AuthorizedSiren` rejettera tout `?siren=X` hors scope).
+    let ui_routes = Router::new()
         .route("/ui", get(crate::ui::handle_dashboard))
         .route("/ui/flows", get(crate::ui::handle_flows_list))
         .route("/ui/flows/{flow_id}", get(crate::ui::handle_flow_detail))
         .route("/ui/flows/{flow_id}/download/xml", get(crate::ui::handle_download_xml))
         .route("/ui/flows/{flow_id}/download/pdf", get(crate::ui::handle_download_pdf))
         .route("/ui/flows/{flow_id}/download/attachment", get(crate::ui::handle_download_attachment))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .with_state(state.clone());
+
+    // Endpoints **réellement** publics : healthcheck, métriques, assets.
+    // Pas d'auth ici — l'UI annuaire fait sa requête `/v1/annuaire/search`
+    // via JS, on garde donc cette route ouverte (Phase B verrouillera).
+    let public_routes = Router::new()
+        .route("/v1/healthcheck", get(handle_healthcheck))
+        .route("/metrics", get(handle_metrics))
+        .route("/annuaire", get(handle_annuaire_page))
+        .route("/v1/annuaire/search", get(handle_annuaire_search))
+        .route("/ui/static/ferrite-icon.png", get(crate::ui::handle_logo))
+        .route("/favicon.ico", get(crate::ui::handle_favicon))
+        .route("/favicon.png", get(crate::ui::handle_favicon))
         .with_state(state);
 
     Router::new()
         .merge(protected_routes)
+        .merge(ui_routes)
         .merge(public_routes)
 }
 
-/// Middleware d'authentification Bearer token pour les endpoints protégés.
+/// Middleware d'authentification Bearer token.
 ///
-/// Si aucun token n'est configuré (`bearer_tokens` absent ou vide), toutes les
-/// requêtes sont acceptées (mode développement). Sinon, le header
-/// `Authorization: Bearer <token>` est vérifié.
+/// Résolution du `SecurityContext` :
+/// - **`dev_open: true`** (config démo locale) : aucun header requis,
+///   contexte admin de complaisance.
+/// - Sinon : `Authorization: Bearer <token>` obligatoire. Le token est
+///   cherché dans `state.tokens` ; inconnu ou manquant → 401.
+///
+/// Le contexte résolu est inséré dans `Request::extensions` sous forme
+/// de `Arc<SecurityContext>` ; les handlers le récupèrent via l'extractor
+/// [`crate::security::AuthorizedSiren`] ou directement via
+/// `Extension<Arc<SecurityContext>>`.
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: middleware::Next,
 ) -> axum::response::Response {
-    // Si pas de tokens configurés, tout passe (mode développement)
-    let tokens = match &state.bearer_tokens {
-        Some(tokens) if !tokens.is_empty() => tokens,
-        _ => return next.run(req).await,
-    };
-
-    // Vérifier le header Authorization
-    let auth_header = req
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok());
-
-    match auth_header {
-        Some(header) if header.starts_with("Bearer ") => {
-            let token = &header[7..];
-            if tokens.iter().any(|t| t == token) {
-                next.run(req).await
-            } else {
-                (
+    let ctx = if state.dev_open {
+        std::sync::Arc::new(crate::security::SecurityContext::dev_open())
+    } else {
+        let auth_header = req
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok());
+        let token = match auth_header {
+            Some(h) if h.starts_with("Bearer ") => &h[7..],
+            _ => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse {
+                        error: "MISSING_TOKEN".to_string(),
+                        message: "Header Authorization Bearer requis".to_string(),
+                    }),
+                )
+                    .into_response()
+            }
+        };
+        match state.tokens.get(token) {
+            Some(c) => std::sync::Arc::new(c.clone()),
+            None => {
+                return (
                     StatusCode::UNAUTHORIZED,
                     Json(ErrorResponse {
                         error: "INVALID_TOKEN".to_string(),
@@ -337,15 +364,9 @@ async fn auth_middleware(
                     .into_response()
             }
         }
-        _ => (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "MISSING_TOKEN".to_string(),
-                message: "Header Authorization Bearer requis".to_string(),
-            }),
-        )
-            .into_response(),
-    }
+    };
+    req.extensions_mut().insert(ctx);
+    next.run(req).await
 }
 
 /// Middleware de timeout par requête (XP Z12-013 §5.5).
@@ -770,6 +791,7 @@ pub struct StatsResponse {
 /// - **ReadableView** : rendu PDF (Factur-X PDF/A-3 ou PDF visuel) avec Content-Type: application/pdf
 async fn handle_get_flow(
     State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
     Path(flow_id): Path<String>,
     Query(params): Query<GetFlowQueryParams>,
 ) -> impl IntoResponse {
@@ -802,7 +824,7 @@ async fn handle_get_flow(
 
     tracing::debug!(flow_id = %flow_id, doc_type = ?doc_type, "Consultation flux");
 
-    match trace_store.get_exchange(&flow_id, None).await {
+    match trace_store.get_exchange(&flow_id, Some(&siren)).await {
         Ok(Some(doc)) => match doc_type {
             GetFlowDocType::Metadata => {
                 let errors: Vec<FlowErrorEntry> = doc.errors.iter().map(|e| FlowErrorEntry {
@@ -935,6 +957,7 @@ async fn handle_get_flow(
 /// GET /v1/flows?status=error — Liste des flux filtrés (pour l'instant, seul status=error est supporté)
 async fn handle_list_flows(
     State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
     Query(params): Query<FlowsQueryParams>,
 ) -> impl IntoResponse {
     // Valider les paramètres AVANT de vérifier le TraceStore
@@ -973,13 +996,18 @@ async fn handle_list_flows(
         }
     };
 
-    // status=error validé ci-dessus
-    match trace_store.get_error_flows().await {
+    // status=error validé ci-dessus, siren validé par AuthorizedSiren.
+    // On utilise list_exchanges (filtré par siren) avec status=ERREUR plutôt
+    // que get_error_flows (qui ratisse pdp-* sans filtre tenant).
+    match trace_store
+        .list_exchanges(&siren, Some("ERREUR"), None, None, 0, 100)
+        .await
+    {
         Ok(flows) => {
             (StatusCode::OK, Json(serde_json::to_value(flows).unwrap_or_default())).into_response()
         }
         Err(e) => {
-            tracing::error!(error = %e, "Erreur liste flux en erreur");
+            tracing::error!(error = %e, siren = %siren, "Erreur liste flux en erreur");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -991,9 +1019,10 @@ async fn handle_list_flows(
     }
 }
 
-/// GET /v1/stats — Statistiques globales du pipeline
+/// GET /v1/stats?siren=... — Statistiques d'un tenant
 async fn handle_stats(
     State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
 ) -> impl IntoResponse {
     let trace_store = match &state.trace_store {
         Some(store) => store,
@@ -1008,7 +1037,7 @@ async fn handle_stats(
         }
     };
 
-    match trace_store.get_stats().await {
+    match trace_store.get_stats_for_siren(&siren).await {
         Ok(stats) => {
             (
                 StatusCode::OK,
@@ -1677,6 +1706,24 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt; // for `oneshot`
 
+    /// Helper: build une table de tokens en `PdpAdmin` (compat ancien comportement).
+    /// Utilisé par les tests historiques d'auth qui ne testent QUE la liste blanche
+    /// de tokens, pas l'isolation tenant.
+    fn legacy_admin_tokens(toks: &[&str]) -> std::collections::HashMap<String, crate::security::SecurityContext> {
+        toks.iter()
+            .map(|t| {
+                (
+                    t.to_string(),
+                    crate::security::SecurityContext {
+                        principal: format!("test:{}", t),
+                        allowed_sirens: Vec::new(),
+                        role: crate::security::Role::PdpAdmin,
+                    },
+                )
+            })
+            .collect()
+    }
+
     /// Helper: create an AppState for tests (with webhook secret, no bearer auth)
     fn test_app_state() -> Arc<AppState> {
         let (tx, _rx) = tokio::sync::mpsc::channel(10);
@@ -1686,7 +1733,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            bearer_tokens: None,
+            tokens: std::collections::HashMap::new(), dev_open: true,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1705,7 +1752,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            bearer_tokens: None,
+            tokens: std::collections::HashMap::new(), dev_open: true,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1724,7 +1771,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            bearer_tokens: None,
+            tokens: std::collections::HashMap::new(), dev_open: true,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1744,7 +1791,8 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            bearer_tokens: Some(vec!["valid-token-123".to_string(), "valid-token-456".to_string()]),
+            tokens: legacy_admin_tokens(&["valid-token-123", "valid-token-456"]),
+            dev_open: false,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -1945,7 +1993,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -1977,7 +2025,7 @@ mod tests {
         let (content_type, body) = build_multipart_body_file_only(file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2001,7 +2049,7 @@ mod tests {
         let (content_type, body) = build_multipart_body_flow_info_only(&flow_info);
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2027,7 +2075,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2055,7 +2103,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2208,7 +2256,7 @@ mod tests {
 
         // Requête SANS token
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2232,7 +2280,8 @@ mod tests {
                 flow_sender: tx,
                 webhook_secret: None,
                 trace_store: None,
-                bearer_tokens: Some(vec!["my-secret-token".to_string()]),
+                tokens: legacy_admin_tokens(&["my-secret-token"]),
+                dev_open: false,
                 metrics: Metrics::default(),
                 annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2249,7 +2298,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .header("Authorization", "Bearer my-secret-token")
@@ -2273,7 +2322,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .header("Authorization", "Bearer wrong-token")
@@ -2297,7 +2346,7 @@ mod tests {
             pdp_matricule: "9999".to_string(),
             flow_sender: tx,
             webhook_secret: None,
-            bearer_tokens: None,
+            tokens: std::collections::HashMap::new(), dev_open: true,
             trace_store: None,
             metrics: Metrics::default(),
             annuaire_store: None,
@@ -2313,7 +2362,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2334,7 +2383,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows/some-flow-id")
+            .uri("/v1/flows/some-flow-id?siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2415,7 +2464,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows/some-flow-id?docType=Garbage")
+            .uri("/v1/flows/some-flow-id?docType=Garbage&siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2439,7 +2488,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows/some-flow-id?docType=Metadata")
+            .uri("/v1/flows/some-flow-id?docType=Metadata&siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2456,7 +2505,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows/some-flow-id?docType=Original")
+            .uri("/v1/flows/some-flow-id?docType=Original&siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2472,7 +2521,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows/some-flow-id")
+            .uri("/v1/flows/some-flow-id?siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2488,7 +2537,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/stats")
+            .uri("/v1/stats?siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2503,7 +2552,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/stats")
+            .uri("/v1/stats?siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2518,7 +2567,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows?status=error")
+            .uri("/v1/flows?status=error&siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2534,7 +2583,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2553,7 +2602,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows?status=unknown")
+            .uri("/v1/flows?status=unknown&siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2572,7 +2621,7 @@ mod tests {
         let app = build_api_router(state);
 
         let req = Request::builder()
-            .uri("/v1/flows?status=error")
+            .uri("/v1/flows?status=error&siren=123456789")
             .method("GET")
             .body(Body::empty())
             .unwrap();
@@ -2639,7 +2688,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, file_content, "facture.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2679,7 +2728,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, &cii_xml, "facture_cii_001.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2714,7 +2763,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, &ubl_xml, "facture_ubl_001.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2745,7 +2794,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, &cii_xml, "facture_cii_001.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -2767,7 +2816,8 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("e2e-secret".to_string()),
             trace_store: None,
-            bearer_tokens: Some(vec!["e2e-token-valid".to_string()]),
+            tokens: legacy_admin_tokens(&["e2e-token-valid"]),
+            dev_open: false,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2786,7 +2836,7 @@ mod tests {
 
         // Sans token → 401
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body.clone()))
@@ -2796,7 +2846,7 @@ mod tests {
 
         // Mauvais token → 401
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .header("Authorization", "Bearer wrong-token")
@@ -2807,7 +2857,7 @@ mod tests {
 
         // Bon token → 202
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .header("Authorization", "Bearer e2e-token-valid")
@@ -2858,7 +2908,7 @@ mod tests {
             let (content_type, body) = build_multipart_body(&flow_info, &content, filename);
 
             let req = Request::builder()
-                .uri("/v1/flows")
+                .uri("/v1/flows?siren=123456789")
                 .method("POST")
                 .header("Content-Type", &content_type)
                 .body(Body::from(body))
@@ -2892,7 +2942,7 @@ mod tests {
             let (ct, body) = build_multipart_body(&flow_info, b"<Invoice/>", &format!("f{}.xml", i));
 
             let req = Request::builder()
-                .uri("/v1/flows").method("POST")
+                .uri("/v1/flows?siren=123456789").method("POST")
                 .header("Content-Type", &ct)
                 .body(Body::from(body)).unwrap();
 
@@ -3253,7 +3303,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            bearer_tokens: None,
+            tokens: std::collections::HashMap::new(), dev_open: true,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3272,7 +3322,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            bearer_tokens: None,
+            tokens: std::collections::HashMap::new(), dev_open: true,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3290,7 +3340,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            bearer_tokens: None,
+            tokens: std::collections::HashMap::new(), dev_open: true,
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3311,7 +3361,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, &big_content, "big.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -3336,7 +3386,7 @@ mod tests {
         let (content_type, body) = build_multipart_body(&flow_info, small_content, "tiny.xml");
 
         let req = Request::builder()
-            .uri("/v1/flows")
+            .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
             .body(Body::from(body))
@@ -3580,9 +3630,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ui_routes_are_public() {
-        // Les pages UI ne doivent pas demander de Bearer token
-        let state = test_app_state_with_auth(); // bearer_tokens configurés
+    async fn test_ui_routes_protected_by_auth_middleware() {
+        // Les pages UI passent maintenant par auth_middleware. Avec
+        // `dev_open: false` ET un token configuré, l'accès sans header
+        // doit retourner 401.
+        let state = test_app_state_with_auth();
         let app = build_api_router(state);
 
         for path in &["/ui", "/ui/flows", "/ui/flows/abc?siren=123456789"] {
@@ -3590,8 +3642,27 @@ mod tests {
             let resp = app.clone().oneshot(req).await.unwrap();
             assert_eq!(
                 resp.status(),
+                StatusCode::UNAUTHORIZED,
+                "UI path {} sans Bearer doit retourner 401",
+                path
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ui_routes_open_with_dev_open() {
+        // En `dev_open: true` (config démo), les routes UI sont accessibles
+        // sans token (le middleware injecte un contexte admin).
+        let state = test_app_state(); // dev_open: true par défaut
+        let app = build_api_router(state);
+
+        for path in &["/ui", "/ui/flows"] {
+            let req = Request::builder().uri(*path).body(Body::empty()).unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                resp.status(),
                 StatusCode::OK,
-                "UI path {} doit être accessible sans Bearer token",
+                "UI path {} en dev_open doit passer sans Bearer",
                 path
             );
         }

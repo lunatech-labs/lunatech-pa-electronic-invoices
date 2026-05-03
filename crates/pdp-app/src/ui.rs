@@ -352,10 +352,16 @@ pub struct DashboardQuery {
 
 pub async fn handle_dashboard(
     State(state): State<Arc<AppState>>,
+    axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
     Query(q): Query<DashboardQuery>,
-) -> impl IntoResponse {
-    // `Some("")` (formulaire vide) → traité comme `None`.
-    let siren = non_empty(&q.siren);
+) -> axum::response::Response {
+    // 403 si le SIREN demandé n'est pas dans le scope du porteur. None si
+    // siren absent (le handler affiche un picker).
+    let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    let siren = owned_siren.as_deref();
 
     let body = match siren {
         None => format!("{}{}", no_siren_banner(), siren_picker_form()),
@@ -421,7 +427,7 @@ pub async fn handle_dashboard(
         }
     };
 
-    html_response(&page_shell("Dashboard", "dashboard", siren, &body))
+    html_response(&page_shell("Dashboard", "dashboard", siren, &body)).into_response()
 }
 
 fn siren_picker_form() -> String {
@@ -469,12 +475,18 @@ fn clamp_page_size(raw: Option<usize>) -> usize {
 
 pub async fn handle_flows_list(
     State(state): State<Arc<AppState>>,
+    axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
     Query(q): Query<FlowsListQuery>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    // 403 si le SIREN demandé n'est pas autorisé. None (siren absent) = picker.
+    let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    let siren = owned_siren.as_deref();
     // Le formulaire HTML soumet les champs vides comme `?status=&from=&to=...`,
     // qui se désérialisent en `Some("")` (et non `None`). On les normalise ici
     // sinon ES voit `term: { "status": "" }` et ne renvoie rien.
-    let siren = non_empty(&q.siren);
     let status = non_empty(&q.status);
     let from = non_empty(&q.from);
     let to = non_empty(&q.to);
@@ -692,7 +704,7 @@ pub async fn handle_flows_list(
         }
     };
 
-    html_response(&page_shell("Factures", "flows", siren, &body))
+    html_response(&page_shell("Factures", "flows", siren, &body)).into_response()
 }
 
 fn build_pagination(
@@ -977,10 +989,15 @@ pub struct FlowDetailQuery {
 
 pub async fn handle_flow_detail(
     State(state): State<Arc<AppState>>,
+    axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
     Path(flow_id): Path<String>,
     Query(q): Query<FlowDetailQuery>,
-) -> impl IntoResponse {
-    let siren = non_empty(&q.siren);
+) -> axum::response::Response {
+    let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    let siren = owned_siren.as_deref();
     let body = match (siren, &state.trace_store) {
         (None, _) => format!("{}{}", no_siren_banner(), siren_picker_form()),
         (_, None) => "TraceStore non configuré (Elasticsearch)".to_string(),
@@ -1004,7 +1021,7 @@ pub async fn handle_flow_detail(
             }
         }
     };
-    html_response(&page_shell("Détail flux", "flows", siren, &body))
+    html_response(&page_shell("Détail flux", "flows", siren, &body)).into_response()
 }
 
 fn render_flow_detail(
@@ -1166,13 +1183,10 @@ async fn lookup_doc(
 /// Télécharge le `raw_xml` brut (UBL/CII).
 pub async fn handle_download_xml(
     State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
     Path(flow_id): Path<String>,
-    Query(q): Query<FlowDetailQuery>,
 ) -> impl IntoResponse {
-    let siren = match non_empty(&q.siren) {
-        Some(s) => s,
-        None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
-    };
+    let siren = siren.as_str();
     let doc = match lookup_doc(&state, siren, &flow_id).await {
         Some(d) => d,
         None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
@@ -1194,13 +1208,10 @@ pub async fn handle_download_xml(
 /// Télécharge le PDF Factur-X (décodé du `raw_pdf_base64`).
 pub async fn handle_download_pdf(
     State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
     Path(flow_id): Path<String>,
-    Query(q): Query<FlowDetailQuery>,
 ) -> impl IntoResponse {
-    let siren = match non_empty(&q.siren) {
-        Some(s) => s,
-        None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
-    };
+    let siren = siren.as_str();
     let doc = match lookup_doc(&state, siren, &flow_id).await {
         Some(d) => d,
         None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
@@ -1234,13 +1245,11 @@ pub struct AttachmentDownloadQuery {
 /// Télécharge la N-ième pièce jointe (idx 0-indexé) extraite à la volée.
 pub async fn handle_download_attachment(
     State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
     Path(flow_id): Path<String>,
     Query(q): Query<AttachmentDownloadQuery>,
 ) -> impl IntoResponse {
-    let siren = match non_empty(&q.siren) {
-        Some(s) => s,
-        None => return (StatusCode::BAD_REQUEST, "siren query param required").into_response(),
-    };
+    let siren = siren.as_str();
     let doc = match lookup_doc(&state, siren, &flow_id).await {
         Some(d) => d,
         None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
