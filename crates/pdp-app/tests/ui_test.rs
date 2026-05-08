@@ -157,11 +157,19 @@ impl TraceBackend for InMemoryTraceBackend {
         to_date: Option<&str>,
         page: usize,
         page_size: usize,
+        direction: Option<&str>,
     ) -> PdpResult<Vec<ExchangeSummary>> {
+        let dir_keep = |d: &&ExchangeDocument| -> bool {
+            match direction {
+                Some("emises") => d.seller_siren.as_deref() == Some(siren),
+                Some("recues") => d.buyer_siren.as_deref() == Some(siren),
+                _ => Self::matches_tenant(d, siren),
+            }
+        };
         let mut hits: Vec<&ExchangeDocument> = self
             .docs
             .iter()
-            .filter(|d| Self::matches_tenant(d, siren))
+            .filter(dir_keep)
             .filter(|d| status.map(|s| Self::matches_status(d, s)).unwrap_or(true))
             .filter(|d| match (from_date, d.issue_date.as_deref()) {
                 (Some(f), Some(date)) => date >= f,
@@ -193,12 +201,20 @@ impl TraceBackend for InMemoryTraceBackend {
         status: Option<&str>,
         from_date: Option<&str>,
         to_date: Option<&str>,
+        direction: Option<&str>,
     ) -> PdpResult<i64> {
+        let dir_keep = |d: &&ExchangeDocument| -> bool {
+            match direction {
+                Some("emises") => d.seller_siren.as_deref() == Some(siren),
+                Some("recues") => d.buyer_siren.as_deref() == Some(siren),
+                _ => Self::matches_tenant(d, siren),
+            }
+        };
         // Réutilise la même logique de filtrage que list_exchanges (sans pagination).
         let count = self
             .docs
             .iter()
-            .filter(|d| Self::matches_tenant(d, siren))
+            .filter(dir_keep)
             .filter(|d| status.map(|s| Self::matches_status(d, s)).unwrap_or(true))
             .filter(|d| match (from_date, d.issue_date.as_deref()) {
                 (Some(f), Some(date)) => date >= f,
@@ -435,7 +451,7 @@ async fn test_dashboard_kpi_with_data() {
 async fn test_flows_list_default_shows_all_for_tenant() {
     let state = make_state();
     let (status, body) =
-        get_html(state, "/ui/flows?siren=123456789").await;
+        get_html(state, "/ui/emises?siren=123456789").await;
     assert_eq!(status, StatusCode::OK);
 
     // 6 docs du tenant doivent apparaître
@@ -453,7 +469,7 @@ async fn test_flows_list_default_shows_all_for_tenant() {
 async fn test_filter_status_ok_excludes_errors_and_pending() {
     let state = make_state();
     let (_status, body) =
-        get_html(state, "/ui/flows?siren=123456789&status=OK").await;
+        get_html(state, "/ui/emises?siren=123456789&status=OK").await;
 
     // OK = error_count=0 ET status terminal OK
     for inv in &["INV-001", "INV-002", "INV-003", "INV-PJ"] {
@@ -471,7 +487,7 @@ async fn test_filter_status_ok_excludes_errors_and_pending() {
 async fn test_filter_status_erreur_returns_only_errors() {
     let state = make_state();
     let (_status, body) =
-        get_html(state, "/ui/flows?siren=123456789&status=ERREUR").await;
+        get_html(state, "/ui/emises?siren=123456789&status=ERREUR").await;
 
     assert!(body.contains("INV-ERR"), "ERREUR doit inclure INV-ERR");
     for inv in &["INV-001", "INV-002", "INV-003", "INV-PJ", "INV-PEND"] {
@@ -486,7 +502,7 @@ async fn test_filter_status_erreur_returns_only_errors() {
 async fn test_filter_status_en_attente_returns_only_pending() {
     let state = make_state();
     let (_status, body) =
-        get_html(state, "/ui/flows?siren=123456789&status=EN_ATTENTE").await;
+        get_html(state, "/ui/emises?siren=123456789&status=EN_ATTENTE").await;
 
     assert!(body.contains("INV-PEND"), "EN_ATTENTE doit inclure INV-PEND");
     for inv in &["INV-001", "INV-002", "INV-003", "INV-PJ", "INV-ERR"] {
@@ -503,7 +519,7 @@ async fn test_filter_date_range() {
     // Plage couvrant uniquement INV-002 (15/04) et INV-ERR (20/04) et INV-PEND (25/04)
     let (_status, body) = get_html(
         state,
-        "/ui/flows?siren=123456789&from=2026-04-15&to=2026-04-25",
+        "/ui/emises?siren=123456789&from=2026-04-15&to=2026-04-25",
     )
     .await;
 
@@ -537,7 +553,7 @@ async fn test_dedup_invoice_number_default_and_show_duplicates() {
 
     // Par défaut : un seul "INV-001" — comptage du nombre de liens vers ce numéro
     let (_status, body) =
-        get_html(state.clone(), "/ui/flows?siren=123456789").await;
+        get_html(state.clone(), "/ui/emises?siren=123456789").await;
     let count = body.matches("INV-001<").count() + body.matches("INV-001 ").count() + body.matches(">INV-001<").count();
     assert!(
         count <= 2,
@@ -547,7 +563,7 @@ async fn test_dedup_invoice_number_default_and_show_duplicates() {
     // Avec ?show_duplicates=true : les 2 exchanges doivent apparaître
     let (_status, body_dup) = get_html(
         state,
-        "/ui/flows?siren=123456789&show_duplicates=true",
+        "/ui/emises?siren=123456789&show_duplicates=true",
     )
     .await;
     // Les exchange_id distincts doivent tous deux apparaître dans les liens
@@ -589,23 +605,37 @@ async fn test_flow_detail_attachments_section() {
 }
 
 #[tokio::test]
-async fn test_flows_list_includes_received_invoices() {
-    // Pour le tenant 123456789, les factures dont il est *acheteur* (REC-PLO-001,
-    // REC-CE-014) doivent apparaître dans sa liste — même si elles sont
-    // indexées sous l'index du fournisseur en réalité.
+async fn test_recues_screen_shows_received_invoices() {
+    // L'écran `/ui/recues` doit lister les factures dont le tenant est
+    // l'acheteur (REC-PLO-001, REC-CE-014). Les émises (INV-*) ne doivent
+    // PAS apparaître ici — elles ont leur propre écran.
     let state = make_state();
-    let (_status, body) = get_html(state, "/ui/flows?siren=123456789").await;
+    let (_status, body) = get_html(state, "/ui/recues?siren=123456789").await;
 
     for inv in &["REC-PLO-001", "REC-CE-014"] {
         assert!(
             body.contains(inv),
-            "{inv} (facture reçue) doit apparaître dans la liste du tenant ; \
+            "{inv} (reçue) doit apparaître dans /ui/recues ; \
              body court=\n{}",
             &body[..400.min(body.len())]
         );
     }
-    // Les émises restent visibles
+    assert!(
+        !body.contains("INV-001"),
+        "les émises ne doivent pas apparaître dans /ui/recues"
+    );
+}
+
+#[tokio::test]
+async fn test_emises_screen_shows_only_sent_invoices() {
+    // Symétrique : /ui/emises montre les émises, pas les reçues.
+    let state = make_state();
+    let (_status, body) = get_html(state, "/ui/emises?siren=123456789").await;
     assert!(body.contains("INV-001"));
+    assert!(
+        !body.contains("REC-PLO-001"),
+        "les reçues ne doivent pas apparaître dans /ui/emises"
+    );
 }
 
 #[tokio::test]
@@ -650,38 +680,34 @@ async fn test_dashboard_kpis_match_filter_results() {
     let err = extract("error", &dashboard);
     let pending = extract("warning", &dashboard);
 
-    // Liste avec filtre OK
-    let (_, ok_html) =
-        get_html(state.clone(), "/ui/flows?siren=123456789&status=OK").await;
-    let ok_count = ["INV-001", "INV-002", "INV-003", "INV-PJ", "REC-PLO-001", "REC-CE-014"]
-        .iter()
-        .filter(|inv| ok_html.contains(*inv))
-        .count();
+    // Le KPI Dashboard agrège les deux directions ; pour le valider on
+    // somme le compte de chaque écran (émises + reçues).
+    let count_invoices = |body: &str, list: &[&str]| -> usize {
+        list.iter().filter(|inv| body.contains(*inv)).count()
+    };
+
+    let (_, em_ok) =
+        get_html(state.clone(), "/ui/emises?siren=123456789&status=OK").await;
+    let (_, re_ok) =
+        get_html(state.clone(), "/ui/recues?siren=123456789&status=OK").await;
+    let ok_total = count_invoices(&em_ok, &["INV-001", "INV-002", "INV-003", "INV-PJ"])
+        + count_invoices(&re_ok, &["REC-PLO-001", "REC-CE-014"]);
     assert_eq!(
-        dist, ok_count,
-        "KPI Distribués ({dist}) doit correspondre au nb de factures listées avec filtre OK ({ok_count})"
+        dist, ok_total,
+        "KPI Distribués ({dist}) ≠ émises OK ({}) + reçues OK ({}) = {ok_total}",
+        count_invoices(&em_ok, &["INV-001", "INV-002", "INV-003", "INV-PJ"]),
+        count_invoices(&re_ok, &["REC-PLO-001", "REC-CE-014"]),
     );
 
-    // Liste avec filtre ERREUR
-    let (_, err_html) =
-        get_html(state.clone(), "/ui/flows?siren=123456789&status=ERREUR").await;
-    let err_count = ["INV-ERR"]
-        .iter()
-        .filter(|inv| err_html.contains(*inv))
-        .count();
-    assert_eq!(err, err_count, "KPI Erreurs ({err}) ≠ liste ?status=ERREUR ({err_count})");
+    let (_, em_err) =
+        get_html(state.clone(), "/ui/emises?siren=123456789&status=ERREUR").await;
+    let err_total = count_invoices(&em_err, &["INV-ERR"]);
+    assert_eq!(err, err_total);
 
-    // Liste avec filtre EN_ATTENTE
-    let (_, pending_html) =
-        get_html(state, "/ui/flows?siren=123456789&status=EN_ATTENTE").await;
-    let pending_count = ["INV-PEND"]
-        .iter()
-        .filter(|inv| pending_html.contains(*inv))
-        .count();
-    assert_eq!(
-        pending, pending_count,
-        "KPI En attente ({pending}) ≠ liste ?status=EN_ATTENTE ({pending_count})"
-    );
+    let (_, em_pend) =
+        get_html(state, "/ui/emises?siren=123456789&status=EN_ATTENTE").await;
+    let pend_total = count_invoices(&em_pend, &["INV-PEND"]);
+    assert_eq!(pending, pend_total);
 }
 
 #[tokio::test]
@@ -711,7 +737,7 @@ async fn test_page_size_selector_limits_results_and_paginates() {
     // page_size=25, page=0 → 25 invoices visibles
     let (_, p0) = get_html(
         state.clone(),
-        "/ui/flows?siren=123456789&page_size=25&page=0",
+        "/ui/emises?siren=123456789&page_size=25&page=0",
     )
     .await;
     assert_eq!(count_invoices(&p0), 25, "page 0 / size 25 → 25 lignes");
@@ -719,7 +745,7 @@ async fn test_page_size_selector_limits_results_and_paginates() {
     // page_size=25, page=1 → reste = 5
     let (_, p1) = get_html(
         state.clone(),
-        "/ui/flows?siren=123456789&page_size=25&page=1",
+        "/ui/emises?siren=123456789&page_size=25&page=1",
     )
     .await;
     assert_eq!(count_invoices(&p1), 5, "page 1 / size 25 → 5 lignes");
@@ -758,7 +784,7 @@ async fn test_pagination_shows_total_count_and_page_count() {
     // Page 0 : "1–25 sur 30 ... page 1/2"
     let (_, p0) = get_html(
         state.clone(),
-        "/ui/flows?siren=123456789&page_size=25&page=0",
+        "/ui/emises?siren=123456789&page_size=25&page=0",
     )
     .await;
     assert!(p0.contains("1–25"), "doit afficher la plage 1–25 ; body={p0}");
@@ -768,7 +794,7 @@ async fn test_pagination_shows_total_count_and_page_count() {
     // Page 1 : "26–30 sur 30 ... page 2/2", pas de Suivant
     let (_, p1) = get_html(
         state.clone(),
-        "/ui/flows?siren=123456789&page_size=25&page=1",
+        "/ui/emises?siren=123456789&page_size=25&page=1",
     )
     .await;
     assert!(p1.contains("26–30"), "plage 26–30 ; got body");
@@ -787,7 +813,7 @@ async fn test_pagination_total_respects_filters() {
     // factures FILTRÉES, pas le nombre total du tenant.
     let state = make_state();
     let (_, body) =
-        get_html(state, "/ui/flows?siren=123456789&status=ERREUR").await;
+        get_html(state, "/ui/emises?siren=123456789&status=ERREUR").await;
     // Le seed contient 1 erreur (INV-ERR) sous le tenant 123456789
     assert!(
         body.contains("sur <strong>1</strong>"),
@@ -814,7 +840,7 @@ async fn test_page_size_invalid_falls_back_to_default() {
     }
     let state = build_state(Arc::new(InMemoryTraceBackend::new(docs)));
     let (_, body) =
-        get_html(state, "/ui/flows?siren=123456789&page_size=10000").await;
+        get_html(state, "/ui/emises?siren=123456789&page_size=10000").await;
     let count = (0..60)
         .filter(|i| body.contains(&format!("INV-FB-{i:03}")))
         .count();
@@ -904,7 +930,7 @@ async fn test_status_with_errors_shows_erreur_not_raw_status() {
     let state = build_state(Arc::new(InMemoryTraceBackend::new(docs)));
 
     // Liste : la ligne INV-002 doit avoir le badge ERREUR (rouge)
-    let (_, list) = get_html(state.clone(), "/ui/flows?siren=123456789").await;
+    let (_, list) = get_html(state.clone(), "/ui/emises?siren=123456789").await;
     // Trouve le bloc HTML autour de INV-002 (raisonnablement local)
     let pos = list.find("INV-002").expect("INV-002 dans la liste");
     let window = &list[pos.saturating_sub(400)..(pos + 200).min(list.len())];
@@ -934,13 +960,13 @@ async fn test_filter_direction_emises_recues() {
     let state = make_state();
 
     let (_st, body_em) =
-        get_html(state.clone(), "/ui/flows?siren=123456789&direction=emises").await;
+        get_html(state.clone(), "/ui/emises?siren=123456789").await;
     assert!(body_em.contains("INV-001"), "émise");
     assert!(!body_em.contains("REC-PLO-001"), "reçue ne doit pas apparaître");
     assert!(!body_em.contains("REC-CE-014"));
 
     let (_st, body_rc) =
-        get_html(state, "/ui/flows?siren=123456789&direction=recues").await;
+        get_html(state, "/ui/recues?siren=123456789").await;
     assert!(body_rc.contains("REC-PLO-001"));
     assert!(body_rc.contains("REC-CE-014"));
     assert!(!body_rc.contains("INV-001"), "émise ne doit pas apparaître");
@@ -948,22 +974,21 @@ async fn test_filter_direction_emises_recues() {
 
 #[tokio::test]
 async fn test_filter_empty_strings_treated_as_no_filter() {
-    // Le formulaire HTML soumet `?siren=X&direction=&status=&from=&to=`
-    // (champs vides → `Some("")`). Cela ne doit PAS retourner une liste vide :
-    // on doit voir tous les flux du tenant comme si aucun filtre n'était posé.
+    // Le formulaire HTML soumet `?siren=X&status=&from=&to=` (champs vides
+    // → `Some("")`). Cela ne doit PAS retourner une liste vide : on doit
+    // voir toutes les factures de la phase comme si aucun filtre n'était
+    // posé.
     let state = make_state();
     let (status, body) = get_html(
         state,
-        "/ui/flows?siren=123456789&direction=&status=&from=&to=",
+        "/ui/emises?siren=123456789&status=&from=&to=",
     )
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    // Toutes les factures du tenant doivent apparaître (idem default sans filtres)
-    for inv in &[
-        "INV-001", "INV-002", "INV-003", "INV-ERR", "INV-PEND", "INV-PJ",
-        "REC-PLO-001", "REC-CE-014",
-    ] {
+    // Toutes les factures émises du tenant doivent apparaître (les reçues
+    // sont sur l'autre écran).
+    for inv in &["INV-001", "INV-002", "INV-003", "INV-ERR", "INV-PEND", "INV-PJ"] {
         assert!(
             body.contains(inv),
             "{inv} doit apparaître malgré les params vides ; \
@@ -980,7 +1005,7 @@ async fn test_filter_empty_status_then_real_status_works() {
     let state = make_state();
     let (_status, body) = get_html(
         state,
-        "/ui/flows?siren=123456789&direction=&status=ERREUR&from=&to=",
+        "/ui/emises?siren=123456789&direction=&status=ERREUR&from=&to=",
     )
     .await;
     assert!(body.contains("INV-ERR"), "ERREUR malgré direction= et from/to vides");

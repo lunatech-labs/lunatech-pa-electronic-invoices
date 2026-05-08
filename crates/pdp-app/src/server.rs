@@ -297,7 +297,22 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
     // l'extractor `AuthorizedSiren` rejettera tout `?siren=X` hors scope).
     let ui_routes = Router::new()
         .route("/ui", get(crate::ui::handle_dashboard))
-        .route("/ui/flows", get(crate::ui::handle_flows_list))
+        .route("/ui/emises", get(crate::ui::handle_flows_emises))
+        .route("/ui/recues", get(crate::ui::handle_flows_recues))
+        // Backward-compat : `/ui/flows` redirige vers `/ui/emises` (les
+        // captures README, bookmarks utilisateurs et la doc gardent leur
+        // sens). On ne préserve pas la query string — la nouvelle nav
+        // pointera vers la bonne page.
+        .route(
+            "/ui/flows",
+            get(|axum::extract::RawQuery(q): axum::extract::RawQuery| async move {
+                let target = match q {
+                    Some(q) if !q.is_empty() => format!("/ui/emises?{q}"),
+                    _ => "/ui/emises".to_string(),
+                };
+                axum::response::Redirect::to(&target)
+            }),
+        )
         .route("/ui/flows/{flow_id}", get(crate::ui::handle_flow_detail))
         .route("/ui/flows/{flow_id}/download/xml", get(crate::ui::handle_download_xml))
         .route("/ui/flows/{flow_id}/download/pdf", get(crate::ui::handle_download_pdf))
@@ -1235,7 +1250,7 @@ async fn handle_list_flows(
     // On utilise list_exchanges (filtré par siren) avec status=ERREUR plutôt
     // que get_error_flows (qui ratisse pdp-* sans filtre tenant).
     match trace_store
-        .list_exchanges(&siren, Some("ERREUR"), None, None, 0, 100)
+        .list_exchanges(&siren, Some("ERREUR"), None, None, 0, 100, None)
         .await
     {
         Ok(flows) => {
@@ -3776,12 +3791,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ui_flows_list_no_siren() {
+    async fn test_ui_flows_legacy_redirects_to_emises() {
+        // L'ancienne route `/ui/flows` est conservée en redirect vers la
+        // nouvelle (`/ui/emises`) pour préserver bookmarks et liens.
         let state = test_app_state();
         let app = build_api_router(state);
 
         let req = Request::builder()
             .uri("/ui/flows")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = resp.headers().get("location").unwrap().to_str().unwrap();
+        assert_eq!(loc, "/ui/emises");
+    }
+
+    #[tokio::test]
+    async fn test_ui_emises_no_siren_shows_picker() {
+        let state = test_app_state();
+        let app = build_api_router(state);
+
+        let req = Request::builder()
+            .uri("/ui/emises")
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3822,7 +3854,8 @@ mod tests {
         assert!(body.starts_with("<!DOCTYPE html>"));
         assert!(body.contains("<title>Dashboard — Ferrite</title>"));
         assert!(body.contains(r#"<a href="/ui""#));
-        assert!(body.contains(r#"<a href="/ui/flows""#));
+        assert!(body.contains(r#"<a href="/ui/emises""#));
+        assert!(body.contains(r#"<a href="/ui/recues""#));
         assert!(body.contains(r#"<a href="/annuaire""#));
         assert!(body.ends_with("</html>"));
     }
@@ -3904,7 +3937,7 @@ mod tests {
         let state = test_app_state(); // dev_open: true par défaut
         let app = build_api_router(state);
 
-        for path in &["/ui", "/ui/flows"] {
+        for path in &["/ui", "/ui/emises", "/ui/recues"] {
             let req = Request::builder().uri(*path).body(Body::empty()).unwrap();
             let resp = app.clone().oneshot(req).await.unwrap();
             assert_eq!(

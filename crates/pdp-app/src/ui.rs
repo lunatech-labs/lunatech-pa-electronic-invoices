@@ -279,7 +279,8 @@ fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> Str
         <h1>Suivi des factures</h1>
         <nav>
             {dashboard_link}
-            {flows_link}
+            {emises_link}
+            {recues_link}
             <a href="/annuaire">Annuaire</a>
         </nav>
     </header>
@@ -289,7 +290,8 @@ fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> Str
         title = title,
         css = CSS,
         dashboard_link = nav_link("", "Dashboard", "dashboard"),
-        flows_link = nav_link("/flows", "Factures", "flows"),
+        emises_link = nav_link("/emises", "Émises", "emises"),
+        recues_link = nav_link("/recues", "Reçues", "recues"),
         body = body,
     )
 }
@@ -411,8 +413,10 @@ pub async fn handle_dashboard(
 </div>
 <div class="card">
     <h2>Actions</h2>
-    <p><a href="/ui/flows?siren={siren}">→ Voir toutes les factures</a></p>
-    <p><a href="/ui/flows?siren={siren}&status=ERREUR">→ Voir uniquement les erreurs</a></p>
+    <p><a href="/ui/emises?siren={siren}">→ Suivi des factures émises</a></p>
+    <p><a href="/ui/recues?siren={siren}">→ Suivi des factures reçues</a></p>
+    <p><a href="/ui/emises?siren={siren}&status=ERREUR">→ Émises en erreur</a></p>
+    <p><a href="/ui/recues?siren={siren}&status=ERREUR">→ Reçues en erreur</a></p>
     <p><a href="/v1/healthcheck">→ Healthcheck API</a></p>
     <p><a href="/metrics">→ Métriques Prometheus</a></p>
 </div>
@@ -443,8 +447,16 @@ fn siren_picker_form() -> String {
 }
 
 // ============================================================
-// GET /ui/flows — Liste paginée
+// GET /ui/emises | /ui/recues — Listes paginées
 // ============================================================
+//
+// Deux écrans **distincts** dans la nav :
+//  - `/ui/emises`  : factures dont le tenant est **vendeur** (sortantes)
+//  - `/ui/recues`  : factures dont il est **acheteur** (entrantes)
+//
+// Les deux partagent le même handler (cf. `render_flows_list`) qui prend
+// la direction comme paramètre figé (pas via la query string). Le détail
+// `/ui/flows/{flow_id}` reste partagé.
 
 #[derive(Deserialize)]
 pub struct FlowsListQuery {
@@ -456,11 +468,53 @@ pub struct FlowsListQuery {
     /// Nombre de factures par page (défaut 50, max 500). Filtré aux valeurs
     /// du sélecteur côté UI : 25, 50, 100, 200.
     pub page_size: Option<usize>,
-    /// `emises` (le tenant est vendeur) / `recues` (le tenant est acheteur) / vide = toutes
-    pub direction: Option<String>,
     /// Si "true", inclut tous les exchanges (toutes les soumissions, même les doublons).
     /// Par défaut, on déduplique par invoice_number en gardant le plus récent.
     pub show_duplicates: Option<String>,
+}
+
+/// Direction figée par la route. Utilisée pour :
+/// - filtrer les exchanges (vendeur vs acheteur)
+/// - choisir le titre, l'item nav actif et l'action du form
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FlowDirection {
+    Emises,
+    Recues,
+}
+
+impl FlowDirection {
+    fn nav_key(&self) -> &'static str {
+        match self {
+            FlowDirection::Emises => "emises",
+            FlowDirection::Recues => "recues",
+        }
+    }
+    fn route_path(&self) -> &'static str {
+        match self {
+            FlowDirection::Emises => "/ui/emises",
+            FlowDirection::Recues => "/ui/recues",
+        }
+    }
+    fn page_title(&self) -> &'static str {
+        match self {
+            FlowDirection::Emises => "Factures émises",
+            FlowDirection::Recues => "Factures reçues",
+        }
+    }
+    fn empty_label(&self) -> &'static str {
+        match self {
+            FlowDirection::Emises => "Aucune facture émise pour ces critères.",
+            FlowDirection::Recues => "Aucune facture reçue pour ces critères.",
+        }
+    }
+    /// Filtre côté Rust : un exchange est dans le scope si le tenant
+    /// joue le rôle attendu (vendeur pour Émises, acheteur pour Reçues).
+    fn keep(&self, ex: &pdp_trace::store::ExchangeSummary, siren: &str) -> bool {
+        match self {
+            FlowDirection::Emises => ex.seller_siren.as_deref() == Some(siren),
+            FlowDirection::Recues => ex.buyer_siren.as_deref() == Some(siren),
+        }
+    }
 }
 
 /// Tailles de page proposées dans le sélecteur de pagination.
@@ -473,10 +527,29 @@ fn clamp_page_size(raw: Option<usize>) -> usize {
     raw.filter(|n| PAGE_SIZE_OPTIONS.contains(n)).unwrap_or(50)
 }
 
-pub async fn handle_flows_list(
+/// `GET /ui/emises` — Suivi des factures émises (tenant = vendeur).
+pub async fn handle_flows_emises(
     State(state): State<Arc<AppState>>,
+    ctx: axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    q: Query<FlowsListQuery>,
+) -> axum::response::Response {
+    render_flows_list(state, ctx, q, FlowDirection::Emises).await
+}
+
+/// `GET /ui/recues` — Suivi des factures reçues (tenant = acheteur).
+pub async fn handle_flows_recues(
+    State(state): State<Arc<AppState>>,
+    ctx: axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    q: Query<FlowsListQuery>,
+) -> axum::response::Response {
+    render_flows_list(state, ctx, q, FlowDirection::Recues).await
+}
+
+async fn render_flows_list(
+    state: Arc<AppState>,
     axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
     Query(q): Query<FlowsListQuery>,
+    direction: FlowDirection,
 ) -> axum::response::Response {
     // 403 si le SIREN demandé n'est pas autorisé. None (siren absent) = picker.
     let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
@@ -490,7 +563,6 @@ pub async fn handle_flows_list(
     let status = non_empty(&q.status);
     let from = non_empty(&q.from);
     let to = non_empty(&q.to);
-    let direction = non_empty(&q.direction);
 
     let body = match siren {
         None => format!("{}{}", no_siren_banner(), siren_picker_form()),
@@ -501,26 +573,15 @@ pub async fn handle_flows_list(
             };
             let page = q.page.unwrap_or(0);
             let page_size = clamp_page_size(q.page_size);
+            let dir_param = Some(direction.nav_key());
             let total = store
-                .count_exchanges(s, status, from, to)
+                .count_exchanges(s, status, from, to, dir_param)
                 .await
                 .unwrap_or(0);
             let mut exchanges = store
-                .list_exchanges(s, status, from, to, page, page_size)
+                .list_exchanges(s, status, from, to, page, page_size, dir_param)
                 .await
                 .unwrap_or_default();
-
-            // Filtre direction sur seller_siren / buyer_siren — déjà présents
-            // dans `ExchangeSummary`, pas besoin de re-fetcher le document.
-            //  - `emises` : tenant est le vendeur
-            //  - `recues` : tenant est l'acheteur
-            if let Some(dir) = direction {
-                exchanges.retain(|ex| match dir {
-                    "emises" => ex.seller_siren.as_deref() == Some(s),
-                    "recues" => ex.buyer_siren.as_deref() == Some(s),
-                    _ => true,
-                });
-            }
 
             // Déduplication par invoice_number (par défaut activée).
             // Plusieurs soumissions de la même facture créent plusieurs exchanges
@@ -549,14 +610,12 @@ pub async fn handle_flows_list(
             }
 
             let tenant_name = store.get_tenant_name(s).await;
-            let list_title = match tenant_name.as_deref() {
-                Some(name) => format!(
-                    r#"{name} <small style="font-weight:400;color:#666">— SIREN {siren}</small>"#,
-                    name = html_escape(name),
-                    siren = html_escape(s),
-                ),
-                None => format!("Factures du tenant {}", html_escape(s)),
-            };
+            let list_title = format!(
+                "{label} — {who} <small style=\"font-weight:400;color:#666\">SIREN {siren}</small>",
+                label = direction.page_title(),
+                who = html_escape(tenant_name.as_deref().unwrap_or(s)),
+                siren = html_escape(s),
+            );
 
             let page_size_opts = PAGE_SIZE_OPTIONS
                 .iter()
@@ -566,13 +625,8 @@ pub async fn handle_flows_list(
                 })
                 .collect::<String>();
             let filters_form = format!(
-                r#"<form method="get" action="/ui/flows" class="filters">
+                r#"<form method="get" action="{action}" class="filters">
     <input type="hidden" name="siren" value="{siren}">
-    <select name="direction">
-        <option value="" {sel_all}>— Toutes directions —</option>
-        <option value="emises" {sel_emises}>Émises (vendeur)</option>
-        <option value="recues" {sel_recues}>Reçues (acheteur)</option>
-    </select>
     <select name="status">
         <option value="">— Tous les statuts —</option>
         <option value="DISTRIBUÉ" {sel_dist}>Distribués</option>
@@ -586,10 +640,8 @@ pub async fn handle_flows_list(
     </select>
     <button type="submit">Filtrer</button>
 </form>"#,
+                action = direction.route_path(),
                 siren = html_escape(s),
-                sel_all = if q.direction.is_none() || q.direction.as_deref() == Some("") { "selected" } else { "" },
-                sel_emises = if q.direction.as_deref() == Some("emises") { "selected" } else { "" },
-                sel_recues = if q.direction.as_deref() == Some("recues") { "selected" } else { "" },
                 sel_dist = if q.status.as_deref() == Some("DISTRIBUÉ") { "selected" } else { "" },
                 sel_err = if q.status.as_deref() == Some("ERREUR") { "selected" } else { "" },
                 sel_pending = if q.status.as_deref() == Some("EN_ATTENTE") { "selected" } else { "" },
@@ -598,8 +650,19 @@ pub async fn handle_flows_list(
                 page_size_opts = page_size_opts,
             );
 
+            // Côté ÉMISES, la « partie » d'intérêt pour le tenant est
+            // l'acheteur (à qui il facture). Côté REÇUES, c'est le vendeur
+            // (de qui il reçoit la facture). On affiche cette info dans une
+            // colonne dédiée et on retire la cellule redondante.
+            let counterparty_label = match direction {
+                FlowDirection::Emises => "Acheteur",
+                FlowDirection::Recues => "Vendeur",
+            };
             let rows = if exchanges.is_empty() {
-                r#"<tr><td colspan="7" class="empty">Aucune facture trouvée pour ces critères.</td></tr>"#.to_string()
+                format!(
+                    r#"<tr><td colspan="6" class="empty">{}</td></tr>"#,
+                    direction.empty_label()
+                )
             } else {
                 exchanges
                     .iter()
@@ -612,15 +675,6 @@ pub async fn handle_flows_list(
                                 n = e.attachment_count
                             )
                         };
-                        // Indique si le tenant est vendeur ou acheteur de cette facture
-                        let direction_marker = if e.seller_siren.as_deref() == Some(s) {
-                            r#"<span class="dir-tag dir-out" title="Émise par ce tenant">↑</span>"#
-                        } else if e.buyer_siren.as_deref() == Some(s) {
-                            r#"<span class="dir-tag dir-in" title="Reçue par ce tenant">↓</span>"#
-                        } else {
-                            ""
-                        };
-                        // Badge erreur ou cellule vide
                         let errors_cell = if e.error_count == 0 {
                             r#"<span style="color:#bbb">—</span>"#.to_string()
                         } else {
@@ -629,32 +683,34 @@ pub async fn handle_flows_list(
                                 n = e.error_count
                             )
                         };
-                        let seller_cell = format!(
+                        let (counterparty_name, counterparty_siret) = match direction {
+                            FlowDirection::Emises => (
+                                e.buyer_name.as_deref().unwrap_or("—"),
+                                e.buyer_siret.as_deref().unwrap_or("—"),
+                            ),
+                            FlowDirection::Recues => (
+                                e.seller_name.as_deref().unwrap_or("—"),
+                                e.seller_siret.as_deref().unwrap_or("—"),
+                            ),
+                        };
+                        let counterparty_cell = format!(
                             r#"<div>{name}</div><div class="siret-sub">SIRET {siret}</div>"#,
-                            name = html_escape(e.seller_name.as_deref().unwrap_or("—")),
-                            siret = html_escape(e.seller_siret.as_deref().unwrap_or("—")),
-                        );
-                        let buyer_cell = format!(
-                            r#"<div>{name}</div><div class="siret-sub">SIRET {siret}</div>"#,
-                            name = html_escape(e.buyer_name.as_deref().unwrap_or("—")),
-                            siret = html_escape(e.buyer_siret.as_deref().unwrap_or("—")),
+                            name = html_escape(counterparty_name),
+                            siret = html_escape(counterparty_siret),
                         );
                         format!(
                             r#"<tr>
-    <td>{dir} <a href="/ui/flows/{flow_id}?siren={siren}">{invoice}</a></td>
-    <td>{seller}</td>
-    <td>{buyer}</td>
+    <td><a href="/ui/flows/{flow_id}?siren={siren}">{invoice}</a></td>
+    <td>{counterparty}</td>
     <td><span class="badge {badge}">{status}</span></td>
     <td>{pj}</td>
     <td>{errors}</td>
     <td>{date}</td>
 </tr>"#,
-                            dir = direction_marker,
                             flow_id = html_escape(&e.flow_id),
                             siren = html_escape(s),
                             invoice = html_escape(e.invoice_number.as_deref().unwrap_or("—")),
-                            seller = seller_cell,
-                            buyer = buyer_cell,
+                            counterparty = counterparty_cell,
                             badge = {
                                 let (_, b) = effective_status(&e.status, e.error_count);
                                 b
@@ -672,31 +728,40 @@ pub async fn handle_flows_list(
                     .join("\n")
             };
 
-            let pagination = build_pagination(s, status, from, to, direction, page, exchanges.len(), page_size, total);
+            let pagination = build_pagination(
+                s, status, from, to, direction, page, exchanges.len(), page_size, total,
+            );
+            let intro = match direction {
+                FlowDirection::Emises => format!(
+                    r#"Factures dont <strong>{siren}</strong> est le vendeur (BT-30 SIREN). \
+                    Une facture re-soumise crée un doublon BR-FR-12/13 — seule la dernière \
+                    soumission est affichée (<a href="?siren={siren}&amp;show_duplicates=true">voir tout l'historique</a>)."#,
+                    siren = html_escape(s),
+                ),
+                FlowDirection::Recues => format!(
+                    r#"Factures dont <strong>{siren}</strong> est l'acheteur (BT-47 SIREN). \
+                    Une facture re-soumise crée un doublon BR-FR-12/13 — seule la dernière \
+                    soumission est affichée (<a href="?siren={siren}&amp;show_duplicates=true">voir tout l'historique</a>)."#,
+                    siren = html_escape(s),
+                ),
+            };
 
             format!(
                 r#"<div class="card">
     <h2>{title}</h2>
-    <div class="tenant-info">
-        L'index Elasticsearch <code>pdp-{siren}</code> regroupe toutes les
-        factures dont le <strong>vendeur a ce SIREN</strong>. Le marqueur
-        <span class="dir-tag dir-out">↑</span> = émises (tenant vendeur),
-        <span class="dir-tag dir-in">↓</span> = reçues (tenant acheteur).
-        Une facture re-soumise crée un doublon détecté (BR-FR-12/13) —
-        seule la dernière soumission est affichée par défaut
-        (<a href="?siren={siren}&amp;show_duplicates=true">voir tout l'historique</a>).
-    </div>
+    <div class="tenant-info">{intro}</div>
     {filters}
     <table>
         <thead>
-            <tr><th>N° facture</th><th>Vendeur</th><th>Acheteur</th><th>Statut</th><th>PJ</th><th>Err.</th><th>Reçue le</th></tr>
+            <tr><th>N° facture</th><th>{counterparty_label}</th><th>Statut</th><th>PJ</th><th>Err.</th><th>Reçue le</th></tr>
         </thead>
         <tbody>{rows}</tbody>
     </table>
     {pagination}
 </div>"#,
                 title = list_title,
-                siren = html_escape(s),
+                intro = intro,
+                counterparty_label = counterparty_label,
                 filters = filters_form,
                 rows = rows,
                 pagination = pagination,
@@ -704,7 +769,13 @@ pub async fn handle_flows_list(
         }
     };
 
-    html_response(&page_shell("Factures", "flows", siren, &body)).into_response()
+    html_response(&page_shell(
+        direction.page_title(),
+        direction.nav_key(),
+        siren,
+        &body,
+    ))
+    .into_response()
 }
 
 fn build_pagination(
@@ -712,7 +783,7 @@ fn build_pagination(
     status: Option<&str>,
     from: Option<&str>,
     to: Option<&str>,
-    direction: Option<&str>,
+    direction: FlowDirection,
     page: usize,
     page_count: usize,
     page_size: usize,
@@ -723,7 +794,6 @@ fn build_pagination(
         if let Some(st) = status { s.push_str(&format!("&status={}", st)); }
         if let Some(f) = from { s.push_str(&format!("&from={}", f)); }
         if let Some(t) = to { s.push_str(&format!("&to={}", t)); }
-        if let Some(d) = direction { if !d.is_empty() { s.push_str(&format!("&direction={}", d)); } }
         s
     };
     // Nombre total de pages (au moins 1 si vide, pour ne pas afficher "Page 1/0").
@@ -733,13 +803,14 @@ fn build_pagination(
         ((total as usize).saturating_sub(1) / page_size) + 1
     };
     let has_next = page + 1 < total_pages;
+    let route = direction.route_path();
     let prev = if page > 0 {
-        format!(r#"<a href="/ui/flows{}">← Précédent</a>"#, qs(page - 1))
+        format!(r#"<a href="{route}{}">← Précédent</a>"#, qs(page - 1))
     } else {
         r#"<span style="color:#aaa">← Précédent</span>"#.to_string()
     };
     let next = if has_next {
-        format!(r#"<a href="/ui/flows{}">Suivant →</a>"#, qs(page + 1))
+        format!(r#"<a href="{route}{}">Suivant →</a>"#, qs(page + 1))
     } else {
         r#"<span style="color:#aaa">Suivant →</span>"#.to_string()
     };
@@ -1004,15 +1075,15 @@ pub async fn handle_flow_detail(
         (Some(s), Some(store)) => {
             // Recherche par flow_id (les exchange_id sont aussi possibles)
             let summaries = store
-                .list_exchanges(s, None, None, None, 0, 200)
+                .list_exchanges(s, None, None, None, 0, 200, None)
                 .await
                 .unwrap_or_default();
             let summary = summaries.iter().find(|sum| sum.flow_id == flow_id || sum.exchange_id == flow_id);
 
             match summary {
                 None => format!(
-                    r#"<div class="card"><h2>Flux introuvable</h2><p>Aucun flux <code>{}</code> dans pdp-{}.</p><p><a href="/ui/flows?siren={}">← Retour à la liste</a></p></div>"#,
-                    html_escape(&flow_id), html_escape(s), html_escape(s),
+                    r#"<div class="card"><h2>Flux introuvable</h2><p>Aucun flux <code>{}</code> dans pdp-{}.</p><p><a href="/ui/emises?siren={s}">← Émises</a> · <a href="/ui/recues?siren={s}">Reçues</a></p></div>"#,
+                    html_escape(&flow_id), html_escape(s), s = html_escape(s),
                 ),
                 Some(sum) => {
                     let exchange = store.get_exchange(&sum.exchange_id, Some(s)).await.ok().flatten();
@@ -1021,7 +1092,26 @@ pub async fn handle_flow_detail(
             }
         }
     };
-    html_response(&page_shell("Détail flux", "flows", siren, &body)).into_response()
+    // Le breadcrumb actif (Émises ou Reçues) dépend du rôle du tenant pour
+    // CETTE facture. Si on est arrivé ici sans summary (flux introuvable),
+    // on retombe sur Émises par défaut.
+    let nav_active = match (siren, &state.trace_store) {
+        (Some(s), Some(store)) => {
+            let summaries = store
+                .list_exchanges(s, None, None, None, 0, 200, None)
+                .await
+                .unwrap_or_default();
+            let sum = summaries
+                .iter()
+                .find(|sum| sum.flow_id == flow_id || sum.exchange_id == flow_id);
+            match sum {
+                Some(sum) if sum.buyer_siren.as_deref() == Some(s) => "recues",
+                _ => "emises",
+            }
+        }
+        _ => "emises",
+    };
+    html_response(&page_shell("Détail flux", nav_active, siren, &body)).into_response()
 }
 
 fn render_flow_detail(
@@ -1143,13 +1233,27 @@ fn render_flow_detail(
         }
     };
 
+    // Le retour pointe vers la liste qui correspond au rôle du tenant pour
+    // cette facture (vendeur → Émises, acheteur → Reçues).
+    let back_route = if sum.buyer_siren.as_deref() == Some(siren) {
+        "/ui/recues"
+    } else {
+        "/ui/emises"
+    };
+    let back_label = if sum.buyer_siren.as_deref() == Some(siren) {
+        "← Retour aux factures reçues"
+    } else {
+        "← Retour aux factures émises"
+    };
     format!(
-        r#"<p><a href="/ui/flows?siren={siren}">← Retour à la liste</a></p>
+        r#"<p><a href="{back_route}?siren={siren}">{back_label}</a></p>
 <div class="card"><h2>Métadonnées</h2>{metadata}</div>
 {errors}
 {downloads}
 {attachments}
 <div class="card"><h2>Timeline du pipeline</h2>{timeline}</div>"#,
+        back_route = back_route,
+        back_label = back_label,
         siren = html_escape(siren),
         metadata = metadata,
         errors = errors,
@@ -1172,7 +1276,7 @@ async fn lookup_doc(
 ) -> Option<pdp_trace::store::ExchangeDocument> {
     let store = state.trace_store.as_ref()?;
     // Le flow_id peut être un flow_id ou un exchange_id
-    let summaries = store.list_exchanges(siren, None, None, None, 0, 200).await.ok()?;
+    let summaries = store.list_exchanges(siren, None, None, None, 0, 200, None).await.ok()?;
     let summary = summaries
         .iter()
         .find(|s| s.flow_id == flow_id || s.exchange_id == flow_id)?;

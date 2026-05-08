@@ -29,6 +29,11 @@ pub trait TraceBackend: Send + Sync {
     async fn get_tenant_name(&self, siren: &str) -> Option<String>;
 
     /// Liste paginée des exchanges d'un tenant avec filtres optionnels.
+    ///
+    /// `direction` :
+    /// - `Some("emises")` filtre les factures dont le tenant est vendeur,
+    /// - `Some("recues")` celles dont il est acheteur,
+    /// - `None` retourne les deux (legacy / écran "tout").
     async fn list_exchanges(
         &self,
         siren: &str,
@@ -37,6 +42,7 @@ pub trait TraceBackend: Send + Sync {
         to_date: Option<&str>,
         page: usize,
         page_size: usize,
+        direction: Option<&str>,
     ) -> PdpResult<Vec<ExchangeSummary>>;
 
     /// Compte le nombre total d'exchanges pour un tenant (avec les mêmes
@@ -48,6 +54,7 @@ pub trait TraceBackend: Send + Sync {
         status: Option<&str>,
         from_date: Option<&str>,
         to_date: Option<&str>,
+        direction: Option<&str>,
     ) -> PdpResult<i64>;
 
     /// Document complet (avec XML/PDF/événements) par ID. Si `siren` est `None`,
@@ -85,9 +92,10 @@ impl TraceBackend for crate::store::TraceStore {
         to_date: Option<&str>,
         page: usize,
         page_size: usize,
+        direction: Option<&str>,
     ) -> PdpResult<Vec<ExchangeSummary>> {
         crate::store::TraceStore::list_exchanges(
-            self, siren, status, from_date, to_date, page, page_size,
+            self, siren, status, from_date, to_date, page, page_size, direction,
         )
         .await
     }
@@ -98,8 +106,12 @@ impl TraceBackend for crate::store::TraceStore {
         status: Option<&str>,
         from_date: Option<&str>,
         to_date: Option<&str>,
+        direction: Option<&str>,
     ) -> PdpResult<i64> {
-        crate::store::TraceStore::count_exchanges(self, siren, status, from_date, to_date).await
+        crate::store::TraceStore::count_exchanges(
+            self, siren, status, from_date, to_date, direction,
+        )
+        .await
     }
 
     async fn get_exchange(

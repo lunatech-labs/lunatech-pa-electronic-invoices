@@ -919,27 +919,36 @@ impl TraceStore {
     }
 
     /// Construit la query ES utilisée par `list_exchanges` et `count_exchanges`,
-    /// en fonction des filtres UI (siren, status, plage de dates).
+    /// en fonction des filtres UI (siren, status, plage de dates, direction).
+    ///
+    /// `direction` :
+    /// - `Some("emises")` → tenant vendeur uniquement (`seller_siren = X`)
+    /// - `Some("recues")` → tenant acheteur uniquement (`buyer_siren = X`)
+    /// - `None` → les deux (vendeur OU acheteur — comportement legacy)
     fn build_tenant_filter_query(
         &self,
         siren: &str,
         status: Option<&str>,
         from_date: Option<&str>,
         to_date: Option<&str>,
+        direction: Option<&str>,
     ) -> serde_json::Value {
         // L'index ES est keyé par seller_siren ; pour qu'un tenant voit *aussi*
-        // les factures où il est acheteur (réception), on filtre sur
-        // `seller_siren = X OR buyer_siren = X` (côté must), avec le wildcard
-        // `pdp-*` côté URL.
-        let tenant_match = serde_json::json!({
-            "bool": {
-                "should": [
-                    { "term": { "seller_siren": siren } },
-                    { "term": { "buyer_siren": siren } }
-                ],
-                "minimum_should_match": 1
-            }
-        });
+        // les factures où il est acheteur (réception), on requête le wildcard
+        // `pdp-*` et on précise le rôle attendu côté must.
+        let tenant_match = match direction {
+            Some("emises") => serde_json::json!({ "term": { "seller_siren": siren } }),
+            Some("recues") => serde_json::json!({ "term": { "buyer_siren": siren } }),
+            _ => serde_json::json!({
+                "bool": {
+                    "should": [
+                        { "term": { "seller_siren": siren } },
+                        { "term": { "buyer_siren": siren } }
+                    ],
+                    "minimum_should_match": 1
+                }
+            }),
+        };
         let mut must: Vec<serde_json::Value> = vec![tenant_match];
         let mut must_not: Vec<serde_json::Value> = Vec::new();
         // Filtre status logique. Les statuts ES présents sur un flux passent
@@ -1002,9 +1011,11 @@ impl TraceStore {
         status: Option<&str>,
         from_date: Option<&str>,
         to_date: Option<&str>,
+        direction: Option<&str>,
     ) -> PdpResult<i64> {
         let index = self.index_pattern();
-        let query = self.build_tenant_filter_query(siren, status, from_date, to_date);
+        let query =
+            self.build_tenant_filter_query(siren, status, from_date, to_date, direction);
         self.count_query(&index, query).await
     }
 
@@ -1024,9 +1035,11 @@ impl TraceStore {
         to_date: Option<&str>,
         page: usize,
         page_size: usize,
+        direction: Option<&str>,
     ) -> PdpResult<Vec<ExchangeSummary>> {
         let index = self.index_pattern();
-        let query = self.build_tenant_filter_query(siren, status, from_date, to_date);
+        let query =
+            self.build_tenant_filter_query(siren, status, from_date, to_date, direction);
 
         let from = page * page_size;
         let body = serde_json::json!({

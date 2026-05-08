@@ -76,13 +76,16 @@ impl TraceBackend for InMemBackend {
         _to: Option<&str>,
         _page: usize,
         _page_size: usize,
+        direction: Option<&str>,
     ) -> PdpResult<Vec<ExchangeSummary>> {
         Ok(self
             .0
             .iter()
-            .filter(|d| {
-                d.seller_siren.as_deref() == Some(siren)
-                    || d.buyer_siren.as_deref() == Some(siren)
+            .filter(|d| match direction {
+                Some("emises") => d.seller_siren.as_deref() == Some(siren),
+                Some("recues") => d.buyer_siren.as_deref() == Some(siren),
+                _ => d.seller_siren.as_deref() == Some(siren)
+                    || d.buyer_siren.as_deref() == Some(siren),
             })
             .map(to_summary)
             .collect())
@@ -93,13 +96,16 @@ impl TraceBackend for InMemBackend {
         _status: Option<&str>,
         _from: Option<&str>,
         _to: Option<&str>,
+        direction: Option<&str>,
     ) -> PdpResult<i64> {
         Ok(self
             .0
             .iter()
-            .filter(|d| {
-                d.seller_siren.as_deref() == Some(siren)
-                    || d.buyer_siren.as_deref() == Some(siren)
+            .filter(|d| match direction {
+                Some("emises") => d.seller_siren.as_deref() == Some(siren),
+                Some("recues") => d.buyer_siren.as_deref() == Some(siren),
+                _ => d.seller_siren.as_deref() == Some(siren)
+                    || d.buyer_siren.as_deref() == Some(siren),
             })
             .count() as i64)
     }
@@ -297,14 +303,14 @@ async fn send(state: Arc<AppState>, uri: &str, bearer: Option<&str>) -> (StatusC
 async fn no_token_redirects_to_login_on_ui() {
     // Phase B : routes UI sans auth → 303 vers /login (au lieu de 401 brut).
     let state = StateBuilder::new().tenant_token("tok-a", &["123456789"]).build();
-    let (status, _) = send(state, "/ui/flows?siren=123456789", None).await;
+    let (status, _) = send(state, "/ui/emises?siren=123456789", None).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
 }
 
 #[tokio::test]
 async fn unknown_token_redirects_to_login_on_ui() {
     let state = StateBuilder::new().tenant_token("tok-a", &["123456789"]).build();
-    let (status, _) = send(state, "/ui/flows?siren=123456789", Some("tok-zzz")).await;
+    let (status, _) = send(state, "/ui/emises?siren=123456789", Some("tok-zzz")).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
 }
 
@@ -320,7 +326,7 @@ async fn no_token_rejected_with_401_on_api() {
 async fn tenant_token_can_access_own_siren() {
     let state = StateBuilder::new().tenant_token("tok-a", &["123456789"]).build();
     let (status, body) =
-        send(state, "/ui/flows?siren=123456789", Some("tok-a")).await;
+        send(state, "/ui/emises?siren=123456789", Some("tok-a")).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("INV-A"), "doit lister INV-A du tenant 123456789");
 }
@@ -330,7 +336,7 @@ async fn tenant_token_cannot_access_other_siren() {
     // tok-a est lié à 123456789 → demander ?siren=999999999 doit être 403.
     let state = StateBuilder::new().tenant_token("tok-a", &["123456789"]).build();
     let (status, body) =
-        send(state, "/ui/flows?siren=999999999", Some("tok-a")).await;
+        send(state, "/ui/emises?siren=999999999", Some("tok-a")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(body.contains("SIREN_NOT_AUTHORIZED"));
 }
@@ -342,7 +348,7 @@ async fn admin_token_sees_all_sirens() {
         .tenant_token("tok-a", &["123456789"]) // pour cohabitation
         .build();
     let (status, body) =
-        send(state, "/ui/flows?siren=999999999", Some("tok-admin")).await;
+        send(state, "/ui/emises?siren=999999999", Some("tok-admin")).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("INV-B"));
 }
@@ -350,7 +356,7 @@ async fn admin_token_sees_all_sirens() {
 #[tokio::test]
 async fn dev_open_grants_admin_without_token() {
     let state = StateBuilder::new().dev_open().build();
-    let (status, _) = send(state, "/ui/flows?siren=999999999", None).await;
+    let (status, _) = send(state, "/ui/emises?siren=999999999", None).await;
     assert_eq!(status, StatusCode::OK);
 }
 
@@ -483,7 +489,7 @@ async fn session_cookie_authenticates_ui_request() {
     // 2. Requête UI avec le cookie : doit passer (200), pas de redirect.
     let app = build_api_router(state);
     let req = Request::builder()
-        .uri("/ui/flows?siren=123456789")
+        .uri("/ui/emises?siren=123456789")
         .header("Cookie", cookie.clone())
         .body(Body::empty())
         .unwrap();
@@ -511,7 +517,7 @@ async fn session_cookie_blocks_cross_tenant() {
 
     let app = build_api_router(state);
     let req = Request::builder()
-        .uri("/ui/flows?siren=999999999")
+        .uri("/ui/emises?siren=999999999")
         .header("Cookie", cookie)
         .body(Body::empty())
         .unwrap();
@@ -589,7 +595,7 @@ async fn cookie_invalidated_after_logout_even_if_replayed() {
     // 1. Cookie valide → 200
     let app = build_api_router(state.clone());
     let req = Request::builder()
-        .uri("/ui/flows?siren=123456789")
+        .uri("/ui/emises?siren=123456789")
         .header("Cookie", cookie.clone())
         .body(Body::empty())
         .unwrap();
@@ -609,7 +615,7 @@ async fn cookie_invalidated_after_logout_even_if_replayed() {
     // 3. Replay du même cookie → doit être rejeté (303 → /login)
     let app = build_api_router(state);
     let req = Request::builder()
-        .uri("/ui/flows?siren=123456789")
+        .uri("/ui/emises?siren=123456789")
         .header("Cookie", cookie)
         .body(Body::empty())
         .unwrap();
