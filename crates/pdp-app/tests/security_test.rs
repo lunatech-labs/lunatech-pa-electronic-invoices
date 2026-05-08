@@ -146,6 +146,7 @@ fn to_summary(d: &ExchangeDocument) -> ExchangeSummary {
         error_count: d.error_count,
         created_at: d.created_at.clone(),
         attachment_count: d.attachment_count,
+        cdv_status_code: d.cdv_status_code,
     }
 }
 
@@ -175,6 +176,7 @@ fn doc_for(seller_siren: &str, buyer_siren: &str, invoice: &str) -> ExchangeDocu
         issue_date: Some("2026-04-01".into()),
         status: "VALIDÉ".into(),
         error_count: 0,
+        cdv_status_code: None,
         raw_xml: Some("<Invoice/>".into()),
         raw_pdf_base64: None,
         converted_xml: None,

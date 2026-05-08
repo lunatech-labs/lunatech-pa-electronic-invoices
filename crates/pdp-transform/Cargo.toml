@@ -22,7 +22,9 @@ uuid = { workspace = true }
 lopdf = { workspace = true }
 typst-as-lib = { workspace = true }
 typst-pdf = { workspace = true }
+typst-render = { workspace = true }
 typst = { workspace = true }
+image = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

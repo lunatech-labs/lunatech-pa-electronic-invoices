@@ -64,7 +64,7 @@ enum Commands {
     Transform {
         /// Chemin vers le fichier facture source
         file: PathBuf,
-        /// Format cible (UBL ou CII)
+        /// Format cible (UBL, CII, Factur-X ou PDF)
         #[arg(short, long)]
         to: String,
         /// Fichier de sortie (optionnel, sinon stdout)
@@ -122,6 +122,18 @@ enum ToolsCommands {
     /// Génère un secret aléatoire 32 octets (base64) pour
     /// `http_server.session_secret`.
     GenSessionSecret,
+    /// Génère les pièces jointes "métier" (BdC PDF, bordereau de livraison
+    /// PNG, détail des lignes CSV) à partir d'une facture, avec les vraies
+    /// données. Utile pour produire des fixtures de démonstration crédibles.
+    GenAttachments {
+        /// Chemin vers le fichier facture source (UBL/CII XML ou Factur-X PDF).
+        invoice: PathBuf,
+        /// Répertoire de sortie (créé si absent). Génère 3 fichiers :
+        /// `bon_commande_<id>.pdf`, `bordereau_livraison_<id>.png`,
+        /// `detail_lignes_<id>.csv`.
+        #[arg(short, long)]
+        output_dir: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -282,6 +294,40 @@ async fn cmd_tools(action: ToolsCommands) -> Result<()> {
             // Padding pour atteindre au moins 32 octets visiblement.
             let b64 = base64::engine::general_purpose::STANDARD.encode(&secret);
             println!("{b64}");
+        }
+        ToolsCommands::GenAttachments { invoice, output_dir } => {
+            let data = std::fs::read(&invoice)?;
+            let format = pdp_invoice::detect_format(&data)?;
+            let inv = match format {
+                pdp_core::model::InvoiceFormat::UBL => {
+                    let xml = std::str::from_utf8(&data)?;
+                    pdp_invoice::UblParser::new().parse(xml)?
+                }
+                pdp_core::model::InvoiceFormat::CII => {
+                    let xml = std::str::from_utf8(&data)?;
+                    pdp_invoice::CiiParser::new().parse(xml)?
+                }
+                pdp_core::model::InvoiceFormat::FacturX => {
+                    pdp_invoice::FacturXParser::new().parse(&data)?
+                }
+            };
+            std::fs::create_dir_all(&output_dir)?;
+            let id = inv.invoice_number.replace(['/', ' '], "_");
+
+            let bdc = pdp_transform::generate_bon_commande_pdf(&inv)?;
+            let bdc_path = output_dir.join(format!("bon_commande_{id}.pdf"));
+            std::fs::write(&bdc_path, &bdc)?;
+            println!("✅ {} ({} octets)", bdc_path.display(), bdc.len());
+
+            let bl = pdp_transform::generate_bordereau_livraison_png(&inv)?;
+            let bl_path = output_dir.join(format!("bordereau_livraison_{id}.png"));
+            std::fs::write(&bl_path, &bl)?;
+            println!("✅ {} ({} octets)", bl_path.display(), bl.len());
+
+            let csv = pdp_transform::generate_detail_lignes_csv(&inv);
+            let csv_path = output_dir.join(format!("detail_lignes_{id}.csv"));
+            std::fs::write(&csv_path, &csv)?;
+            println!("✅ {} ({} octets)", csv_path.display(), csv.len());
         }
     }
     Ok(())
@@ -713,22 +759,60 @@ async fn cmd_transform(
         }
     };
 
-    let result_xml = match target.to_uppercase().as_str() {
-        "CII" | "UBL" => {
-            let target_format = if target.to_uppercase() == "CII" {
-                pdp_core::model::InvoiceFormat::CII
-            } else {
-                pdp_core::model::InvoiceFormat::UBL
-            };
-            let result = pdp_transform::convert(&invoice, target_format)?;
-            String::from_utf8(result.content)?
-        }
-        _ => anyhow::bail!("Format cible non supporté: {}. Utilisez UBL ou CII.", target),
-    };
+    let upper = target.to_uppercase();
+    // PDF (visuel seul, sans XML embarqué) est traité à part — ce n'est pas
+    // un format facture EN16931, juste un rendu graphique de la facture pour
+    // archivage / pièce jointe.
+    if matches!(upper.as_str(), "PDF") {
+        let result = pdp_transform::convert_to(&invoice, pdp_transform::OutputFormat::PDF)?;
+        let out_path = output.ok_or_else(|| {
+            anyhow::anyhow!("--output <chemin.pdf> est requis pour le format PDF")
+        })?;
+        std::fs::write(out_path, &result.content)?;
+        println!(
+            "✅ Transformation {} -> PDF (visuel) écrite dans {} ({} octets)",
+            format,
+            out_path.display(),
+            result.content.len()
+        );
+        return Ok(());
+    }
 
+    let target_format = match upper.as_str() {
+        "UBL" => pdp_core::model::InvoiceFormat::UBL,
+        "CII" => pdp_core::model::InvoiceFormat::CII,
+        "FACTURX" | "FACTUR-X" => pdp_core::model::InvoiceFormat::FacturX,
+        _ => anyhow::bail!(
+            "Format cible non supporté : {}. Utilisez UBL, CII, Factur-X ou PDF.",
+            target
+        ),
+    };
+    let result = pdp_transform::convert(&invoice, target_format)?;
+
+    // Factur-X est binaire (PDF/A-3) — il doit aller dans un fichier, pas stdout.
+    if matches!(target_format, pdp_core::model::InvoiceFormat::FacturX) {
+        let out_path = output.ok_or_else(|| {
+            anyhow::anyhow!("--output <chemin.pdf> est requis pour le format Factur-X")
+        })?;
+        std::fs::write(out_path, &result.content)?;
+        println!(
+            "✅ Transformation {} -> Factur-X (PDF/A-3) écrite dans {} ({} octets)",
+            format,
+            out_path.display(),
+            result.content.len()
+        );
+        return Ok(());
+    }
+
+    let result_xml = String::from_utf8(result.content)?;
     if let Some(out_path) = output {
         std::fs::write(out_path, &result_xml)?;
-        println!("✅ Transformation {} -> {} écrite dans {}", format, target.to_uppercase(), out_path.display());
+        println!(
+            "✅ Transformation {} -> {} écrite dans {}",
+            format,
+            upper,
+            out_path.display()
+        );
     } else {
         println!("{}", result_xml);
     }
@@ -2392,13 +2476,101 @@ async fn cmd_demo_populate(
         errors
     );
     println!("⏳ Le pipeline traite les flux toutes les 60s — recharger l'UI dans ~1 minute");
+
+    // 4. Enrichissement des statuts AFNOR (codes 200-501 du cycle de vie facture)
+    //    Les fixtures `tests/fixtures/cdar/cdv_*.xml` couvrent les 23 statuts AFNOR
+    //    mais leurs `invoice_id` sont hardcodés (F202500003) et ne matchent pas les
+    //    fixtures bulk. Plutôt que de générer dynamiquement et POSTer des CDV à
+    //    travers /v1/flows (CdarProcessor + linker pipeline), on enrichit
+    //    directement les documents ES déjà écrits avec une distribution réaliste,
+    //    pour exposer la palette complète AFNOR XP Z12-012 dans l'UI.
+    let dist = inject_demo_cdv_statuses(&client, elasticsearch_url).await;
+    match dist {
+        Ok(updated) => {
+            if updated > 0 {
+                println!("🎯 {} factures enrichies avec un statut AFNOR (200-213)", updated);
+            }
+        }
+        Err(e) => eprintln!("⚠️  Enrichissement statuts AFNOR ignoré : {}", e),
+    }
+
     println!("🌐 Dashboard : {}/ui?siren=123456789", server_url);
-    println!("🌐 Liste     : {}/ui/flows?siren=123456789", server_url);
+    println!("🌐 Émises    : {}/ui/emises?siren=123456789", server_url);
+    println!("🌐 Reçues    : {}/ui/recues?siren=123456789", server_url);
 
     if errors > 0 {
         anyhow::bail!("{} fixtures ont échoué", errors);
     }
     Ok(())
+}
+
+/// Enrichit les documents Elasticsearch existants avec un `cdv_status_code`
+/// AFNOR aléatoire pour la démo.
+///
+/// Distribution (~70% des factures) calibrée sur un mix réaliste B2B :
+/// - 35% Approuvée (205) — l'acheteur a validé la facture
+/// - 25% Prise en charge (204) — réceptionnée par l'acheteur
+/// - 15% Encaissée (212) — payée
+/// -  8% Mise à disposition (203) — disponible côté acheteur
+/// -  7% En litige (207)
+/// -  5% Refusée (210)
+/// -  3% Suspendue (208)
+/// -  2% Rejetée (213)
+///
+/// 30% restent sans `cdv_status_code` (fallback FlowStatus → "Émise" / "Mise à disposition").
+///
+/// Implémenté via un Painless script ES `_update_by_query` ciblant tous les
+/// documents qui n'ont pas encore de `cdv_status_code` — idempotent sur les
+/// docs déjà enrichis. Référence : XP Z12-012 Annexe A V1.2.
+async fn inject_demo_cdv_statuses(
+    client: &reqwest::Client,
+    elasticsearch_url: &str,
+) -> Result<u64> {
+    let url = format!(
+        "{}/pdp-*/_update_by_query?refresh=true&conflicts=proceed",
+        elasticsearch_url.trim_end_matches('/')
+    );
+
+    // Painless ES : tirage aléatoire pondéré avec seuils cumulés.
+    let body = serde_json::json!({
+        "query": {
+            "bool": {
+                "must_not": [
+                    { "exists": { "field": "cdv_status_code" } }
+                ],
+                "must": [
+                    { "exists": { "field": "invoice_number" } },
+                    { "term": { "error_count": 0 } }
+                ]
+            }
+        },
+        "script": {
+            "source": "
+                if (Math.random() > 0.7) { ctx.op = 'noop'; return; }
+                double r = Math.random();
+                int code;
+                if (r < 0.35) code = 205;
+                else if (r < 0.60) code = 204;
+                else if (r < 0.75) code = 212;
+                else if (r < 0.83) code = 203;
+                else if (r < 0.90) code = 207;
+                else if (r < 0.95) code = 210;
+                else if (r < 0.98) code = 208;
+                else code = 213;
+                ctx._source.cdv_status_code = code;
+            ",
+            "lang": "painless"
+        }
+    });
+
+    let resp = client.post(&url).json(&body).send().await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        anyhow::bail!("ES _update_by_query {} : {}", status, txt);
+    }
+    let json: serde_json::Value = resp.json().await?;
+    Ok(json["updated"].as_u64().unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -2571,6 +2743,7 @@ mod tests {
             issue_date: Some("2025-11-15".to_string()),
             status: "DISTRIBUÉ".to_string(),
             error_count: 0,
+            cdv_status_code: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,

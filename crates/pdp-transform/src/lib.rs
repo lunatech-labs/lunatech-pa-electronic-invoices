@@ -110,12 +110,14 @@
 //! - **Typst** — génération PDF in-process (~100ms)
 //! - **qpdf** — correction header binaire PDF/A-3
 
+pub mod attachments;
 pub mod converter;
 pub mod processor;
 pub mod ppf_flux1;
 pub mod xslt_engine;
 pub mod typst_engine;
 pub mod facturx_generator;
+pub use attachments::{generate_bon_commande_pdf, generate_bordereau_livraison_png, generate_detail_lignes_csv};
 pub use converter::{convert, convert_to, xslt_transform, ConversionResult, OutputFormat, supported_conversions, supported_output_formats};
 pub use processor::TransformProcessor;
 pub use xslt_engine::{XsltEngine, XsltTransform};

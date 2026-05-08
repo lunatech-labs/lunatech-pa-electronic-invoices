@@ -147,7 +147,7 @@
   }
 )
 
-v(10pt)
+#v(10pt)
 
 // ========== ACHETEUR ==========
 #box(
@@ -201,7 +201,7 @@ v(10pt)
   )
 }
 
-v(12pt)
+#v(12pt)
 
 // ========== LIGNES DE FACTURE ==========
 #let lines = get("lines", default: ())
@@ -250,7 +250,7 @@ v(12pt)
   }
 )
 
-v(8pt)
+#v(8pt)
 
 // ========== REMISES / CHARGES DOCUMENT ==========
 #let ac = get("allowance_charges", default: ())
@@ -341,7 +341,7 @@ v(8pt)
   }
 )
 
-v(12pt)
+#v(12pt)
 
 // ========== PAIEMENT ==========
 #if get("payment_iban") != none or get("payment_means_text") != none or get("payment_terms") != none {

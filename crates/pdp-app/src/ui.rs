@@ -320,26 +320,152 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-fn status_badge(status: &str) -> &'static str {
-    match status.to_uppercase().as_str() {
-        "DISTRIBUÉ" | "DISTRIBUE" | "ACKNOWLEDGED" | "ACQUITTÉ" | "ACQUITTE" => "badge-success",
-        "ERREUR" | "ERROR" | "REJECTED" | "REJETÉ" | "REJETE" | "ANNULÉ" | "ANNULE" => "badge-error",
-        "EN_ATTENTE" | "PENDING" | "WAITINGACK" | "WAITING" | "ATTENTE_ACK" => "badge-warning",
-        "VALIDATED" | "VALIDÉ" | "VALIDE" | "RECEIVED" | "REÇU" | "RECU" | "TRANSFORMÉ" | "TRANSFORME" => "badge-info",
-        _ => "badge-default",
+/// Direction métier d'une facture vue par un tenant. Détermine le libellé
+/// AFNOR à afficher : un même `FlowStatus::Distributed` correspond à
+/// `201 Émise` côté vendeur mais `203 Mise à disposition` côté acheteur.
+#[derive(Debug, Clone, Copy)]
+enum DisplayDirection {
+    /// Le tenant est vendeur (BT-30) — facture émise.
+    Emise,
+    /// Le tenant est acheteur (BT-47) — facture reçue.
+    Recue,
+}
+
+impl DisplayDirection {
+    fn from_route(d: FlowDirection) -> Self {
+        match d {
+            FlowDirection::Emises => Self::Emise,
+            FlowDirection::Recues => Self::Recue,
+        }
+    }
+
+    /// Détermine la direction métier en comparant le SIREN du tenant
+    /// à `seller_siren` / `buyer_siren` du document. Utilisé par la vue
+    /// détail où la route ne porte pas la direction.
+    fn from_summary(viewing_siren: &str, sum: &pdp_trace::store::ExchangeSummary) -> Self {
+        if sum.seller_siren.as_deref() == Some(viewing_siren) {
+            Self::Emise
+        } else {
+            Self::Recue
+        }
     }
 }
 
-/// Statut "métier" affiché à l'utilisateur. Si la facture a des erreurs
-/// (`error_count > 0`), on affiche **ERREUR** quel que soit l'état brut du
-/// pipeline (le pipeline continue après une erreur non bloquante mais on ne
-/// veut pas afficher "DISTRIBUÉ" sur une facture rejetable). Sinon on rend
-/// le statut tel quel.
-fn effective_status<'a>(raw_status: &'a str, error_count: i32) -> (&'a str, &'static str) {
-    if error_count > 0 {
-        ("ERREUR", "badge-error")
-    } else {
-        (raw_status, status_badge(raw_status))
+/// Classe CSS du badge associée à un code AFNOR `InvoiceStatusCode`.
+fn afnor_badge_for_code(code: u16) -> &'static str {
+    use pdp_cdar::model::InvoiceStatusCode::*;
+    match pdp_cdar::model::InvoiceStatusCode::from_code(code) {
+        // Rejets / irrecevabilité → rouge.
+        Some(Refusee) | Some(Rejetee) | Some(Irrecevable) | Some(ErreurRoutage) => {
+            "badge-error"
+        }
+        // États transitoires "en attente d'action" → orange.
+        Some(EnLitige) | Some(Suspendue) | Some(Annulee) => "badge-warning",
+        // États "transmise / vue / acquittée par C4" → vert.
+        Some(Emise)
+        | Some(Recue)
+        | Some(MiseADisposition)
+        | Some(PriseEnCharge)
+        | Some(Approuvee)
+        | Some(ApprouveePartiellement)
+        | Some(Completee)
+        | Some(Visee)
+        | Some(PaiementTransmis)
+        | Some(Encaissee) => "badge-success",
+        // 200 Déposée + autres → bleu (in-flight côté PDP).
+        _ => "badge-info",
+    }
+}
+
+/// Statut métier AFNOR affiché à l'utilisateur.
+///
+/// Si la facture porte un `cdv_status_code` (CDV reçu de l'acheteur ou du
+/// PPF), on retourne directement le libellé granulaire AFNOR (204 Prise en
+/// charge, 205 Approuvée, 210 Refusée, 212 Encaissée, …). Sinon on retombe
+/// sur la dérivation depuis `FlowStatus` interne, direction-dépendante.
+///
+/// Référence : XP Z12-012 Annexe A V1.2 (codes 200-501),
+/// `specs/codelists/Statuts_facture_G2B_B2G.xlsx`,
+/// docs/cdar.md §"Statuts de cycle de vie".
+fn afnor_status(
+    raw_status: &str,
+    error_count: i32,
+    cdv_status_code: Option<u16>,
+    dir: DisplayDirection,
+) -> (String, &'static str) {
+    // 1. CDV reçu : libellé AFNOR exact, désambigüisé selon la direction.
+    //    Côté émission, le vendeur ne doit jamais voir « Reçue » sur sa propre
+    //    facture (ce serait illogique) : les codes 201/202/203 — qui décrivent
+    //    le passage de la facture chez la PDP destinataire — collapse sur
+    //    « Émise ». Côté réception, on garde « Reçue de la plateforme » pour
+    //    distinguer du 203 Mise à disposition.
+    if let Some(code) = cdv_status_code {
+        let label = match (code, dir) {
+            (201, DisplayDirection::Emise) => Some("Émise".to_string()),
+            (202, DisplayDirection::Emise) => Some("Émise".to_string()),
+            (203, DisplayDirection::Emise) => Some("Émise".to_string()),
+            (202, DisplayDirection::Recue) => Some("Reçue de la plateforme".to_string()),
+            _ => pdp_cdar::model::InvoiceStatusCode::from_code(code)
+                .map(|s| s.label().replace('_', " ")),
+        };
+        if let Some(label) = label {
+            return (label, afnor_badge_for_code(code));
+        }
+    }
+
+    // 2. Pas de CDV : dérivation depuis FlowStatus.
+    let upper = raw_status.to_uppercase();
+
+    // 213 Rejetée (toute erreur ou rejet explicite).
+    if error_count > 0
+        || matches!(
+            upper.as_str(),
+            "ERREUR"
+                | "ERROR"
+                | "REJETÉ"
+                | "REJETE"
+                | "REJETÉE"
+                | "REJETEE"
+                | "REJECTED"
+        )
+    {
+        return ("Rejetée".to_string(), "badge-error");
+    }
+
+    // 220 Annulée.
+    if matches!(
+        upper.as_str(),
+        "ANNULÉ" | "ANNULE" | "ANNULÉE" | "ANNULEE" | "CANCELLED" | "CANCELED"
+    ) {
+        return ("Annulée".to_string(), "badge-warning");
+    }
+
+    match dir {
+        DisplayDirection::Emise => match upper.as_str() {
+            "REÇU" | "RECU" | "RECEIVED" | "PARSING" | "PARSÉ" | "PARSE" | "PARSED"
+            | "VALIDATION" | "VALIDATING" | "VALIDÉ" | "VALIDE" | "VALIDATED"
+            | "TRANSFORMATION" | "TRANSFORMING" | "TRANSFORMÉ" | "TRANSFORME"
+            | "TRANSFORMED" | "DISTRIBUTION" | "DISTRIBUTING" => {
+                ("Déposée".to_string(), "badge-info")
+            }
+            "DISTRIBUÉ" | "DISTRIBUE" | "DISTRIBUTED" | "ATTENTE_ACK" | "WAITINGACK"
+            | "WAITING" | "ACQUITTÉ" | "ACQUITTE" | "ACKNOWLEDGED" => {
+                ("Émise".to_string(), "badge-success")
+            }
+            _ => (raw_status.to_string(), "badge-default"),
+        },
+        DisplayDirection::Recue => match upper.as_str() {
+            "REÇU" | "RECU" | "RECEIVED" | "PARSING" | "PARSÉ" | "PARSE" | "PARSED"
+            | "VALIDATION" | "VALIDATING" | "VALIDÉ" | "VALIDE" | "VALIDATED"
+            | "TRANSFORMATION" | "TRANSFORMING" | "TRANSFORMÉ" | "TRANSFORME"
+            | "TRANSFORMED" => ("Reçue".to_string(), "badge-info"),
+            "DISTRIBUTION" | "DISTRIBUTING" | "DISTRIBUÉ" | "DISTRIBUE"
+            | "DISTRIBUTED" | "ATTENTE_ACK" | "WAITINGACK" | "WAITING" | "ACQUITTÉ"
+            | "ACQUITTE" | "ACKNOWLEDGED" => {
+                ("Mise à disposition".to_string(), "badge-success")
+            }
+            _ => (raw_status.to_string(), "badge-default"),
+        },
     }
 }
 
@@ -629,9 +755,9 @@ async fn render_flows_list(
     <input type="hidden" name="siren" value="{siren}">
     <select name="status">
         <option value="">— Tous les statuts —</option>
-        <option value="DISTRIBUÉ" {sel_dist}>Distribués</option>
-        <option value="ERREUR" {sel_err}>En erreur</option>
-        <option value="EN_ATTENTE" {sel_pending}>En attente</option>
+        <option value="DISTRIBUÉ" {sel_dist}>Transmise au destinataire</option>
+        <option value="ERREUR" {sel_err}>Rejetée (213)</option>
+        <option value="EN_ATTENTE" {sel_pending}>En cours de traitement</option>
     </select>
     <input type="date" name="from" value="{from}" placeholder="Du">
     <input type="date" name="to" value="{to}" placeholder="Au">
@@ -712,12 +838,22 @@ async fn render_flows_list(
                             invoice = html_escape(e.invoice_number.as_deref().unwrap_or("—")),
                             counterparty = counterparty_cell,
                             badge = {
-                                let (_, b) = effective_status(&e.status, e.error_count);
+                                let (_, b) = afnor_status(
+                                    &e.status,
+                                    e.error_count,
+                                    e.cdv_status_code,
+                                    DisplayDirection::from_route(direction),
+                                );
                                 b
                             },
                             status = {
-                                let (s, _) = effective_status(&e.status, e.error_count);
-                                html_escape(s)
+                                let (s, _) = afnor_status(
+                                    &e.status,
+                                    e.error_count,
+                                    e.cdv_status_code,
+                                    DisplayDirection::from_route(direction),
+                                );
+                                html_escape(&s)
                             },
                             pj = pj_cell,
                             errors = errors_cell,
@@ -837,79 +973,150 @@ fn build_pagination(
 // Timeline du pipeline (events + errors fusionnés chronologiquement)
 // ============================================================
 
-/// Construit la timeline affichée sur la page détail.
+/// Mappe un statut pipeline interne (`FlowStatus`) sur l'étape AFNOR
+/// correspondante du cycle de vie facture (XP Z12-012). Renvoie `None` pour
+/// les étapes purement internes (PARSING, VALIDATION, TRANSFORMATION, …) qui
+/// ne doivent pas être visibles côté utilisateur.
+fn pipeline_event_to_afnor(status: &str, dir: DisplayDirection) -> Option<(&'static str, &'static str)> {
+    match status.to_uppercase().as_str() {
+        "REÇU" | "RECU" | "RECEIVED" => Some(("Déposée", "badge-info")),
+        "DISTRIBUÉ" | "DISTRIBUE" | "DISTRIBUTED" | "ACQUITTÉ" | "ACQUITTE" | "ACKNOWLEDGED" => {
+            match dir {
+                DisplayDirection::Emise => Some(("Émise", "badge-success")),
+                DisplayDirection::Recue => Some(("Mise à disposition", "badge-success")),
+            }
+        }
+        "REJETÉ" | "REJETE" | "REJECTED" => Some(("Rejetée", "badge-error")),
+        "ANNULÉ" | "ANNULE" | "CANCELLED" => Some(("Annulée", "badge-warning")),
+        // Étapes purement internes du pipeline — ne pas afficher.
+        _ => None,
+    }
+}
+
+/// Construit la timeline AFNOR de la facture pour la page détail.
 ///
-/// Les `events` (REÇU, PARSÉ, VALIDÉ, DISTRIBUÉ…) racontent ce que les
-/// processors ont **fait**, tandis que les `errors` racontent ce qui a **mal
-/// tourné** au passage. Le pipeline ne s'arrête pas sur une erreur non
-/// bloquante (la responsabilité de générer un CDV de rejet incombe au
-/// `CdarProcessor` en aval), donc une facture peut très bien aller jusqu'à
-/// `DISTRIBUÉ` tout en ayant des erreurs collectées en route.
+/// **Seuls les statuts AFNOR officiels** sont affichés (XP Z12-012 Annexe A
+/// V1.2, codes 200-501). Les libellés pipeline internes (PARSÉ, VALIDÉ,
+/// TRANSFORMÉ, etc.) sont filtrés : ils décrivent l'implémentation et
+/// n'ont aucune valeur pour l'utilisateur.
 ///
-/// Pour ne pas induire l'utilisateur en erreur, on **fusionne** events et
-/// errors dans une seule liste triée par timestamp, et on tronque la
-/// progression `events` après la première erreur — les statuts ultérieurs
-/// (DISTRIBUÉ, ACQUITTÉ…) ne sont pas affichés car ils ne reflètent pas
-/// l'issue réelle de la facture.
+/// Les events `REÇU`/`DISTRIBUÉ`/`ACQUITTÉ` du pipeline interne sont remappés
+/// vers `Déposée` / `Émise` (ou `Mise à disposition` côté reçue). Les erreurs
+/// deviennent `Rejetée` (CDV 213). Si un `cdv_status_code` est présent, son
+/// libellé AFNOR exact est ajouté en fin de timeline (Approuvée, Encaissée,
+/// Refusée, En litige, …).
+///
+/// La timeline est tronquée après la première erreur : les statuts ultérieurs
+/// (DISTRIBUÉ alors qu'une erreur annuaire-validation est survenue) ne
+/// reflètent pas l'issue métier réelle.
 fn render_timeline(
     events: &[pdp_trace::store::EventEntry],
     errors: &[pdp_trace::store::ErrorEntry],
+    cdv_status_code: Option<u16>,
+    dir: DisplayDirection,
 ) -> String {
-    if events.is_empty() && errors.is_empty() {
+    if events.is_empty() && errors.is_empty() && cdv_status_code.is_none() {
         return r#"<p style="color:#888">Aucun événement enregistré.</p>"#.to_string();
     }
+
     enum Item<'a> {
-        Event(&'a pdp_trace::store::EventEntry),
+        /// Étape AFNOR remappée depuis un event pipeline.
+        AfnorEvent {
+            ts: &'a str,
+            route: &'a str,
+            label: &'static str,
+            badge: &'static str,
+        },
         Error(&'a pdp_trace::store::ErrorEntry),
     }
-    let mut items: Vec<Item> = events.iter().map(Item::Event).chain(errors.iter().map(Item::Error)).collect();
+
+    // 1. Convertir chaque event pipeline en étape AFNOR (filtre les internes).
+    let mut items: Vec<Item> = Vec::new();
+    for ev in events {
+        if let Some((label, badge)) = pipeline_event_to_afnor(&ev.status, dir) {
+            items.push(Item::AfnorEvent {
+                ts: &ev.timestamp,
+                route: &ev.route_id,
+                label,
+                badge,
+            });
+        }
+    }
+    for er in errors {
+        items.push(Item::Error(er));
+    }
+
+    // 2. Tri chronologique.
     items.sort_by(|a, b| {
         let ta = match a {
-            Item::Event(e) => &e.timestamp,
-            Item::Error(e) => &e.timestamp,
+            Item::AfnorEvent { ts, .. } => *ts,
+            Item::Error(e) => e.timestamp.as_str(),
         };
         let tb = match b {
-            Item::Event(e) => &e.timestamp,
-            Item::Error(e) => &e.timestamp,
+            Item::AfnorEvent { ts, .. } => *ts,
+            Item::Error(e) => e.timestamp.as_str(),
         };
         ta.cmp(tb)
     });
 
-    // Tronque après la première erreur : les statuts pipeline qui suivent
-    // (ex. DISTRIBUÉ alors qu'on a une erreur annuaire-validation) sont
-    // trompeurs et ne reflètent pas le rejet métier qui arrive en aval.
+    // 3. Tronque après la première erreur métier.
     let first_err_pos = items.iter().position(|it| matches!(it, Item::Error(_)));
     if let Some(idx) = first_err_pos {
         items.truncate(idx + 1);
     }
 
-    let html: Vec<String> = items
+    // 4. Si un CDV granulaire (204/205/210/212/…) est porté par la facture,
+    //    on l'ajoute comme dernière étape — sauf si la timeline est déjà
+    //    terminée par une erreur (rejet métier prioritaire).
+    let mut html_items: Vec<String> = items
         .iter()
         .map(|it| match it {
-            Item::Event(ev) => format!(
+            Item::AfnorEvent { ts, route, label, badge } => format!(
                 r#"<div class="timeline-item">
-    <div class="ts">{ts} — route <code>{route}</code></div>
-    <div class="label">{status}</div>
-    <div class="msg">{msg}</div>
+    <div class="ts">{ts}</div>
+    <div class="label"><span class="badge {badge}">{label}</span></div>
+    <div class="msg">Route <code>{route}</code></div>
 </div>"#,
-                ts = html_escape(&ev.timestamp),
-                route = html_escape(&ev.route_id),
-                status = html_escape(&ev.status),
-                msg = html_escape(&ev.message),
+                ts = html_escape(ts),
+                badge = badge,
+                label = label,
+                route = html_escape(route),
             ),
             Item::Error(er) => format!(
                 r#"<div class="timeline-item timeline-error">
-    <div class="ts">{ts} — étape <code>{step}</code></div>
-    <div class="label">❌ ERREUR</div>
+    <div class="ts">{ts}</div>
+    <div class="label"><span class="badge badge-error">Rejetée</span></div>
     <div class="msg">{msg}</div>
 </div>"#,
                 ts = html_escape(&er.timestamp),
-                step = html_escape(&er.step),
                 msg = html_escape(&er.message),
             ),
         })
         .collect();
-    format!(r#"<div class="timeline">{}</div>"#, html.join(""))
+
+    let already_ended_in_error = matches!(items.last(), Some(Item::Error(_)));
+    if let Some(code) = cdv_status_code {
+        if !already_ended_in_error {
+            // Le label "officiel" passe par afnor_status pour bénéficier des
+            // règles direction-aware (202 → "Émise" côté émetteur, etc.).
+            let (label, badge) = afnor_status("", 0, Some(code), dir);
+            html_items.push(format!(
+                r#"<div class="timeline-item">
+    <div class="ts">CDV — code AFNOR {code}</div>
+    <div class="label"><span class="badge {badge}">{label}</span></div>
+    <div class="msg">Statut métier porté par le CDV reçu</div>
+</div>"#,
+                code = code,
+                badge = badge,
+                label = html_escape(&label),
+            ));
+        }
+    }
+
+    if html_items.is_empty() {
+        return r#"<p style="color:#888">Aucune étape AFNOR enregistrée.</p>"#.to_string();
+    }
+    format!(r#"<div class="timeline">{}</div>"#, html_items.join(""))
 }
 
 // ============================================================
@@ -1114,12 +1321,37 @@ pub async fn handle_flow_detail(
     html_response(&page_shell("Détail flux", nav_active, siren, &body)).into_response()
 }
 
+/// Affiche le format source de la facture avec un badge coloré + le nom du
+/// standard auquel il se rattache. Conforme XP Z12-012 (formats supportés
+/// EN16931 par la PDP : UBL 2.1, CII D16B, Factur-X 1.07.2).
+fn render_source_format(format: Option<&str>) -> String {
+    let raw = format.unwrap_or("").to_uppercase();
+    let (label, full_name, badge) = match raw.as_str() {
+        "UBL" => ("UBL", "OASIS Universal Business Language 2.1", "badge-info"),
+        "CII" => ("CII", "UN/CEFACT Cross Industry Invoice D16B", "badge-info"),
+        "FACTURX" | "FACTUR-X" => (
+            "Factur-X",
+            "PDF/A-3 hybride (PDF visuel + XML CII embarqué)",
+            "badge-success",
+        ),
+        "" => return r#"<span style="color:#888">—</span>"#.to_string(),
+        _ => return html_escape(format.unwrap_or("—")),
+    };
+    format!(
+        r#"<span class="badge {badge}">{label}</span> <span style="color:#666;font-size:0.9rem">— {full_name}</span>"#,
+        badge = badge,
+        label = label,
+        full_name = full_name,
+    )
+}
+
 fn render_flow_detail(
     siren: &str,
     flow_id: &str,
     sum: &pdp_trace::store::ExchangeSummary,
     full: Option<&pdp_trace::store::ExchangeDocument>,
 ) -> String {
+    let format_html = render_source_format(full.and_then(|f| f.source_format.as_deref()));
     let metadata = format!(
         r#"<dl class="kv">
     <dt>Flow ID</dt><dd><code>{flow_id}</code></dd>
@@ -1127,7 +1359,7 @@ fn render_flow_detail(
     <dt>Numéro facture</dt><dd>{invoice}</dd>
     <dt>Vendeur</dt><dd>{seller} ({seller_siret})</dd>
     <dt>Acheteur</dt><dd>{buyer} ({buyer_siret})</dd>
-    <dt>Format</dt><dd>{format}</dd>
+    <dt>Type de fichier original</dt><dd>{format}</dd>
     <dt>Total HT</dt><dd>{total_ht}</dd>
     <dt>Total TVA</dt><dd>{total_tax}</dd>
     <dt>Total TTC</dt><dd>{total_ttc}</dd>
@@ -1143,26 +1375,37 @@ fn render_flow_detail(
         seller_siret = html_escape(full.and_then(|f| f.seller_siret.as_deref()).unwrap_or("—")),
         buyer = html_escape(sum.buyer_name.as_deref().unwrap_or("—")),
         buyer_siret = html_escape(full.and_then(|f| f.buyer_siret.as_deref()).unwrap_or("—")),
-        format = html_escape(full.and_then(|f| f.source_format.as_deref()).unwrap_or("—")),
+        format = format_html,
         total_ht = full.and_then(|f| f.total_ht).map(|v| format!("{:.2}", v)).unwrap_or_else(|| "—".into()),
         total_tax = full.and_then(|f| f.total_tax).map(|v| format!("{:.2}", v)).unwrap_or_else(|| "—".into()),
         total_ttc = full.and_then(|f| f.total_ttc).map(|v| format!("{:.2}", v)).unwrap_or_else(|| "—".into()),
         currency = html_escape(full.and_then(|f| f.currency.as_deref()).unwrap_or("—")),
         issue_date = html_escape(full.and_then(|f| f.issue_date.as_deref()).unwrap_or("—")),
         badge = {
-            let (_, b) = effective_status(&sum.status, sum.error_count);
+            let (_, b) = afnor_status(
+                &sum.status,
+                sum.error_count,
+                sum.cdv_status_code,
+                DisplayDirection::from_summary(siren, sum),
+            );
             b
         },
         status = {
-            let (s, _) = effective_status(&sum.status, sum.error_count);
-            html_escape(s)
+            let (s, _) = afnor_status(
+                &sum.status,
+                sum.error_count,
+                sum.cdv_status_code,
+                DisplayDirection::from_summary(siren, sum),
+            );
+            html_escape(&s)
         },
         created_at = html_escape(&sum.created_at),
     );
 
+    let dir = DisplayDirection::from_summary(siren, sum);
     let timeline = match full {
         None => String::new(),
-        Some(doc) => render_timeline(&doc.events, &doc.errors),
+        Some(doc) => render_timeline(&doc.events, &doc.errors, sum.cdv_status_code, dir),
     };
 
     let errors = match full {
@@ -1205,7 +1448,7 @@ fn render_flow_detail(
         }
     };
 
-    // Liens de téléchargement (XML brut, PDF Factur-X)
+    // Liens de téléchargement (XML brut, PDF Factur-X original, Factur-X généré)
     let downloads = match full {
         None => String::new(),
         Some(doc) => {
@@ -1217,8 +1460,16 @@ fn render_flow_detail(
                 ));
             }
             if doc.raw_pdf_base64.is_some() {
+                // Source Factur-X : on dispose du PDF/A-3 original.
                 links.push(format!(
                     r#"<a class="dl-btn" href="/ui/flows/{f}/download/pdf?siren={s}">⬇️ PDF Factur-X</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren),
+                ));
+            } else if doc.raw_xml.is_some() {
+                // Source UBL/CII : on peut générer un Factur-X à la volée
+                // (PDF/A-3 + CII embarqué) via `pdp_transform::convert`.
+                links.push(format!(
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/facturx?siren={s}">⬇️ Factur-X (généré)</a>"#,
                     f = html_escape(flow_id), s = html_escape(siren),
                 ));
             }
@@ -1306,6 +1557,98 @@ pub async fn handle_download_xml(
         headers.insert("content-disposition", v);
     }
     (StatusCode::OK, headers, xml).into_response()
+}
+
+/// GET /ui/flows/{flowId}/download/facturx
+/// Génère et télécharge un PDF Factur-X (PDF/A-3 + XML CII embarqué)
+/// conforme à la spec Factur-X 1.07.2 / EN 16931 niveau BASIC.
+///
+/// - Si la facture est déjà un Factur-X reçu, retourne le PDF original
+///   (équivalent à `/download/pdf`).
+/// - Si c'est un UBL ou CII, parse l'XML et utilise `pdp_transform::convert`
+///   (Typst PDF/A-3 + injection CII) pour produire un Factur-X à la volée.
+pub async fn handle_download_facturx(
+    State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
+    Path(flow_id): Path<String>,
+) -> axum::response::Response {
+    let siren = siren.as_str();
+    let doc = match lookup_doc(&state, siren, &flow_id).await {
+        Some(d) => d,
+        None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
+    };
+
+    // Cas 1 : facture source déjà en Factur-X → retourne le PDF original.
+    if let Some(b64) = doc.raw_pdf_base64.as_deref() {
+        use base64::Engine as _;
+        if let Ok(pdf_bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
+            let invoice_no = doc.invoice_number.clone().unwrap_or_else(|| flow_id.clone());
+            return facturx_pdf_response(pdf_bytes, &invoice_no);
+        }
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Décodage base64 PDF échoué")
+            .into_response();
+    }
+
+    // Cas 2 : source UBL/CII → conversion à la volée.
+    let invoice = match parse_invoice_for_facturx(&doc) {
+        Some(inv) => inv,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                "Aucune source convertible : raw_xml absent ou format inconnu",
+            )
+                .into_response();
+        }
+    };
+
+    match pdp_transform::convert(&invoice, pdp_core::model::InvoiceFormat::FacturX) {
+        Ok(result) => facturx_pdf_response(result.content, &invoice.invoice_number),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Échec génération Factur-X : {}", e),
+        )
+            .into_response(),
+    }
+}
+
+fn facturx_pdf_response(pdf_bytes: Vec<u8>, invoice_no: &str) -> axum::response::Response {
+    let filename = format!("{}_facturx.pdf", invoice_no);
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "application/pdf".parse().unwrap());
+    if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
+        headers.insert("content-disposition", v);
+    }
+    (StatusCode::OK, headers, pdf_bytes).into_response()
+}
+
+/// Parse l'`ExchangeDocument` en `InvoiceData` selon `source_format`. Variante
+/// locale de `exchange_doc_to_invoice` (main.rs) pour rester self-contained
+/// dans le module ui.
+fn parse_invoice_for_facturx(
+    doc: &pdp_trace::store::ExchangeDocument,
+) -> Option<pdp_core::model::InvoiceData> {
+    let raw = doc.raw_xml.as_deref()?;
+    let bytes = raw.as_bytes().to_vec();
+    let format_str = doc.source_format.as_deref().unwrap_or("UBL").to_uppercase();
+    match format_str.as_str() {
+        "UBL" => pdp_invoice::UblParser::new().parse(raw).ok(),
+        "CII" => pdp_invoice::CiiParser::new().parse(raw).ok(),
+        "FACTURX" | "FACTUR-X" => pdp_invoice::FacturXParser::new().parse(&bytes).ok(),
+        _ => {
+            let format = pdp_invoice::detect_format(&bytes).ok()?;
+            match format {
+                pdp_core::model::InvoiceFormat::UBL => {
+                    pdp_invoice::UblParser::new().parse(raw).ok()
+                }
+                pdp_core::model::InvoiceFormat::CII => {
+                    pdp_invoice::CiiParser::new().parse(raw).ok()
+                }
+                pdp_core::model::InvoiceFormat::FacturX => {
+                    pdp_invoice::FacturXParser::new().parse(&bytes).ok()
+                }
+            }
+        }
+    }
 }
 
 /// GET /ui/flows/{flowId}/download/pdf
@@ -1451,6 +1794,7 @@ mod tests {
             issue_date: None,
             status: "DISTRIBUÉ".into(),
             error_count: 0,
+            cdv_status_code: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,
@@ -1547,6 +1891,53 @@ mod tests {
         assert!(html.contains("ATT-2"));
         assert!(html.contains(r#"<a href="https://example.com/specs.pdf""#));
         assert!(html.contains("externe"));
+    }
+
+    #[test]
+    fn test_afnor_status_prefers_cdv_code_when_present() {
+        // Quand un CDV est reçu, on doit afficher le libellé AFNOR exact
+        // — y compris ceux que `FlowStatus` ne distingue pas (204/205/210/212).
+        // Côté émission, 201/202/203 collapse sur « Émise » : le vendeur ne
+        // doit jamais voir « Reçue » sur sa propre facture.
+        let cases_emise = [
+            (200u16, "Déposée", "badge-info"),
+            (201, "Émise", "badge-success"),
+            (202, "Émise", "badge-success"),
+            (203, "Émise", "badge-success"),
+            (204, "Prise en charge", "badge-success"),
+            (205, "Approuvée", "badge-success"),
+            (207, "En litige", "badge-warning"),
+            (210, "Refusée", "badge-error"),
+            (212, "Encaissée", "badge-success"),
+            (213, "Rejetée", "badge-error"),
+            (220, "Annulée", "badge-warning"),
+            (501, "Irrecevable", "badge-error"),
+        ];
+        for (code, expected_label, expected_badge) in cases_emise {
+            let (label, badge) = afnor_status("ACQUITTÉ", 0, Some(code), DisplayDirection::Emise);
+            assert_eq!(label, expected_label, "emise code {code}: label");
+            assert_eq!(badge, expected_badge, "emise code {code}: badge");
+        }
+
+        // Côté réception, 202 reste « Reçue de la plateforme » (distinction
+        // avec 203 Mise à disposition).
+        let (label, _) = afnor_status("ACQUITTÉ", 0, Some(202), DisplayDirection::Recue);
+        assert_eq!(label, "Reçue de la plateforme");
+    }
+
+    #[test]
+    fn test_afnor_status_falls_back_to_flow_status_without_cdv() {
+        // Sans CDV, on dérive depuis FlowStatus + direction.
+        let (label, badge) = afnor_status("DISTRIBUÉ", 0, None, DisplayDirection::Emise);
+        assert_eq!(label, "Émise");
+        assert_eq!(badge, "badge-success");
+
+        let (label, _) = afnor_status("DISTRIBUÉ", 0, None, DisplayDirection::Recue);
+        assert_eq!(label, "Mise à disposition");
+
+        let (label, badge) = afnor_status("VALIDÉ", 1, None, DisplayDirection::Emise);
+        assert_eq!(label, "Rejetée");
+        assert_eq!(badge, "badge-error");
     }
 
     #[test]

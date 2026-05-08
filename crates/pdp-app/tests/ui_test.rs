@@ -90,6 +90,7 @@ impl InMemoryTraceBackend {
             error_count: d.error_count,
             created_at: d.created_at.clone(),
             attachment_count: d.attachment_count,
+            cdv_status_code: d.cdv_status_code,
         }
     }
 }
@@ -317,6 +318,7 @@ fn doc(
         issue_date: Some(issue_date.to_string()),
         status: status.to_string(),
         error_count,
+        cdv_status_code: None,
         raw_xml: Some(format!("<Invoice id=\"{}\"/>", invoice_number)),
         raw_pdf_base64: None,
         converted_xml: None,
@@ -584,7 +586,9 @@ async fn test_flow_detail_renders_metadata() {
     assert!(body.contains("INV-001"), "numéro de facture");
     assert!(body.contains("Vendeur 123456789"), "nom vendeur");
     assert!(body.contains("Acheteur 987654321"), "nom acheteur");
-    assert!(body.contains("DISTRIBUÉ"), "statut");
+    // Statut AFNOR : tenant = vendeur (123456789), facture DISTRIBUÉ →
+    // 201 Émise (cf. XP Z12-012 §"Statuts émis par la PDP").
+    assert!(body.contains("Émise"), "statut AFNOR émise attendu, got=\n{body}");
     // Timeline événement
     assert!(body.contains("Test event") || body.contains("route-test"));
 }
@@ -894,28 +898,34 @@ async fn test_timeline_truncates_after_first_error() {
     let (_, body) =
         get_html(state, &format!("/ui/flows/flow-{target_id}?siren=123456789")).await;
 
-    // Timeline : REÇU/PARSÉ/VALIDÉ visibles + 1 entrée d'erreur ; DISTRIBUÉ NON
+    // Timeline : seuls les statuts AFNOR officiels sont visibles
+    // (XP Z12-012 Annexe A V1.2). Les libellés pipeline internes
+    // (PARSÉ/VALIDÉ/TRANSFORMÉ) sont filtrés. REÇU → "Déposée".
+    // L'événement DISTRIBUÉ post-erreur NE doit PAS apparaître.
     let timeline_start = body.find(r#"class="timeline""#).expect("bloc timeline");
     let timeline_end = body[timeline_start..].find("</div></div>").map(|p| timeline_start + p).unwrap_or(body.len());
     let timeline = &body[timeline_start..timeline_end];
-    assert!(timeline.contains("REÇU"));
-    assert!(timeline.contains("PARSÉ"));
-    assert!(timeline.contains("VALIDÉ"));
-    assert!(timeline.contains("annuaire-validation"));
+    assert!(timeline.contains("Déposée"), "REÇU → Déposée (CDV 200) attendu");
+    // Les libellés internes ne doivent JAMAIS apparaître.
+    assert!(!timeline.contains(">PARSÉ<"), "PARSÉ est interne et doit être masqué");
+    assert!(!timeline.contains(">VALIDÉ<"), "VALIDÉ est interne et doit être masqué");
+    // Erreur métier : libellée Rejetée + message original visible.
+    assert!(timeline.contains("Rejetée"), "erreur → Rejetée (CDV 213)");
     assert!(timeline.contains("Vendeur inconnu"));
     assert!(timeline.contains("timeline-error"), "doit avoir une entrée timeline-error");
+    // DISTRIBUÉ post-erreur reste filtré (rejet métier prioritaire).
     assert!(
-        !timeline.contains("DISTRIBUÉ"),
-        "DISTRIBUÉ est postérieur à l'erreur — ne doit pas apparaître dans la timeline ; got=\n{timeline}"
+        !timeline.contains(">Émise<") && !timeline.contains(">Mise à disposition<"),
+        "DISTRIBUÉ post-erreur ne doit pas apparaître ; got=\n{timeline}"
     );
 }
 
 #[tokio::test]
-async fn test_status_with_errors_shows_erreur_not_raw_status() {
-    // Une facture avec error_count > 0 doit afficher le badge "ERREUR" (rouge)
-    // dans la liste ET le détail, même si son statut brut du pipeline est
-    // "DISTRIBUÉ" / "VALIDÉ" (le pipeline ne s'arrête pas sur les erreurs
-    // non bloquantes — c'est l'UI qui rend l'état métier).
+async fn test_status_with_errors_shows_rejetee_not_raw_status() {
+    // Une facture avec error_count > 0 doit afficher le badge "Rejetée" (CDV
+    // 213, badge rouge) dans la liste ET le détail, même si son statut brut
+    // du pipeline est "DISTRIBUÉ" / "VALIDÉ" (le pipeline ne s'arrête pas sur
+    // les erreurs non bloquantes — c'est l'UI qui rend l'état métier AFNOR).
     let mut docs = seed();
     // Mute INV-002 qui est VALIDÉ err=0 → simule une "VALIDÉ avec erreur"
     if let Some(d) = docs.iter_mut().find(|d| d.invoice_number.as_deref() == Some("INV-002")) {
@@ -929,9 +939,8 @@ async fn test_status_with_errors_shows_erreur_not_raw_status() {
     }
     let state = build_state(Arc::new(InMemoryTraceBackend::new(docs)));
 
-    // Liste : la ligne INV-002 doit avoir le badge ERREUR (rouge)
+    // Liste : la ligne INV-002 doit avoir le badge Rejetée (rouge)
     let (_, list) = get_html(state.clone(), "/ui/emises?siren=123456789").await;
-    // Trouve le bloc HTML autour de INV-002 (raisonnablement local)
     let pos = list.find("INV-002").expect("INV-002 dans la liste");
     let window = &list[pos.saturating_sub(400)..(pos + 200).min(list.len())];
     assert!(
@@ -939,8 +948,8 @@ async fn test_status_with_errors_shows_erreur_not_raw_status() {
         "INV-002 (err=1) doit avoir badge-error dans la liste ; window=\n{window}"
     );
     assert!(
-        window.contains("ERREUR"),
-        "INV-002 (err=1) doit afficher 'ERREUR' dans la liste"
+        window.contains("Rejetée"),
+        "INV-002 (err=1) doit afficher 'Rejetée' (CDV 213) dans la liste"
     );
     assert!(
         !window.contains(">VALIDÉ<"),
@@ -949,7 +958,7 @@ async fn test_status_with_errors_shows_erreur_not_raw_status() {
 
     // Détail : pareil + section Erreurs visible
     let (_, detail) = get_html(state, "/ui/flows/flow-ex-2?siren=123456789").await;
-    assert!(detail.contains(r#"<span class="badge badge-error">ERREUR</span>"#));
+    assert!(detail.contains(r#"<span class="badge badge-error">Rejetée</span>"#));
     assert!(detail.contains("Émetteur inconnu (test)"));
 }
 

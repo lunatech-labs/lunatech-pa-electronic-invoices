@@ -66,6 +66,12 @@ pub struct ExchangeDocument {
     pub issue_date: Option<String>,
     pub status: String,
     pub error_count: i32,
+    /// Code statut AFNOR du cycle de vie facture (XP Z12-012, codes 200-501)
+    /// porté par le dernier CDV reçu pour cette facture. Plus granulaire
+    /// que `status` (FlowStatus) qui collapse 204/205/212 sur Acknowledged.
+    /// Présent uniquement après réception d'un CDV traitement (TypeCode 23).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdv_status_code: Option<u16>,
     /// XML brut de la facture (stocké tel quel, searchable).
     /// Contient toujours le document **original** tel que reçu, indépendamment
     /// d'une éventuelle transformation effectuée par la PDP.
@@ -150,6 +156,11 @@ pub struct ExchangeSummary {
     /// avoir à re-charger le document complet.
     #[serde(default)]
     pub attachment_count: usize,
+    /// Code statut AFNOR du cycle de vie facture (XP Z12-012, codes 200-501)
+    /// si un CDV a été reçu — sinon `None` (le statut affiché retombe sur
+    /// `status` mappé vers AFNOR via `FlowStatus`).
+    #[serde(default)]
+    pub cdv_status_code: Option<u16>,
 }
 
 impl TraceStore {
@@ -279,6 +290,7 @@ impl TraceStore {
                     "issue_date": { "type": "date", "format": "yyyy-MM-dd||strict_date_optional_time" },
                     "status": { "type": "keyword" },
                     "error_count": { "type": "integer" },
+                    "cdv_status_code": { "type": "short" },
                     "raw_xml": { "type": "text", "index": true },
                     "raw_pdf_base64": { "type": "binary" },
                     "converted_xml": { "type": "text", "index": true },
@@ -429,6 +441,19 @@ impl TraceStore {
             issue_date: invoice.and_then(|i| i.issue_date.clone()),
             status: exchange.status.to_string(),
             error_count: exchange.errors.len() as i32,
+            // `cdv.status_code` est posé par CdarProcessor avec le code du CDV
+            // que LA PDP vient de générer (200/202 systématiquement) — ce
+            // n'est PAS le statut métier réel de la facture. On capture
+            // uniquement les CDV reçus d'acteurs externes (acheteur via
+            // CdvReceptionProcessor, qui pose `cdv.received=true`) ou les
+            // statuts simulés par la démo (POST direct via _update_by_query).
+            cdv_status_code: if exchange.get_property("cdv.received").is_some() {
+                exchange
+                    .get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+            } else {
+                None
+            },
             raw_xml,
             raw_pdf_base64,
             converted_xml,
@@ -817,7 +842,7 @@ impl TraceStore {
             "sort": [{ "created_at": "desc" }],
             "size": 50,
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
-                        "seller_name", "buyer_name", "status", "error_count", "created_at"]
+                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code"]
         });
 
         let resp = self.client
@@ -845,7 +870,7 @@ impl TraceStore {
             "sort": [{ "created_at": "desc" }],
             "size": 5,
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
-                        "seller_name", "buyer_name", "status", "error_count", "created_at"]
+                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code"]
         });
 
         let resp = self.client
@@ -1048,7 +1073,7 @@ impl TraceStore {
             "size": page_size,
             "sort": [{ "created_at": "desc" }],
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
-                        "seller_name", "buyer_name", "status", "error_count", "created_at"]
+                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code"]
         });
 
         let resp = self.client
@@ -1339,6 +1364,7 @@ impl TraceStore {
                         error_count: source["error_count"].as_i64().unwrap_or(0) as i32,
                         created_at: source["created_at"].as_str().unwrap_or("").to_string(),
                         attachment_count: source["attachment_count"].as_u64().unwrap_or(0) as usize,
+                        cdv_status_code: source["cdv_status_code"].as_u64().map(|v| v as u16),
                     });
                 }
             }

@@ -27,19 +27,43 @@ impl TypstPdfEngine {
 
     /// Génère un PDF à partir d'une InvoiceData.
     pub fn generate_pdf(&self, invoice: &InvoiceData) -> PdpResult<Vec<u8>> {
+        self.generate_pdf_with_template(invoice, "invoice.typ")
+    }
+
+    /// Génère un PDF en utilisant un template Typst arbitraire dans
+    /// `specs/typst/`. Permet de réutiliser le moteur (polices, JSON dict)
+    /// pour les pièces jointes (bon de commande, bordereau, etc.).
+    pub fn generate_pdf_with_template(
+        &self,
+        invoice: &InvoiceData,
+        template_name: &str,
+    ) -> PdpResult<Vec<u8>> {
         let json_data = self.invoice_to_json(invoice);
-        let template = self.load_template()?;
+        let template = self.load_template_named(template_name)?;
         let fonts = self.load_fonts();
 
         self.compile_to_pdf(&template, &json_data, &fonts)
     }
 
-    /// Charge le template Typst de facture.
-    fn load_template(&self) -> PdpResult<String> {
-        let path = self.specs_dir.join("typst/invoice.typ");
+    /// Génère un PNG à partir d'une InvoiceData en compilant un template
+    /// Typst (1 page, ~144 DPI). Utilisé pour les pièces jointes images
+    /// (bordereau de livraison).
+    pub fn generate_png_with_template(
+        &self,
+        invoice: &InvoiceData,
+        template_name: &str,
+    ) -> PdpResult<Vec<u8>> {
+        let json_data = self.invoice_to_json(invoice);
+        let template = self.load_template_named(template_name)?;
+        let fonts = self.load_fonts();
+        self.compile_to_png(&template, &json_data, &fonts)
+    }
+
+    fn load_template_named(&self, name: &str) -> PdpResult<String> {
+        let path = self.specs_dir.join("typst").join(name);
         std::fs::read_to_string(&path).map_err(|e| PdpError::TransformError {
             source_format: "InvoiceData".to_string(),
-            target_format: "PDF".to_string(),
+            target_format: format!("template {}", name),
             message: format!("Template Typst introuvable ({}): {}", path.display(), e),
         })
     }
@@ -271,6 +295,58 @@ impl TypstPdfEngine {
 
         tracing::debug!(pdf_size = pdf_bytes.len(), "PDF généré via Typst");
         Ok(pdf_bytes)
+    }
+
+    /// Compile un template Typst et exporte la première page en PNG (RGBA).
+    /// Utilisé pour les PJ images (bordereau de livraison).
+    fn compile_to_png(
+        &self,
+        template: &str,
+        json_data: &str,
+        fonts: &[Vec<u8>],
+    ) -> PdpResult<Vec<u8>> {
+        use typst::diag::Warned;
+        use typst_as_lib::TypstEngine;
+
+        let font_refs: Vec<&[u8]> = fonts.iter().map(|f| f.as_slice()).collect();
+        let engine = TypstEngine::builder()
+            .main_file(template)
+            .fonts(font_refs)
+            .build();
+
+        let mut inputs = typst::foundations::Dict::new();
+        inputs.insert(
+            typst::foundations::Str::from("invoice-data"),
+            typst::foundations::Value::Str(typst::foundations::Str::from(json_data)),
+        );
+
+        let Warned { output, warnings } =
+            engine.compile_with_input::<_, typst::layout::PagedDocument>(inputs);
+        for w in &warnings {
+            tracing::warn!(warning = %w.message, "Typst warning");
+        }
+        let document = output.map_err(|e| PdpError::TransformError {
+            source_format: "InvoiceData".to_string(),
+            target_format: "PNG".to_string(),
+            message: format!("Typst compilation échouée: {}", e),
+        })?;
+
+        let page = document.pages.first().ok_or_else(|| PdpError::TransformError {
+            source_format: "InvoiceData".to_string(),
+            target_format: "PNG".to_string(),
+            message: "Document Typst vide".to_string(),
+        })?;
+
+        // 2.0 pixel/pt → ~144 DPI : équilibre taille/lisibilité pour PJ.
+        let pixmap = typst_render::render(page, 2.0);
+        let png = pixmap.encode_png().map_err(|e| PdpError::TransformError {
+            source_format: "InvoiceData".to_string(),
+            target_format: "PNG".to_string(),
+            message: format!("Encodage PNG: {}", e),
+        })?;
+
+        tracing::debug!(png_size = png.len(), "PNG généré via Typst");
+        Ok(png)
     }
 
     /// Supprime les annotations de type Link du PDF pour conformité PDF/A-3.

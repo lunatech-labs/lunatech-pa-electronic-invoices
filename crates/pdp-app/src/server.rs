@@ -316,6 +316,7 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/ui/flows/{flow_id}", get(crate::ui::handle_flow_detail))
         .route("/ui/flows/{flow_id}/download/xml", get(crate::ui::handle_download_xml))
         .route("/ui/flows/{flow_id}/download/pdf", get(crate::ui::handle_download_pdf))
+        .route("/ui/flows/{flow_id}/download/facturx", get(crate::ui::handle_download_facturx))
         .route("/ui/flows/{flow_id}/download/attachment", get(crate::ui::handle_download_attachment))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state.clone());
