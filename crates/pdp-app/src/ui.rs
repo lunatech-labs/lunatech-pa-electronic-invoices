@@ -1988,6 +1988,19 @@ pub async fn handle_logo() -> impl IntoResponse {
     (StatusCode::OK, headers, FERRITE_ICON_PNG).into_response()
 }
 
+/// GET /ui/static/annuaire.js — sert le JS de la page `/annuaire`
+/// (extrait du HTML pour respecter la CSP `script-src 'self'`).
+const ANNUAIRE_JS: &str = include_str!("../static/annuaire.js");
+pub async fn handle_annuaire_js() -> impl IntoResponse {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        "content-type",
+        "application/javascript; charset=utf-8".parse().unwrap(),
+    );
+    headers.insert("cache-control", "public, max-age=3600".parse().unwrap());
+    (StatusCode::OK, headers, ANNUAIRE_JS).into_response()
+}
+
 /// GET /favicon.ico (alias /favicon.png)
 pub async fn handle_favicon() -> impl IntoResponse {
     let mut headers = axum::http::HeaderMap::new();

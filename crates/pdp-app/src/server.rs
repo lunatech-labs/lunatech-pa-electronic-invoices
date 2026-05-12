@@ -347,6 +347,7 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/annuaire", get(handle_annuaire_page))
         .route("/v1/annuaire/search", get(handle_annuaire_search))
         .route("/ui/static/ferrite-icon.png", get(crate::ui::handle_logo))
+        .route("/ui/static/annuaire.js", get(crate::ui::handle_annuaire_js))
         .route("/favicon.ico", get(crate::ui::handle_favicon))
         .route("/favicon.png", get(crate::ui::handle_favicon))
         .route("/login", get(handle_login_page).post(handle_login_submit))
