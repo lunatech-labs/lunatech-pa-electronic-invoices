@@ -244,9 +244,69 @@ dl.kv dd { color: #1a1a2e; }
     font-size: 0.9rem;
     color: #16213e;
 }
+.entreprise-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.8rem;
+}
+.entreprise-card {
+    display: block;
+    padding: 1.2rem;
+    background: white;
+    border: 1px solid #e3e6ea;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #1a1a2e;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.entreprise-card:hover {
+    border-color: #534ab7;
+    box-shadow: 0 4px 12px rgba(83,74,183,0.12);
+    transform: translateY(-1px);
+    text-decoration: none;
+}
+.entreprise-name {
+    font-weight: 600;
+    font-size: 1.05rem;
+    margin-bottom: 0.3rem;
+}
+.entreprise-siren {
+    color: #666;
+    font-size: 0.85rem;
+}
+header nav .nav-user {
+    color: rgba(255,255,255,0.55);
+    font-size: 0.85rem;
+    margin-left: 1.2rem;
+    margin-right: 0.6rem;
+}
+header nav form.logout-form {
+    display: inline;
+    margin-left: 0.6rem;
+}
+header nav form.logout-form button {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.25);
+    color: rgba(255,255,255,0.85);
+    padding: 0.25rem 0.7rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+}
+header nav form.logout-form button:hover {
+    border-color: rgba(255,255,255,0.6);
+    color: white;
+}
 "#;
 
-fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> String {
+pub(crate) fn page_shell(
+    title: &str,
+    active: &str,
+    siren: Option<&str>,
+    ctx: &crate::security::SecurityContext,
+    body: &str,
+) -> String {
     let siren_q = siren.map(|s| format!("?siren={}", s)).unwrap_or_default();
     let nav_link = |path: &str, label: &str, key: &str| {
         let class = if key == active { "active" } else { "" };
@@ -258,6 +318,25 @@ fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> Str
             label = label,
         )
     };
+    // Lien Admin réservé au rôle PdpAdmin. La route est de toute façon
+    // protégée côté serveur (cf. `admin::require_admin`) mais on évite
+    // d'afficher un lien qui mène à un 403 aux opérateurs et tenants.
+    let admin_link = if is_admin(ctx) {
+        let class = if active == "admin" { "active" } else { "" };
+        format!(r#"<a href="/ui/admin" class="{class}">Admin</a>"#)
+    } else {
+        String::new()
+    };
+    // `/logout` n'accepte que POST (anti-CSRF basique : un simple GET ne
+    // doit pas pouvoir déconnecter). On rend un mini-formulaire dans la
+    // nav stylé comme un bouton — pas de JS.
+    let logout_block = format!(
+        r#"<span class="nav-user">{principal}</span>
+        <form method="post" action="/logout" class="logout-form">
+            <button type="submit">Se déconnecter</button>
+        </form>"#,
+        principal = html_escape(&ctx.principal),
+    );
     format!(
         r#"<!DOCTYPE html>
 <html lang="fr">
@@ -282,6 +361,8 @@ fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> Str
             {emises_link}
             {recues_link}
             <a href="/annuaire">Annuaire</a>
+            {admin_link}
+            {logout_block}
         </nav>
     </header>
     <main>{body}</main>
@@ -292,15 +373,10 @@ fn page_shell(title: &str, active: &str, siren: Option<&str>, body: &str) -> Str
         dashboard_link = nav_link("", "Dashboard", "dashboard"),
         emises_link = nav_link("/emises", "Émises", "emises"),
         recues_link = nav_link("/recues", "Reçues", "recues"),
+        admin_link = admin_link,
+        logout_block = logout_block,
         body = body,
     )
-}
-
-fn no_siren_banner() -> String {
-    r#"<div class="banner">
-        ⚠️ Aucun SIREN sélectionné. Ajouter <code>?siren=123456789</code> à l'URL pour cibler un tenant.
-        Sans SIREN, les données ne peuvent pas être chargées (un index Elasticsearch par tenant).
-    </div>"#.to_string()
 }
 
 /// Convertit une option de paramètre de query en `Option<&str>` en éliminant
@@ -312,7 +388,7 @@ fn non_empty(opt: &Option<String>) -> Option<&str> {
     opt.as_deref().filter(|s| !s.is_empty())
 }
 
-fn html_escape(s: &str) -> String {
+pub(crate) fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -489,10 +565,16 @@ pub async fn handle_dashboard(
         Ok(s) => s,
         Err(resp) => return resp,
     };
+    // Pour un tenant avec un seul SIREN autorisé, on saute le picker et
+    // on redirige directement vers son dashboard — afficher une liste à
+    // un seul élément n'a pas d'intérêt et casse le flux de connexion.
+    if let Some(r) = auto_redirect_single_tenant(&ctx, owned_siren.as_deref(), "/ui") {
+        return r;
+    }
     let siren = owned_siren.as_deref();
 
     let body = match siren {
-        None => format!("{}{}", no_siren_banner(), siren_picker_form()),
+        None => siren_picker(&state, &ctx, "/ui"),
         Some(s) => {
             let store = match &state.trace_store {
                 Some(st) => st,
@@ -504,7 +586,7 @@ pub async fn handle_dashboard(
                 total_distributed: 0,
             });
             let pending = stats.total_exchanges - stats.total_distributed - stats.total_errors;
-            let tenant_name = store.get_tenant_name(s).await;
+            let tenant_name = resolve_tenant_name(&state, s).await;
             let header_title = match tenant_name.as_deref() {
                 Some(name) => format!(
                     r#"{name} <small style="font-weight:400;color:#666">— SIREN {siren}</small>"#,
@@ -557,19 +639,160 @@ pub async fn handle_dashboard(
         }
     };
 
-    html_response(&page_shell("Dashboard", "dashboard", siren, &body)).into_response()
+    html_response(&page_shell(
+        "Dashboard",
+        "dashboard",
+        siren,
+        &ctx,
+        &body,
+    ))
+    .into_response()
 }
 
-fn siren_picker_form() -> String {
-    r#"<div class="card">
-    <h2>Choisir un tenant</h2>
-    <form method="get" action="/ui">
-        <div class="filters">
-            <input name="siren" placeholder="SIREN (9 chiffres)" pattern="[0-9]{9}" required>
-            <button type="submit">Charger</button>
-        </div>
-    </form>
-</div>"#.to_string()
+/// Résout la raison sociale d'une entreprise pour un SIREN donné.
+///
+/// Source de vérité : `{tenants_dir}/{siren}/config.yaml` (= ce qui a été
+/// saisi par l'admin dans le formulaire de création). C'est ce qu'on
+/// affiche en priorité dans les titres des écrans.
+///
+/// Fallback : `seller_name` / `buyer_name` inféré depuis les documents
+/// Elasticsearch (`store.get_tenant_name`). Utile quand un SIREN n'a pas
+/// (encore) été enregistré comme entreprise mais apparaît dans des
+/// factures importées — sinon on n'aurait que le SIREN brut.
+async fn resolve_tenant_name(state: &crate::server::AppState, siren: &str) -> Option<String> {
+    // 1. Config.yaml de l'entreprise (autoritaire)
+    if let Some(dir) = &state.tenants_dir {
+        let cfg_path = dir.join(siren).join("config.yaml");
+        if cfg_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&cfg_path) {
+                if let Ok(cfg) =
+                    serde_yaml::from_str::<pdp_config::model::TenantConfig>(&content)
+                {
+                    let name = cfg.pdp.name.trim();
+                    if !name.is_empty() {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    // 2. Inférence depuis ES (seller_name / buyer_name d'une facture passée)
+    if let Some(store) = &state.trace_store {
+        return store.get_tenant_name(siren).await;
+    }
+    None
+}
+
+/// Si le porteur est un `Tenant` avec exactement UN `allowed_siren` et
+/// qu'aucune `?siren=` n'a été fournie, retourne un `303 → target?siren=<...>`.
+/// Pour les autres cas (admin, opérateur, tenant multi-siren, ou siren déjà
+/// fourni), retourne `None` — le handler affichera son picker / sa page.
+pub(crate) fn auto_redirect_single_tenant(
+    ctx: &crate::security::SecurityContext,
+    siren: Option<&str>,
+    target: &str,
+) -> Option<axum::response::Response> {
+    use crate::security::Role;
+    if siren.is_some() {
+        return None;
+    }
+    if matches!(ctx.role, Role::Tenant) && ctx.allowed_sirens.len() == 1 {
+        let to = format!("{target}?siren={}", ctx.allowed_sirens[0]);
+        return Some(axum::response::Redirect::to(&to).into_response());
+    }
+    None
+}
+
+/// Sélecteur d'entreprise affiché quand aucune `?siren=` n'est fourni.
+///
+/// Contextuel au rôle du porteur :
+/// - `PdpAdmin` / `PdpOperator` : liste **toutes** les entreprises
+///   trouvées dans `state.tenants_dir`. Pas de saisie libre — on clique.
+/// - `Tenant` : liste les SIRENs autorisés (`allowed_sirens`). Si la
+///   liste est vide ou si une seule entrée existe, on retombe sur un
+///   message d'aide (la redirection vers l'unique SIREN est faite plus
+///   haut par le handler).
+///
+/// `target_path` permet à un même picker de pointer vers `/ui`,
+/// `/ui/emises` ou `/ui/recues` selon la page d'origine.
+pub(crate) fn siren_picker(
+    state: &crate::server::AppState,
+    ctx: &crate::security::SecurityContext,
+    target_path: &str,
+) -> String {
+    use crate::security::Role;
+    use std::collections::HashMap;
+
+    // Map SIREN → nom d'entreprise (si config.yaml présent).
+    let known: HashMap<String, String> = state
+        .tenants_dir
+        .as_ref()
+        .and_then(|dir| pdp_config::discover_tenants(dir).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.siren.clone(), e.config.pdp.name.clone()))
+        .collect();
+
+    let entries: Vec<(String, Option<String>)> = match ctx.role {
+        Role::PdpAdmin | Role::PdpOperator => {
+            let mut v: Vec<_> = known
+                .iter()
+                .map(|(s, n)| (s.clone(), Some(n.clone())))
+                .collect();
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            v
+        }
+        Role::Tenant => ctx
+            .allowed_sirens
+            .iter()
+            .map(|s| (s.clone(), known.get(s).cloned()))
+            .collect(),
+    };
+
+    if entries.is_empty() {
+        let msg = match ctx.role {
+            Role::PdpAdmin | Role::PdpOperator => format!(
+                r#"Aucune entreprise enregistrée pour le moment.
+                Rendez-vous sur <a href="/ui/admin">l'administration</a>
+                pour en créer une."#,
+            ),
+            Role::Tenant => format!(
+                r#"Aucun SIREN n'est associé à votre compte
+                (<code>{}</code>). Contactez l'administrateur PDP."#,
+                html_escape(&ctx.principal),
+            ),
+        };
+        return format!(r#"<div class="card"><h2>Choisir une entreprise</h2><p>{msg}</p></div>"#);
+    }
+
+    let cards = entries
+        .iter()
+        .map(|(siren, name)| {
+            let label = name.clone().unwrap_or_else(|| format!("Tenant {siren}"));
+            format!(
+                r#"<a href="{target}?siren={siren}" class="entreprise-card">
+                    <div class="entreprise-name">{name}</div>
+                    <div class="entreprise-siren"><code>{siren}</code></div>
+                </a>"#,
+                target = html_escape(target_path),
+                siren = html_escape(siren),
+                name = html_escape(&label),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let title = match ctx.role {
+        Role::PdpAdmin | Role::PdpOperator => "Choisir une entreprise",
+        Role::Tenant => "Vos entreprises",
+    };
+
+    format!(
+        r#"<div class="card">
+            <h2>{title}</h2>
+            <div class="entreprise-grid">{cards}</div>
+        </div>"#,
+    )
 }
 
 // ============================================================
@@ -682,6 +905,13 @@ async fn render_flows_list(
         Ok(s) => s,
         Err(resp) => return resp,
     };
+    let target = match direction {
+        FlowDirection::Emises => "/ui/emises",
+        FlowDirection::Recues => "/ui/recues",
+    };
+    if let Some(r) = auto_redirect_single_tenant(&ctx, owned_siren.as_deref(), target) {
+        return r;
+    }
     let siren = owned_siren.as_deref();
     // Le formulaire HTML soumet les champs vides comme `?status=&from=&to=...`,
     // qui se désérialisent en `Some("")` (et non `None`). On les normalise ici
@@ -691,7 +921,14 @@ async fn render_flows_list(
     let to = non_empty(&q.to);
 
     let body = match siren {
-        None => format!("{}{}", no_siren_banner(), siren_picker_form()),
+        None => siren_picker(
+            &state,
+            &ctx,
+            match direction {
+                FlowDirection::Emises => "/ui/emises",
+                FlowDirection::Recues => "/ui/recues",
+            },
+        ),
         Some(s) => {
             let store = match &state.trace_store {
                 Some(st) => st,
@@ -735,7 +972,7 @@ async fn render_flows_list(
                 exchanges = deduped;
             }
 
-            let tenant_name = store.get_tenant_name(s).await;
+            let tenant_name = resolve_tenant_name(&state, s).await;
             let list_title = format!(
                 "{label} — {who} <small style=\"font-weight:400;color:#666\">SIREN {siren}</small>",
                 label = direction.page_title(),
@@ -909,6 +1146,7 @@ async fn render_flows_list(
         direction.page_title(),
         direction.nav_key(),
         siren,
+        &ctx,
         &body,
     ))
     .into_response()
@@ -1277,7 +1515,7 @@ pub async fn handle_flow_detail(
     };
     let siren = owned_siren.as_deref();
     let body = match (siren, &state.trace_store) {
-        (None, _) => format!("{}{}", no_siren_banner(), siren_picker_form()),
+        (None, _) => siren_picker(&state, &ctx, "/ui"),
         (_, None) => "TraceStore non configuré (Elasticsearch)".to_string(),
         (Some(s), Some(store)) => {
             // Recherche par flow_id (les exchange_id sont aussi possibles)
@@ -1318,7 +1556,14 @@ pub async fn handle_flow_detail(
         }
         _ => "emises",
     };
-    html_response(&page_shell("Détail flux", nav_active, siren, &body)).into_response()
+    html_response(&page_shell(
+        "Détail flux",
+        nav_active,
+        siren,
+        &ctx,
+        &body,
+    ))
+    .into_response()
 }
 
 /// Affiche le format source de la facture avec un badge coloré + le nom du
@@ -1755,8 +2000,15 @@ pub async fn handle_favicon() -> impl IntoResponse {
 // Helper réponse HTML
 // ============================================================
 
-fn html_response(body: &str) -> axum::response::Response {
+pub(crate) fn html_response(body: &str) -> axum::response::Response {
     (StatusCode::OK, Html(body.to_string())).into_response()
+}
+
+/// Petit raccourci : `ctx.role == Role::PdpAdmin`. Sert à conditionner
+/// l'affichage du lien "Admin" dans le shell de page (le serveur fait
+/// quand même le check d'autorisation côté handler).
+pub(crate) fn is_admin(ctx: &crate::security::SecurityContext) -> bool {
+    matches!(ctx.role, crate::security::Role::PdpAdmin)
 }
 
 #[cfg(test)]

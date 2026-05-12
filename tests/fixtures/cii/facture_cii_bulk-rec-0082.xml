@@ -22,15 +22,15 @@
                 <ram:LineID>1</ram:LineID>
             </ram:AssociatedDocumentLineDocument>
             <ram:SpecifiedTradeProduct>
-                <ram:Name>Prestation de conseil — sprint</ram:Name>
+                <ram:Name>Fournitures bureau</ram:Name>
             </ram:SpecifiedTradeProduct>
             <ram:SpecifiedLineTradeAgreement>
                 <ram:NetPriceProductTradePrice>
-                    <ram:ChargeAmount>950.00</ram:ChargeAmount>
+                    <ram:ChargeAmount>240.00</ram:ChargeAmount>
                 </ram:NetPriceProductTradePrice>
             </ram:SpecifiedLineTradeAgreement>
             <ram:SpecifiedLineTradeDelivery>
-                <ram:BilledQuantity unitCode="C62">5</ram:BilledQuantity>
+                <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
             </ram:SpecifiedLineTradeDelivery>
             <ram:SpecifiedLineTradeSettlement>
                 <ram:ApplicableTradeTax>
@@ -39,16 +39,16 @@
                     <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
                 </ram:ApplicableTradeTax>
                 <ram:SpecifiedTradeSettlementLineMonetarySummation>
-                    <ram:LineTotalAmount>4750.00</ram:LineTotalAmount>
+                    <ram:LineTotalAmount>240.00</ram:LineTotalAmount>
                 </ram:SpecifiedTradeSettlementLineMonetarySummation>
             </ram:SpecifiedLineTradeSettlement>
         </ram:IncludedSupplyChainTradeLineItem>
         <ram:ApplicableHeaderTradeAgreement>
             <ram:BuyerReference>BC-BULK-REC-0082</ram:BuyerReference>
             <ram:SellerTradeParty>
-                <ram:Name>Industrie Culture SA</ram:Name>
+                <ram:Name>Menuiserie Artisanale Dupont EURL</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">139937345</ram:ID>
+                    <ram:ID schemeID="0002">111222333</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:LineOne>10 rue de la Paix</ram:LineOne>
@@ -57,10 +57,10 @@
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
                 <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0009">13993734500001</ram:URIID>
+                    <ram:URIID schemeID="0009">11122233300001</ram:URIID>
                 </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
-                    <ram:ID schemeID="VA">FR13139937345</ram:ID>
+                    <ram:ID schemeID="VA">FR11111222333</ram:ID>
                 </ram:SpecifiedTaxRegistration>
             </ram:SellerTradeParty>
             <ram:BuyerTradeParty>
@@ -92,9 +92,9 @@
                 </ram:PayeePartyCreditorFinancialAccount>
             </ram:SpecifiedTradeSettlementPaymentMeans>
             <ram:ApplicableTradeTax>
-                <ram:CalculatedAmount>950.00</ram:CalculatedAmount>
+                <ram:CalculatedAmount>48.00</ram:CalculatedAmount>
                 <ram:TypeCode>VAT</ram:TypeCode>
-                <ram:BasisAmount>4750.00</ram:BasisAmount>
+                <ram:BasisAmount>240.00</ram:BasisAmount>
                 <ram:CategoryCode>S</ram:CategoryCode>
                 <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
             </ram:ApplicableTradeTax>
@@ -104,11 +104,11 @@
                 </ram:DueDateDateTime>
             </ram:SpecifiedTradePaymentTerms>
             <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-                <ram:LineTotalAmount>4750.00</ram:LineTotalAmount>
-                <ram:TaxBasisTotalAmount>4750.00</ram:TaxBasisTotalAmount>
-                <ram:TaxTotalAmount currencyID="EUR">950.00</ram:TaxTotalAmount>
-                <ram:GrandTotalAmount>5700.00</ram:GrandTotalAmount>
-                <ram:DuePayableAmount>5700.00</ram:DuePayableAmount>
+                <ram:LineTotalAmount>240.00</ram:LineTotalAmount>
+                <ram:TaxBasisTotalAmount>240.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">48.00</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>288.00</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>288.00</ram:DuePayableAmount>
             </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         </ram:ApplicableHeaderTradeSettlement>
     </rsm:SupplyChainTradeTransaction>

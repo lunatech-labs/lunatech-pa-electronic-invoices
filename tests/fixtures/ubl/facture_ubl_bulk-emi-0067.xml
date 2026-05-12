@@ -33,8 +33,8 @@
     </cac:AccountingSupplierParty>
     <cac:AccountingCustomerParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">73849201200002</cac:EndpointID>
-            <cac:PartyName><cbc:Name>Plomberie Durand SARL</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">11122233300002</cac:EndpointID>
+            <cac:PartyName><cbc:Name>Menuiserie Artisanale Dupont EURL</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
                 <cbc:CityName>Lyon</cbc:CityName>
@@ -42,12 +42,12 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR73738492012</cbc:CompanyID>
+                <cbc:CompanyID>FR11111222333</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>Plomberie Durand SARL</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">738492012</cbc:CompanyID>
+                <cbc:RegistrationName>Menuiserie Artisanale Dupont EURL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">111222333</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingCustomerParty>

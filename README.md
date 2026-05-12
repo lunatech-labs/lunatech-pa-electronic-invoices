@@ -98,7 +98,8 @@ Les pièces jointes (BG-24) sont préservées dans toutes les conversions : XML 
 
 ## Interface web
 
-Quatre écrans server-rendered (HTML, sans framework JS, accessibles sans Bearer token) :
+Quatre écrans server-rendered (HTML, sans framework JS, protégés par
+cookie de session ou Bearer token) :
 
 ### Dashboard `/ui?siren={SIREN}`
 
@@ -163,14 +164,16 @@ pipeline).
 
 ### Authentification & isolation tenant
 
-Trois voies d'authentification résolues par un middleware unique
+Deux voies d'authentification résolues par un middleware unique
 (cf. [crates/pdp-app/src/security.rs](crates/pdp-app/src/security.rs)) :
 
 | Voie | Usage | Routes |
 |---|---|---|
-| `dev_open: true` | Démo locale, screenshots — accepte tout sans auth | UI + API |
 | Cookie `ferrite_session` | Login web `/login` → cookie HMAC signé (HttpOnly, SameSite=Lax) | UI |
 | `Authorization: Bearer <tok>` | Clients API (`pdp demo populate`, intégrations) | API |
+
+Pas de mode "bypass" : même la démo locale passe par `/login` (cf. les
+comptes pré-configurés en bas de cette section).
 
 Chaque token / user porte un `principal`, une liste `allowed_sirens` et un
 rôle (`tenant` / `pdp_operator` / `pdp_admin`). L'extractor
@@ -204,6 +207,41 @@ jusqu'à expiration naturelle.
 Capture d'écran de la page `/login` :
 
 <p align="center"><img src="assets/screenshots/login.png" alt="Page de connexion Ferrite" width="500"></p>
+
+### Démo : démarrer et se logger
+
+```bash
+# 1. Démarrer la PDP (serveur HTTP + pipelines)
+cargo run -- --config config-ui-demo.yaml start --mode receiver
+
+# 2. Dans un autre terminal, peupler l'annuaire et les factures
+pdp --config config-ui-demo.yaml demo seed --reset-annuaire --reset-factures
+```
+
+`pdp demo seed` enchaîne trois étapes :
+1. **Annuaire** — importe `tests/fixtures/annuaire/F14_demo.xml` (~500
+   entreprises + établissements) dans PostgreSQL
+2. **Entreprises** — crée `tenants/{siren}/{in,out}/` + `config.yaml`
+   pour les 3 SIRENs de démo, en récupérant le nom depuis l'annuaire
+3. **Factures** — pousse ~285 fixtures UBL + CII + Factur-X via
+   `POST /v1/flows`. Pour régénérer les fixtures avec une distribution
+   équilibrée entre les 3 tenants (~100 factures chacun, mix émises +
+   reçues, ~10 % avec PJ) : `python3 tools/gen-fixtures-bulk.py --count 240`
+
+Comptes embarqués dans `config-ui-demo.yaml` (`/login` → mot de passe en
+clair pour la démo, à remplacer par un hash argon2id en prod via
+`pdp tools hash-password "..."`) :
+
+| Email | Mot de passe | Rôle | SIREN | Entreprise |
+|---|---|---|---|---|
+| `admin@ferrite.demo` | `admin` | `pdp_admin` | tous | (accès complet + `/ui/admin`) |
+| `alice@techconseil.demo` | `alice` | `tenant` | `123456789` | TechConseil SAS |
+| `charlotte@solutions.demo` | `charlotte` | `tenant` | `109009309` | Charlotte Solutions SCI |
+| `dupont@menuiserie.demo` | `dupont` | `tenant` | `111222333` | Menuiserie Artisanale Dupont EURL |
+
+Les SIRENs sont câblés sur des entreprises de l'annuaire F14 démo, donc
+la résolution `/v1/siren/code-insee:...` retourne des fiches complètes,
+et `/ui/admin` montre les 3 entreprises de démo avec leurs noms réels.
 
 Voir [docs/ui.md](docs/ui.md#authentification--isolation-tenant) pour le
 modèle d'auth complet (table de réponses 401/400/403, exemples YAML

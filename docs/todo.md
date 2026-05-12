@@ -438,8 +438,9 @@ Actuellement les tenants sont auto-configurés (juste un répertoire SIREN suffi
 - [x] Config `tokens: Vec<TokenConfig>` (avec liaison
       `principal`/`allowed_sirens`/`role`) ; `bearer_tokens:` deprecated
       avec migration douce vers `PdpAdmin`
-- [x] Mode `dev_open: true` réservé à la démo locale (assume admin sans
-      token) ; fail-closed en prod
+- [x] Plus de mode bypass : suppression de `dev_open` (anciennement réservé
+      à la démo) — la démo passe maintenant par `/login` avec des
+      utilisateurs prédéfinis dans `config-ui-demo.yaml`
 - [x] Extractor `AuthorizedSiren` qui rejette en 403 tout `?siren=X`
       hors scope du porteur
 - [x] Helper `authorize_optional_siren` pour les pages UI qui acceptent

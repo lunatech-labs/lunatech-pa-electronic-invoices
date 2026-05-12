@@ -22,15 +22,15 @@
                 <ram:LineID>1</ram:LineID>
             </ram:AssociatedDocumentLineDocument>
             <ram:SpecifiedTradeProduct>
-                <ram:Name>Développement module sur mesure</ram:Name>
+                <ram:Name>Travaux de plomberie urgents</ram:Name>
             </ram:SpecifiedTradeProduct>
             <ram:SpecifiedLineTradeAgreement>
                 <ram:NetPriceProductTradePrice>
-                    <ram:ChargeAmount>95.00</ram:ChargeAmount>
+                    <ram:ChargeAmount>580.00</ram:ChargeAmount>
                 </ram:NetPriceProductTradePrice>
             </ram:SpecifiedLineTradeAgreement>
             <ram:SpecifiedLineTradeDelivery>
-                <ram:BilledQuantity unitCode="HUR">24</ram:BilledQuantity>
+                <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
             </ram:SpecifiedLineTradeDelivery>
             <ram:SpecifiedLineTradeSettlement>
                 <ram:ApplicableTradeTax>
@@ -39,16 +39,16 @@
                     <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
                 </ram:ApplicableTradeTax>
                 <ram:SpecifiedTradeSettlementLineMonetarySummation>
-                    <ram:LineTotalAmount>2280.00</ram:LineTotalAmount>
+                    <ram:LineTotalAmount>580.00</ram:LineTotalAmount>
                 </ram:SpecifiedTradeSettlementLineMonetarySummation>
             </ram:SpecifiedLineTradeSettlement>
         </ram:IncludedSupplyChainTradeLineItem>
         <ram:ApplicableHeaderTradeAgreement>
             <ram:BuyerReference>BC-BULK-REC-0004</ram:BuyerReference>
             <ram:SellerTradeParty>
-                <ram:Name>Charlotte Solutions SCI</ram:Name>
+                <ram:Name>Rénovation Habitat Plus SARL</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">109009309</ram:ID>
+                    <ram:ID schemeID="0002">918273645</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:LineOne>10 rue de la Paix</ram:LineOne>
@@ -57,10 +57,10 @@
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
                 <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0009">10900930900001</ram:URIID>
+                    <ram:URIID schemeID="0009">91827364500001</ram:URIID>
                 </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
-                    <ram:ID schemeID="VA">FR10109009309</ram:ID>
+                    <ram:ID schemeID="VA">FR91918273645</ram:ID>
                 </ram:SpecifiedTaxRegistration>
             </ram:SellerTradeParty>
             <ram:BuyerTradeParty>
@@ -92,9 +92,9 @@
                 </ram:PayeePartyCreditorFinancialAccount>
             </ram:SpecifiedTradeSettlementPaymentMeans>
             <ram:ApplicableTradeTax>
-                <ram:CalculatedAmount>456.00</ram:CalculatedAmount>
+                <ram:CalculatedAmount>116.00</ram:CalculatedAmount>
                 <ram:TypeCode>VAT</ram:TypeCode>
-                <ram:BasisAmount>2280.00</ram:BasisAmount>
+                <ram:BasisAmount>580.00</ram:BasisAmount>
                 <ram:CategoryCode>S</ram:CategoryCode>
                 <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
             </ram:ApplicableTradeTax>
@@ -104,11 +104,11 @@
                 </ram:DueDateDateTime>
             </ram:SpecifiedTradePaymentTerms>
             <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-                <ram:LineTotalAmount>2280.00</ram:LineTotalAmount>
-                <ram:TaxBasisTotalAmount>2280.00</ram:TaxBasisTotalAmount>
-                <ram:TaxTotalAmount currencyID="EUR">456.00</ram:TaxTotalAmount>
-                <ram:GrandTotalAmount>2736.00</ram:GrandTotalAmount>
-                <ram:DuePayableAmount>2736.00</ram:DuePayableAmount>
+                <ram:LineTotalAmount>580.00</ram:LineTotalAmount>
+                <ram:TaxBasisTotalAmount>580.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">116.00</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>696.00</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>696.00</ram:DuePayableAmount>
             </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         </ram:ApplicableHeaderTradeSettlement>
     </rsm:SupplyChainTradeTransaction>

@@ -46,9 +46,9 @@
         <ram:ApplicableHeaderTradeAgreement>
             <ram:BuyerReference>BC-BULK-REC-0140</ram:BuyerReference>
             <ram:SellerTradeParty>
-                <ram:Name>Thomas Solutions SA</ram:Name>
+                <ram:Name>Production Luxe SA</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">146962925</ram:ID>
+                    <ram:ID schemeID="0002">148981446</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:LineOne>10 rue de la Paix</ram:LineOne>
@@ -57,16 +57,16 @@
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
                 <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0009">14696292500001</ram:URIID>
+                    <ram:URIID schemeID="0009">14898144600001</ram:URIID>
                 </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
-                    <ram:ID schemeID="VA">FR14146962925</ram:ID>
+                    <ram:ID schemeID="VA">FR14148981446</ram:ID>
                 </ram:SpecifiedTaxRegistration>
             </ram:SellerTradeParty>
             <ram:BuyerTradeParty>
-                <ram:Name>TechConseil SAS</ram:Name>
+                <ram:Name>Charlotte Solutions SCI</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">123456789</ram:ID>
+                    <ram:ID schemeID="0002">109009309</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:LineOne>5 avenue du Commerce</ram:LineOne>
@@ -75,10 +75,10 @@
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
                 <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0009">12345678900002</ram:URIID>
+                    <ram:URIID schemeID="0009">10900930900002</ram:URIID>
                 </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
-                    <ram:ID schemeID="VA">FR12123456789</ram:ID>
+                    <ram:ID schemeID="VA">FR10109009309</ram:ID>
                 </ram:SpecifiedTaxRegistration>
             </ram:BuyerTradeParty>
         </ram:ApplicableHeaderTradeAgreement>

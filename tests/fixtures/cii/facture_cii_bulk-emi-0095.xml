@@ -22,15 +22,15 @@
                 <ram:LineID>1</ram:LineID>
             </ram:AssociatedDocumentLineDocument>
             <ram:SpecifiedTradeProduct>
-                <ram:Name>Formation équipe technique</ram:Name>
+                <ram:Name>Fournitures bureau</ram:Name>
             </ram:SpecifiedTradeProduct>
             <ram:SpecifiedLineTradeAgreement>
                 <ram:NetPriceProductTradePrice>
-                    <ram:ChargeAmount>1850.00</ram:ChargeAmount>
+                    <ram:ChargeAmount>240.00</ram:ChargeAmount>
                 </ram:NetPriceProductTradePrice>
             </ram:SpecifiedLineTradeAgreement>
             <ram:SpecifiedLineTradeDelivery>
-                <ram:BilledQuantity unitCode="DAY">2</ram:BilledQuantity>
+                <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
             </ram:SpecifiedLineTradeDelivery>
             <ram:SpecifiedLineTradeSettlement>
                 <ram:ApplicableTradeTax>
@@ -39,16 +39,16 @@
                     <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
                 </ram:ApplicableTradeTax>
                 <ram:SpecifiedTradeSettlementLineMonetarySummation>
-                    <ram:LineTotalAmount>3700.00</ram:LineTotalAmount>
+                    <ram:LineTotalAmount>240.00</ram:LineTotalAmount>
                 </ram:SpecifiedTradeSettlementLineMonetarySummation>
             </ram:SpecifiedLineTradeSettlement>
         </ram:IncludedSupplyChainTradeLineItem>
         <ram:ApplicableHeaderTradeAgreement>
             <ram:BuyerReference>BC-BULK-EMI-0095</ram:BuyerReference>
             <ram:SellerTradeParty>
-                <ram:Name>TechConseil SAS</ram:Name>
+                <ram:Name>Charlotte Solutions SCI</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">123456789</ram:ID>
+                    <ram:ID schemeID="0002">109009309</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:LineOne>10 rue de la Paix</ram:LineOne>
@@ -57,16 +57,16 @@
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
                 <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0009">12345678900001</ram:URIID>
+                    <ram:URIID schemeID="0009">10900930900001</ram:URIID>
                 </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
-                    <ram:ID schemeID="VA">FR12123456789</ram:ID>
+                    <ram:ID schemeID="VA">FR10109009309</ram:ID>
                 </ram:SpecifiedTaxRegistration>
             </ram:SellerTradeParty>
             <ram:BuyerTradeParty>
-                <ram:Name>Plomberie Martin SARL</ram:Name>
+                <ram:Name>Thomas Solutions SA</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">222333444</ram:ID>
+                    <ram:ID schemeID="0002">146962925</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:LineOne>5 avenue du Commerce</ram:LineOne>
@@ -75,10 +75,10 @@
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
                 <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0009">22233344400002</ram:URIID>
+                    <ram:URIID schemeID="0009">14696292500002</ram:URIID>
                 </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
-                    <ram:ID schemeID="VA">FR22222333444</ram:ID>
+                    <ram:ID schemeID="VA">FR14146962925</ram:ID>
                 </ram:SpecifiedTaxRegistration>
             </ram:BuyerTradeParty>
         </ram:ApplicableHeaderTradeAgreement>
@@ -92,9 +92,9 @@
                 </ram:PayeePartyCreditorFinancialAccount>
             </ram:SpecifiedTradeSettlementPaymentMeans>
             <ram:ApplicableTradeTax>
-                <ram:CalculatedAmount>740.00</ram:CalculatedAmount>
+                <ram:CalculatedAmount>48.00</ram:CalculatedAmount>
                 <ram:TypeCode>VAT</ram:TypeCode>
-                <ram:BasisAmount>3700.00</ram:BasisAmount>
+                <ram:BasisAmount>240.00</ram:BasisAmount>
                 <ram:CategoryCode>S</ram:CategoryCode>
                 <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
             </ram:ApplicableTradeTax>
@@ -104,11 +104,11 @@
                 </ram:DueDateDateTime>
             </ram:SpecifiedTradePaymentTerms>
             <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-                <ram:LineTotalAmount>3700.00</ram:LineTotalAmount>
-                <ram:TaxBasisTotalAmount>3700.00</ram:TaxBasisTotalAmount>
-                <ram:TaxTotalAmount currencyID="EUR">740.00</ram:TaxTotalAmount>
-                <ram:GrandTotalAmount>4440.00</ram:GrandTotalAmount>
-                <ram:DuePayableAmount>4440.00</ram:DuePayableAmount>
+                <ram:LineTotalAmount>240.00</ram:LineTotalAmount>
+                <ram:TaxBasisTotalAmount>240.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">48.00</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>288.00</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>288.00</ram:DuePayableAmount>
             </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         </ram:ApplicableHeaderTradeSettlement>
     </rsm:SupplyChainTradeTransaction>

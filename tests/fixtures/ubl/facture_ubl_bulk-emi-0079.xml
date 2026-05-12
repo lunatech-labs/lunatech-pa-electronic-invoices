@@ -8,7 +8,7 @@
     <cbc:IssueDate>2025-09-23</cbc:IssueDate>
     <cbc:DueDate>2025-09-28</cbc:DueDate>
     <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
-    <cbc:Note>Réparation matériel électronique</cbc:Note>
+    <cbc:Note>Étude de faisabilité projet</cbc:Note>
     <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
     <cbc:BuyerReference>BC-BULK-EMI-0079</cbc:BuyerReference>
     <cac:AccountingSupplierParty>
@@ -33,8 +33,8 @@
     </cac:AccountingSupplierParty>
     <cac:AccountingCustomerParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">98765432100002</cac:EndpointID>
-            <cac:PartyName><cbc:Name>IndustrieFrance SA</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">11284843800002</cac:EndpointID>
+            <cac:PartyName><cbc:Name>Design Santé SAS</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
                 <cbc:CityName>Lyon</cbc:CityName>
@@ -42,12 +42,12 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR98987654321</cbc:CompanyID>
+                <cbc:CompanyID>FR11112848438</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>IndustrieFrance SA</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">987654321</cbc:CompanyID>
+                <cbc:RegistrationName>Design Santé SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">112848438</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingCustomerParty>
@@ -61,10 +61,10 @@
     </cac:PaymentMeans>
 
     <cac:TaxTotal>
-        <cbc:TaxAmount currencyID="EUR">84.00</cbc:TaxAmount>
+        <cbc:TaxAmount currencyID="EUR">1160.00</cbc:TaxAmount>
         <cac:TaxSubtotal>
-            <cbc:TaxableAmount currencyID="EUR">420.00</cbc:TaxableAmount>
-            <cbc:TaxAmount currencyID="EUR">84.00</cbc:TaxAmount>
+            <cbc:TaxableAmount currencyID="EUR">5800.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">1160.00</cbc:TaxAmount>
             <cac:TaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -73,18 +73,18 @@
         </cac:TaxSubtotal>
     </cac:TaxTotal>
     <cac:LegalMonetaryTotal>
-        <cbc:LineExtensionAmount currencyID="EUR">420.00</cbc:LineExtensionAmount>
-        <cbc:TaxExclusiveAmount currencyID="EUR">420.00</cbc:TaxExclusiveAmount>
-        <cbc:TaxInclusiveAmount currencyID="EUR">504.00</cbc:TaxInclusiveAmount>
-        <cbc:PayableAmount currencyID="EUR">504.00</cbc:PayableAmount>
+        <cbc:LineExtensionAmount currencyID="EUR">5800.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">5800.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">6960.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">6960.00</cbc:PayableAmount>
     </cac:LegalMonetaryTotal>
     <cac:InvoiceLine>
         <cbc:ID>1</cbc:ID>
         <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
-        <cbc:LineExtensionAmount currencyID="EUR">420.00</cbc:LineExtensionAmount>
+        <cbc:LineExtensionAmount currencyID="EUR">5800.00</cbc:LineExtensionAmount>
         <cac:Item>
-            <cbc:Description>Réparation matériel électronique</cbc:Description>
-            <cbc:Name>Réparation matériel électronique</cbc:Name>
+            <cbc:Description>Étude de faisabilité projet</cbc:Description>
+            <cbc:Name>Étude de faisabilité projet</cbc:Name>
             <cac:ClassifiedTaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -92,7 +92,7 @@
             </cac:ClassifiedTaxCategory>
         </cac:Item>
         <cac:Price>
-            <cbc:PriceAmount currencyID="EUR">420.00</cbc:PriceAmount>
+            <cbc:PriceAmount currencyID="EUR">5800.00</cbc:PriceAmount>
         </cac:Price>
     </cac:InvoiceLine>
 </Invoice>

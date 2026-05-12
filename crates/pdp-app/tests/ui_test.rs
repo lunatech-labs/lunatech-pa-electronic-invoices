@@ -269,6 +269,26 @@ fn clone_doc(d: &ExchangeDocument) -> ExchangeDocument {
 // Helpers : construction d'AppState et de documents de seed
 // ---------------------------------------------------------------------------
 
+/// Token injecté dans les helpers HTTP des tests UI : il ouvre l'accès à
+/// toutes les routes protégées sans devoir mettre en scène un login par
+/// cookie. Le serveur réel n'accepte rien sans token depuis qu'on a retiré
+/// le mode `dev_open`.
+const TEST_ADMIN_TOKEN: &str = "tok-test-admin";
+
+fn test_admin_token_map(
+) -> std::collections::HashMap<String, pdp_app::security::SecurityContext> {
+    let mut m = std::collections::HashMap::new();
+    m.insert(
+        TEST_ADMIN_TOKEN.to_string(),
+        pdp_app::security::SecurityContext {
+            principal: "test-admin".to_string(),
+            allowed_sirens: Vec::new(),
+            role: pdp_app::security::Role::PdpAdmin,
+        },
+    );
+    m
+}
+
 fn build_state(backend: Arc<dyn TraceBackend>) -> Arc<AppState> {
     let (tx, _rx) = tokio::sync::mpsc::channel(10);
     Arc::new(AppState {
@@ -277,7 +297,11 @@ fn build_state(backend: Arc<dyn TraceBackend>) -> Arc<AppState> {
         flow_sender: tx,
         webhook_secret: None,
         trace_store: Some(backend),
-        tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(pdp_app::session::RevocationList::new()),
+        tokens: test_admin_token_map(),
+        users: Vec::new(),
+        session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(),
+        session_ttl_secs: 3600,
+        revocations: std::sync::Arc::new(pdp_app::session::RevocationList::new()),
         metrics: Metrics::default(),
         annuaire_store: None,
         webhook_store: Arc::new(WebhookStore::new()),
@@ -285,6 +309,7 @@ fn build_state(backend: Arc<dyn TraceBackend>) -> Arc<AppState> {
         max_flow_size_bytes: 100 * 1024 * 1024,
         request_timeout: std::time::Duration::from_secs(30),
         rate_limiter: None,
+        tenants_dir: None,
     })
 }
 
@@ -416,7 +441,11 @@ async fn body_text(resp: axum::response::Response) -> String {
 
 async fn get_html(state: Arc<AppState>, uri: &str) -> (StatusCode, String) {
     let app = build_api_router(state);
-    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri(uri)
+        .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     let status = resp.status();
     let body = body_text(resp).await;

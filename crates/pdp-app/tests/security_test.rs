@@ -1,11 +1,10 @@
 //! Tests d'isolation tenant et d'authentification.
 //!
 //! Vérifient que :
-//! 1. Sans token et sans `dev_open`, toute route protégée retourne 401
+//! 1. Sans token, toute route protégée retourne 401 (ou redirige vers /login pour /ui)
 //! 2. Un token `Tenant` ne voit QUE ses SIRENs autorisés (403 sur les autres)
 //! 3. Un token `PdpAdmin` peut consulter n'importe quel SIREN
 //! 4. `get_exchange` filtre par siren côté backend (un mauvais siren → None)
-//! 5. Le mode `dev_open: true` accepte sans token (pour la démo locale)
 //!
 //! Stratégie : on monte un AppState complet avec un mock InMemoryTraceBackend
 //! (cohérent avec ui_test.rs) et on envoie des requêtes via `tower::oneshot`.
@@ -203,7 +202,6 @@ fn doc_for(seller_siren: &str, buyer_siren: &str, invoice: &str) -> ExchangeDocu
 // ---------------------------------------------------------------------------
 
 struct StateBuilder {
-    dev_open: bool,
     tokens: HashMap<String, SecurityContext>,
     users: Vec<UserConfig>,
     docs: Vec<ExchangeDocument>,
@@ -212,7 +210,6 @@ struct StateBuilder {
 impl StateBuilder {
     fn new() -> Self {
         Self {
-            dev_open: false,
             tokens: HashMap::new(),
             users: Vec::new(),
             docs: vec![
@@ -230,11 +227,6 @@ impl StateBuilder {
             allowed_sirens: sirens.iter().map(|s| s.to_string()).collect(),
             role,
         });
-        self
-    }
-
-    fn dev_open(mut self) -> Self {
-        self.dev_open = true;
         self
     }
 
@@ -271,7 +263,6 @@ impl StateBuilder {
             webhook_secret: None,
             trace_store: Some(Arc::new(InMemBackend(self.docs))),
             tokens: self.tokens,
-            dev_open: self.dev_open,
             users: self.users,
             session_secret: b"test-session-secret-32-bytes-padding-padding".to_vec(),
             session_ttl_secs: 3600, revocations: std::sync::Arc::new(pdp_app::session::RevocationList::new()),
@@ -282,6 +273,7 @@ impl StateBuilder {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         })
     }
 }
@@ -357,17 +349,11 @@ async fn admin_token_sees_all_sirens() {
 }
 
 #[tokio::test]
-async fn dev_open_grants_admin_without_token() {
-    let state = StateBuilder::new().dev_open().build();
-    let (status, _) = send(state, "/ui/emises?siren=999999999", None).await;
-    assert_eq!(status, StatusCode::OK);
-}
-
-#[tokio::test]
 async fn v1_stats_requires_siren() {
-    // Avec dev_open + sans ?siren=, l'extractor AuthorizedSiren retourne 400.
-    let state = StateBuilder::new().dev_open().build();
-    let (status, body) = send(state, "/v1/stats", None).await;
+    // Avec un admin token et sans `?siren=`, l'extractor AuthorizedSiren
+    // retourne 400 (le check d'autorisation n'est jamais atteint).
+    let state = StateBuilder::new().admin_token("tok-admin").build();
+    let (status, body) = send(state, "/v1/stats", Some("tok-admin")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body.contains("SIREN_REQUIRED"));
 }
@@ -652,7 +638,10 @@ async fn logout_clears_cookie_and_redirects() {
 
 #[tokio::test]
 async fn security_headers_present_on_all_responses() {
-    let state = StateBuilder::new().dev_open().build();
+    // Les headers de sécurité sont posés par le middleware sur TOUTES les
+    // réponses — y compris une 303 vers /login pour une requête /ui non
+    // authentifiée. C'est suffisant pour valider la couverture.
+    let state = StateBuilder::new().build();
     let app = build_api_router(state);
     let req = Request::builder().uri("/ui").body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();

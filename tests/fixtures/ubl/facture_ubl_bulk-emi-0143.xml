@@ -13,8 +13,8 @@
     <cbc:BuyerReference>BC-BULK-EMI-0143</cbc:BuyerReference>
     <cac:AccountingSupplierParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">12345678900001</cac:EndpointID>
-            <cac:PartyName><cbc:Name>TechConseil SAS</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">10900930900001</cac:EndpointID>
+            <cac:PartyName><cbc:Name>Charlotte Solutions SCI</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>10 rue de la Paix</cbc:StreetName>
                 <cbc:CityName>Paris</cbc:CityName>
@@ -22,19 +22,19 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR12123456789</cbc:CompanyID>
+                <cbc:CompanyID>FR10109009309</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>TechConseil SAS</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">123456789</cbc:CompanyID>
+                <cbc:RegistrationName>Charlotte Solutions SCI</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">109009309</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingSupplierParty>
     <cac:AccountingCustomerParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">53698721000002</cac:EndpointID>
-            <cac:PartyName><cbc:Name>Électronique Distribution SARL</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">11122233300002</cac:EndpointID>
+            <cac:PartyName><cbc:Name>Menuiserie Artisanale Dupont EURL</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
                 <cbc:CityName>Lyon</cbc:CityName>
@@ -42,12 +42,12 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR53536987210</cbc:CompanyID>
+                <cbc:CompanyID>FR11111222333</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>Électronique Distribution SARL</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">536987210</cbc:CompanyID>
+                <cbc:RegistrationName>Menuiserie Artisanale Dupont EURL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">111222333</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingCustomerParty>
@@ -56,7 +56,7 @@
         <cbc:PaymentID>BULK-EMI-0143</cbc:PaymentID>
         <cac:PayeeFinancialAccount>
             <cbc:ID>FR7630001007941234567890185</cbc:ID>
-            <cbc:Name>TechConseil SAS</cbc:Name>
+            <cbc:Name>Charlotte Solutions SCI</cbc:Name>
         </cac:PayeeFinancialAccount>
     </cac:PaymentMeans>
 

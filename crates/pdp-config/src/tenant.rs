@@ -110,9 +110,24 @@ fn auto_config(siren: &str) -> TenantConfig {
 /// minimale est auto-générée.
 ///
 /// Les répertoires `in/` et `out/` sont créés automatiquement.
+///
+/// Si `tenants_dir` lui-même n'existe pas, il est créé (vide). C'est ce
+/// qui permet à la démo de démarrer avant la première création
+/// d'entreprise via l'écran `/ui/admin` — un répertoire vide est un
+/// état initial parfaitement valide.
 pub fn discover_tenants(tenants_dir: &Path) -> Result<Vec<TenantEntry>, String> {
     if !tenants_dir.exists() {
-        return Err(format!("Répertoire tenants introuvable: {}", tenants_dir.display()));
+        std::fs::create_dir_all(tenants_dir).map_err(|e| {
+            format!(
+                "Création du répertoire tenants {}: {}",
+                tenants_dir.display(),
+                e
+            )
+        })?;
+        tracing::info!(
+            tenants_dir = %tenants_dir.display(),
+            "Répertoire tenants_dir créé (vide — aucune entreprise enregistrée)"
+        );
     }
 
     let mut entries = Vec::new();
@@ -274,6 +289,21 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let result = discover_tenants(dir.path()).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_discover_tenants_creates_missing_dir() {
+        // Le répertoire `tenants_dir` n'existe pas encore : c'est l'état
+        // initial d'une nouvelle installation. `discover_tenants` doit le
+        // créer (vide) plutôt que de fail-fast — sinon la démo ne démarre
+        // pas avant d'avoir créé manuellement le dossier.
+        let parent = TempDir::new().unwrap();
+        let missing = parent.path().join("tenants");
+        assert!(!missing.exists());
+
+        let result = discover_tenants(&missing).unwrap();
+        assert!(result.is_empty());
+        assert!(missing.is_dir());
     }
 
     #[test]

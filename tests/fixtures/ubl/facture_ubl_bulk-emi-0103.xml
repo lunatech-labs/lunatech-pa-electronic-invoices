@@ -8,7 +8,7 @@
     <cbc:IssueDate>2025-11-19</cbc:IssueDate>
     <cbc:DueDate>2025-11-28</cbc:DueDate>
     <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
-    <cbc:Note>Développement module sur mesure</cbc:Note>
+    <cbc:Note>Licences logicielles annuelles</cbc:Note>
     <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
     <cbc:BuyerReference>BC-BULK-EMI-0103</cbc:BuyerReference>
     <cac:AccountingSupplierParty>
@@ -33,8 +33,8 @@
     </cac:AccountingSupplierParty>
     <cac:AccountingCustomerParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">53698721000002</cac:EndpointID>
-            <cac:PartyName><cbc:Name>Électronique Distribution SARL</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">12214003400002</cac:EndpointID>
+            <cac:PartyName><cbc:Name>Formation Bâtiment SAS</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
                 <cbc:CityName>Lyon</cbc:CityName>
@@ -42,12 +42,12 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR53536987210</cbc:CompanyID>
+                <cbc:CompanyID>FR12122140034</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>Électronique Distribution SARL</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">536987210</cbc:CompanyID>
+                <cbc:RegistrationName>Formation Bâtiment SAS</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">122140034</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingCustomerParty>
@@ -61,10 +61,10 @@
     </cac:PaymentMeans>
 
     <cac:TaxTotal>
-        <cbc:TaxAmount currencyID="EUR">456.00</cbc:TaxAmount>
+        <cbc:TaxAmount currencyID="EUR">512.00</cbc:TaxAmount>
         <cac:TaxSubtotal>
-            <cbc:TaxableAmount currencyID="EUR">2280.00</cbc:TaxableAmount>
-            <cbc:TaxAmount currencyID="EUR">456.00</cbc:TaxAmount>
+            <cbc:TaxableAmount currencyID="EUR">2560.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">512.00</cbc:TaxAmount>
             <cac:TaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -73,18 +73,18 @@
         </cac:TaxSubtotal>
     </cac:TaxTotal>
     <cac:LegalMonetaryTotal>
-        <cbc:LineExtensionAmount currencyID="EUR">2280.00</cbc:LineExtensionAmount>
-        <cbc:TaxExclusiveAmount currencyID="EUR">2280.00</cbc:TaxExclusiveAmount>
-        <cbc:TaxInclusiveAmount currencyID="EUR">2736.00</cbc:TaxInclusiveAmount>
-        <cbc:PayableAmount currencyID="EUR">2736.00</cbc:PayableAmount>
+        <cbc:LineExtensionAmount currencyID="EUR">2560.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">2560.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">3072.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">3072.00</cbc:PayableAmount>
     </cac:LegalMonetaryTotal>
     <cac:InvoiceLine>
         <cbc:ID>1</cbc:ID>
-        <cbc:InvoicedQuantity unitCode="HUR">24</cbc:InvoicedQuantity>
-        <cbc:LineExtensionAmount currencyID="EUR">2280.00</cbc:LineExtensionAmount>
+        <cbc:InvoicedQuantity unitCode="C62">8</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">2560.00</cbc:LineExtensionAmount>
         <cac:Item>
-            <cbc:Description>Développement module sur mesure</cbc:Description>
-            <cbc:Name>Développement module sur mesure</cbc:Name>
+            <cbc:Description>Licences logicielles annuelles</cbc:Description>
+            <cbc:Name>Licences logicielles annuelles</cbc:Name>
             <cac:ClassifiedTaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -92,7 +92,7 @@
             </cac:ClassifiedTaxCategory>
         </cac:Item>
         <cac:Price>
-            <cbc:PriceAmount currencyID="EUR">95.00</cbc:PriceAmount>
+            <cbc:PriceAmount currencyID="EUR">320.00</cbc:PriceAmount>
         </cac:Price>
     </cac:InvoiceLine>
 </Invoice>

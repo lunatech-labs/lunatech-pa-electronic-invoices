@@ -3,6 +3,7 @@
 //! `Cargo.toml`) garde son propre `main.rs` qui inclut ces modules de façon
 //! identique pour ne rien dupliquer.
 
+pub mod admin;
 pub mod security;
 pub mod server;
 pub mod session;

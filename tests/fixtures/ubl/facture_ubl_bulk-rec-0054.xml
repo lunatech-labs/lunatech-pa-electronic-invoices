@@ -8,13 +8,13 @@
     <cbc:IssueDate>2025-08-26</cbc:IssueDate>
     <cbc:DueDate>2025-08-28</cbc:DueDate>
     <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
-    <cbc:Note>Aménagement salle de réunion</cbc:Note>
+    <cbc:Note>Audit sécurité applicative</cbc:Note>
     <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
     <cbc:BuyerReference>BC-BULK-REC-0054</cbc:BuyerReference>
     <cac:AccountingSupplierParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">98765432100001</cac:EndpointID>
-            <cac:PartyName><cbc:Name>IndustrieFrance SA</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">10780342300001</cac:EndpointID>
+            <cac:PartyName><cbc:Name>ServicesArchitecture SARL</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>10 rue de la Paix</cbc:StreetName>
                 <cbc:CityName>Paris</cbc:CityName>
@@ -22,19 +22,19 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR98987654321</cbc:CompanyID>
+                <cbc:CompanyID>FR10107803423</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>IndustrieFrance SA</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">987654321</cbc:CompanyID>
+                <cbc:RegistrationName>ServicesArchitecture SARL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">107803423</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingSupplierParty>
     <cac:AccountingCustomerParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">12345678900002</cac:EndpointID>
-            <cac:PartyName><cbc:Name>TechConseil SAS</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">11122233300002</cac:EndpointID>
+            <cac:PartyName><cbc:Name>Menuiserie Artisanale Dupont EURL</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
                 <cbc:CityName>Lyon</cbc:CityName>
@@ -42,12 +42,12 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR12123456789</cbc:CompanyID>
+                <cbc:CompanyID>FR11111222333</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>TechConseil SAS</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">123456789</cbc:CompanyID>
+                <cbc:RegistrationName>Menuiserie Artisanale Dupont EURL</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">111222333</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingCustomerParty>
@@ -56,15 +56,15 @@
         <cbc:PaymentID>BULK-REC-0054</cbc:PaymentID>
         <cac:PayeeFinancialAccount>
             <cbc:ID>FR7630001007941234567890185</cbc:ID>
-            <cbc:Name>IndustrieFrance SA</cbc:Name>
+            <cbc:Name>ServicesArchitecture SARL</cbc:Name>
         </cac:PayeeFinancialAccount>
     </cac:PaymentMeans>
 
     <cac:TaxTotal>
-        <cbc:TaxAmount currencyID="EUR">690.00</cbc:TaxAmount>
+        <cbc:TaxAmount currencyID="EUR">870.00</cbc:TaxAmount>
         <cac:TaxSubtotal>
-            <cbc:TaxableAmount currencyID="EUR">3450.00</cbc:TaxableAmount>
-            <cbc:TaxAmount currencyID="EUR">690.00</cbc:TaxAmount>
+            <cbc:TaxableAmount currencyID="EUR">4350.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">870.00</cbc:TaxAmount>
             <cac:TaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -73,18 +73,18 @@
         </cac:TaxSubtotal>
     </cac:TaxTotal>
     <cac:LegalMonetaryTotal>
-        <cbc:LineExtensionAmount currencyID="EUR">3450.00</cbc:LineExtensionAmount>
-        <cbc:TaxExclusiveAmount currencyID="EUR">3450.00</cbc:TaxExclusiveAmount>
-        <cbc:TaxInclusiveAmount currencyID="EUR">4140.00</cbc:TaxInclusiveAmount>
-        <cbc:PayableAmount currencyID="EUR">4140.00</cbc:PayableAmount>
+        <cbc:LineExtensionAmount currencyID="EUR">4350.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">4350.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">5220.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">5220.00</cbc:PayableAmount>
     </cac:LegalMonetaryTotal>
     <cac:InvoiceLine>
         <cbc:ID>1</cbc:ID>
-        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
-        <cbc:LineExtensionAmount currencyID="EUR">3450.00</cbc:LineExtensionAmount>
+        <cbc:InvoicedQuantity unitCode="C62">3</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">4350.00</cbc:LineExtensionAmount>
         <cac:Item>
-            <cbc:Description>Aménagement salle de réunion</cbc:Description>
-            <cbc:Name>Aménagement salle de réunion</cbc:Name>
+            <cbc:Description>Audit sécurité applicative</cbc:Description>
+            <cbc:Name>Audit sécurité applicative</cbc:Name>
             <cac:ClassifiedTaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -92,7 +92,7 @@
             </cac:ClassifiedTaxCategory>
         </cac:Item>
         <cac:Price>
-            <cbc:PriceAmount currencyID="EUR">3450.00</cbc:PriceAmount>
+            <cbc:PriceAmount currencyID="EUR">1450.00</cbc:PriceAmount>
         </cac:Price>
     </cac:InvoiceLine>
 </Invoice>

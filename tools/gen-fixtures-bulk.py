@@ -24,10 +24,20 @@ import os
 import random
 from dataclasses import dataclass
 
-# Tenant principal de la démo
-TECHCONSEIL_SIREN = "123456789"
-TECHCONSEIL_NAME = "TechConseil SAS"
-TECHCONSEIL_VAT = "FR12123456789"
+# Entreprises de démo — celles que `config-ui-demo.yaml` associe aux
+# comptes alice / charlotte / dupont. Le générateur produit autant de
+# factures **émises** que **reçues** pour chacune (équitable entre les 3),
+# avec rotation des partenaires dans `KNOWN_PARTNERS`.
+DEMO_TENANTS: list[tuple[str, str, str]] = [
+    ("123456789", "TechConseil SAS", "FR12123456789"),
+    ("109009309", "Charlotte Solutions SCI", "FR10109009309"),
+    ("111222333", "Menuiserie Artisanale Dupont EURL", "FR11111222333"),
+]
+DEMO_SIRENS = {t[0] for t in DEMO_TENANTS}
+
+# Rétro-compatibilité — certaines parties du fichier référencent encore
+# TECHCONSEIL_SIREN pour les stats de fin d'exécution.
+TECHCONSEIL_SIREN, TECHCONSEIL_NAME, TECHCONSEIL_VAT = DEMO_TENANTS[0]
 
 # 24 partenaires PRÉSENTS dans l'annuaire — pour les fixtures valides
 KNOWN_PARTNERS: list[tuple[str, str, str]] = [
@@ -138,27 +148,41 @@ def daterange(start_year: int = 2025, start_month: int = 6, count: int = 240) ->
 
 
 def build_scenarios(count: int) -> list[Scenario]:
-    """Mix : moitié émises (TechConseil = vendeur), moitié reçues. ~10% avec PJ.
-    ~3% avec un partenaire inconnu (en réception → EMMET_INC)."""
+    """Mix équilibré pour les 3 entreprises de démo : chaque tenant a des
+    émises ET des reçues, et leurs partenaires varient (autres tenants démo
+    + entreprises connues de l'annuaire). ~10% avec PJ, ~3 % de reçues avec
+    un partenaire inconnu (→ EMMET_INC en réception)."""
     rng = random.Random(42)  # déterministe pour reproductibilité
     dates = daterange(2025, 6, count)
     scenarios: list[Scenario] = []
     for i in range(count):
-        is_emise = i % 2 == 0  # alterne pour équilibrer
+        is_emise = i % 2 == 0  # alterne pour équilibrer émis/reçus
         has_pdf = rng.random() < 0.10
         # 3% des reçues utilisent un partenaire absent de l'annuaire
         unknown = (not is_emise) and rng.random() < 0.03
 
-        partner = (
-            rng.choice(UNKNOWN_PARTNERS) if unknown else rng.choice(KNOWN_PARTNERS)
-        )
+        # Tenant principal de cette facture : on tourne sur les 3 demo
+        # entreprises pour les équilibrer.
+        demo_tenant = DEMO_TENANTS[i % len(DEMO_TENANTS)]
+        # Partenaire : un autre tenant démo (cross-traffic) ou un connu
+        # de l'annuaire. On évite que partner == demo_tenant.
+        if unknown:
+            partner = rng.choice(UNKNOWN_PARTNERS)
+        else:
+            # 30% du temps un autre tenant démo, sinon un partenaire annuaire
+            if rng.random() < 0.30:
+                others = [t for t in DEMO_TENANTS if t[0] != demo_tenant[0]]
+                partner = rng.choice(others)
+            else:
+                partner = rng.choice(KNOWN_PARTNERS)
+
         if is_emise:
-            seller = (TECHCONSEIL_SIREN, TECHCONSEIL_NAME, TECHCONSEIL_VAT)
+            seller = demo_tenant
             buyer = partner
             prefix = "BULK-EMI"
         else:
             seller = partner
-            buyer = (TECHCONSEIL_SIREN, TECHCONSEIL_NAME, TECHCONSEIL_VAT)
+            buyer = demo_tenant
             prefix = "BULK-REC"
 
         desc = rng.choice(DESCRIPTIONS)
@@ -622,8 +646,14 @@ def main() -> None:
     pdp_bin = args.pdp_bin or os.path.join(repo_root, "target", "release", "pdp")
 
     scenarios = build_scenarios(args.count)
-    n_emis = sum(1 for s in scenarios if s.seller_siren == TECHCONSEIL_SIREN)
-    n_recu = sum(1 for s in scenarios if s.buyer_siren == TECHCONSEIL_SIREN)
+    # Compteurs par entreprise démo (émises + reçues)
+    per_tenant: dict[str, tuple[int, int]] = {}
+    for siren, name, _ in DEMO_TENANTS:
+        emis = sum(1 for s in scenarios if s.seller_siren == siren)
+        recu = sum(1 for s in scenarios if s.buyer_siren == siren)
+        per_tenant[siren] = (emis, recu)
+    n_emis = sum(e for e, _ in per_tenant.values())
+    n_recu = sum(r for _, r in per_tenant.values())
     n_pj = sum(1 for s in scenarios if s.has_pdf)
     n_unknown = sum(
         1 for s in scenarios
@@ -687,10 +717,14 @@ def main() -> None:
                 os.unlink(tmp_ubl.name)
 
     print(f"Généré {len(scenarios)} fixtures BULK dans tests/fixtures/")
-    print(f"  Émises (TechConseil = vendeur)  : {n_emis}")
-    print(f"  Reçues (TechConseil = acheteur) : {n_recu}")
-    print(f"  Avec PJ                         : {n_pj}")
-    print(f"  Avec partenaire inconnu         : {n_unknown}")
+    print(f"  Émises (toutes entreprises démo)  : {n_emis}")
+    print(f"  Reçues (toutes entreprises démo)  : {n_recu}")
+    print(f"  Avec PJ                           : {n_pj}")
+    print(f"  Avec partenaire inconnu           : {n_unknown}")
+    print("  Détail par entreprise démo :")
+    for siren, name, _ in DEMO_TENANTS:
+        e, r = per_tenant[siren]
+        print(f"    • {siren} {name:<40} → {e} émises / {r} reçues")
     print()
     print(f"  UBL     : {n_ubl} → {ubl_dir}")
     print(f"  CII     : {n_cii} → {cii_dir}")

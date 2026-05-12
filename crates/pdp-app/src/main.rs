@@ -159,6 +159,34 @@ enum DemoCommands {
         #[arg(long, default_value = "http://localhost:9200")]
         elasticsearch_url: String,
     },
+    /// One-shot pour démarrer une démo propre : importe l'annuaire F14 dans
+    /// PostgreSQL, prépare les répertoires `tenants/{siren}/` des entreprises
+    /// de démo, puis pousse toutes les fixtures via `populate`. À lancer une
+    /// fois que le serveur tourne (`pdp start --mode receiver`).
+    Seed {
+        /// URL du serveur Ferrite (défaut: http://localhost:8080)
+        #[arg(long, default_value = "http://localhost:8080")]
+        server_url: String,
+        /// Fichier F14 à importer (défaut: la fixture de démo)
+        #[arg(long, default_value = "tests/fixtures/annuaire/F14_demo.xml")]
+        annuaire_file: PathBuf,
+        /// Répertoire contenant les fixtures UBL/CII/Factur-X
+        #[arg(long, default_value = "tests/fixtures")]
+        fixtures_dir: PathBuf,
+        /// Bearer token (si l'auth est activée). En config-ui-demo.yaml on
+        /// passe par cookie de session, donc cet argument reste optionnel.
+        #[arg(long)]
+        token: Option<String>,
+        /// Reset l'annuaire (TRUNCATE) avant l'import F14
+        #[arg(long)]
+        reset_annuaire: bool,
+        /// Reset les indices Elasticsearch `pdp-*` avant populate
+        #[arg(long)]
+        reset_factures: bool,
+        /// URL Elasticsearch (défaut: http://localhost:9200)
+        #[arg(long, default_value = "http://localhost:9200")]
+        elasticsearch_url: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -513,7 +541,6 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             flow_sender: flow_tx.clone(),
             webhook_secret: http_config.webhook_secret.clone(),
             tokens: tokens_table,
-            dev_open: http_config.dev_open,
             users,
             session_secret,
             session_ttl_secs: http_config.session_ttl_secs,
@@ -529,6 +556,10 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
                 .rate_limit_per_minute
                 .filter(|n| *n > 0)
                 .map(|n| std::sync::Arc::new(server::RateLimiter::new(n))),
+            tenants_dir: config
+                .tenants_dir
+                .as_ref()
+                .map(|d| base_dir.join(d)),
         });
 
         let server_config = server::ServerConfig {
@@ -2432,7 +2463,147 @@ async fn cmd_demo(action: DemoCommands) -> Result<()> {
             )
             .await
         }
+        DemoCommands::Seed {
+            server_url,
+            annuaire_file,
+            fixtures_dir,
+            token,
+            reset_annuaire,
+            reset_factures,
+            elasticsearch_url,
+        } => {
+            cmd_demo_seed(
+                &server_url,
+                &annuaire_file,
+                &fixtures_dir,
+                token.as_deref(),
+                reset_annuaire,
+                reset_factures,
+                &elasticsearch_url,
+            )
+            .await
+        }
     }
+}
+
+/// Bootstrap complet d'une démo Ferrite :
+/// 1. Importe l'annuaire F14 dans PostgreSQL (~500 entreprises)
+/// 2. Crée les répertoires `tenants/{siren}/{in,out}/` + `config.yaml` pour
+///    les entreprises de démo (TechConseil, Charlotte Solutions,
+///    Menuiserie Dupont) à partir des noms trouvés dans l'annuaire
+/// 3. Pousse toutes les fixtures UBL/CII/Factur-X via `POST /v1/flows`
+///
+/// Les SIRENs de démo sont en dur ici parce qu'ils doivent rester alignés
+/// avec [`config-ui-demo.yaml`] et avec les fixtures (cf. `gen-fixtures-bulk.py`).
+async fn cmd_demo_seed(
+    server_url: &str,
+    annuaire_file: &std::path::Path,
+    fixtures_dir: &std::path::Path,
+    token: Option<&str>,
+    reset_annuaire: bool,
+    reset_factures: bool,
+    elasticsearch_url: &str,
+) -> Result<()> {
+    /// SIRENs des entreprises de démo. Alignés sur `config-ui-demo.yaml`
+    /// (alice / charlotte / dupont) ET sur les fixtures UBL/CII.
+    const DEMO_TENANT_SIRENS: &[&str] = &["123456789", "109009309", "111222333"];
+    /// Bearer token par défaut câblé dans `config-ui-demo.yaml`. Permet à
+    /// `seed` de pousser les fixtures sans demander à l'utilisateur de le
+    /// préciser à la main. En config "réelle" (production), passer `--token`.
+    const DEFAULT_DEMO_TOKEN: &str = "tok-demo-admin";
+
+    let token = token.map(str::to_string).or_else(|| Some(DEFAULT_DEMO_TOKEN.to_string()));
+    let token_ref = token.as_deref();
+
+    // 1. Import annuaire F14 ──────────────────────────────────────────────
+    println!("\n=== 1/3 Annuaire F14 ===");
+    // On suppose `config.yaml` à côté (configuration par défaut). En démo
+    // Ferrite c'est `config-ui-demo.yaml` à la racine du repo.
+    let demo_config = std::path::Path::new("config-ui-demo.yaml");
+    let config_path: &std::path::Path = if demo_config.exists() {
+        demo_config
+    } else {
+        std::path::Path::new("config.yaml")
+    };
+
+    if !annuaire_file.exists() {
+        anyhow::bail!(
+            "Fichier F14 introuvable : {}\n→ Vérifier --annuaire-file",
+            annuaire_file.display()
+        );
+    }
+    let store = connect_annuaire_db(config_path).await?;
+    if reset_annuaire {
+        println!("🗑️  Reset annuaire (TRUNCATE)…");
+        store
+            .truncate_all()
+            .await
+            .map_err(|e| anyhow::anyhow!("truncate annuaire: {}", e))?;
+    }
+    let f = std::fs::File::open(annuaire_file)?;
+    let reader = std::io::BufReader::with_capacity(8 * 1024 * 1024, f);
+    let stats = pdp_annuaire::ingest_f14(reader, &store, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("ingest_f14: {}", e))?;
+    println!(
+        "✅ Annuaire importé : {} unités légales, {} établissements, {} codes routage",
+        stats.unites_legales, stats.etablissements, stats.codes_routage
+    );
+
+    // 2. Création des répertoires tenants/{siren} ────────────────────────
+    println!("\n=== 2/3 Entreprises de démo ===");
+    let tenants_dir = std::path::Path::new("tenants");
+    std::fs::create_dir_all(tenants_dir)?;
+    for siren in DEMO_TENANT_SIRENS {
+        let target = tenants_dir.join(siren);
+        if target.exists() {
+            println!("  • {} déjà présent ({})", siren, target.display());
+            continue;
+        }
+        // Récupère le nom officiel depuis l'annuaire qu'on vient d'importer
+        let unite = store
+            .lookup_unite_legale(siren)
+            .await
+            .map_err(|e| anyhow::anyhow!("lookup {}: {}", siren, e))?;
+        let name = unite
+            .as_ref()
+            .map(|u| u.nom.clone())
+            .unwrap_or_else(|| format!("Tenant {siren}"));
+        std::fs::create_dir_all(target.join("in"))?;
+        std::fs::create_dir_all(target.join("out"))?;
+        let cfg = pdp_config::model::TenantConfig {
+            pdp: pdp_config::model::PdpIdentity {
+                id: format!("TENANT-{siren}"),
+                name: name.clone(),
+                siren: Some(siren.to_string()),
+                siret: None,
+                matricule: None,
+            },
+            routes: Vec::new(),
+            ppf: None,
+            afnor: None,
+        };
+        let yaml = serde_yaml::to_string(&cfg)?;
+        std::fs::write(target.join("config.yaml"), yaml)?;
+        println!("  ✅ {} → {}", siren, name);
+    }
+
+    // 3. Populate des fixtures ────────────────────────────────────────────
+    println!("\n=== 3/3 Factures fixtures ===");
+    cmd_demo_populate(
+        server_url,
+        fixtures_dir,
+        token_ref,
+        reset_factures,
+        elasticsearch_url,
+    )
+    .await?;
+
+    println!(
+        "\n🎉 Démo prête. Connecte-toi sur {}/login\n   admin@ferrite.demo / admin",
+        server_url.trim_end_matches('/')
+    );
+    Ok(())
 }
 
 async fn cmd_demo_populate(

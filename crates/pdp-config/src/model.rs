@@ -135,13 +135,8 @@ pub struct HttpServerConfig {
     /// migration des configs vers `tokens:`.
     #[serde(default)]
     pub bearer_tokens: Option<Vec<String>>,
-    /// Mode développement : accepte les requêtes **sans token** et leur
-    /// donne un contexte `PdpAdmin`. Doit rester `false` en prod.
-    /// Activer uniquement pour la démo locale (config-ui-demo.yaml).
-    #[serde(default)]
-    pub dev_open: bool,
-    /// Comptes utilisateurs pour le login web (Phase B). Voir [`UserConfig`].
-    /// Vide / absent = login désactivé (Phase A bearer-only).
+    /// Comptes utilisateurs pour le login web. Voir [`UserConfig`].
+    /// Vide / absent = login désactivé (mode bearer-only).
     #[serde(default)]
     pub users: Option<Vec<UserConfig>>,
     /// Secret HMAC utilisé pour signer les cookies de session (`/login`).

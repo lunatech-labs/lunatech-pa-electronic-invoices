@@ -22,15 +22,15 @@
                 <ram:LineID>1</ram:LineID>
             </ram:AssociatedDocumentLineDocument>
             <ram:SpecifiedTradeProduct>
-                <ram:Name>Maintenance trimestrielle infrastructure</ram:Name>
+                <ram:Name>Intervention support niveau 2</ram:Name>
             </ram:SpecifiedTradeProduct>
             <ram:SpecifiedLineTradeAgreement>
                 <ram:NetPriceProductTradePrice>
-                    <ram:ChargeAmount>1250.00</ram:ChargeAmount>
+                    <ram:ChargeAmount>110.00</ram:ChargeAmount>
                 </ram:NetPriceProductTradePrice>
             </ram:SpecifiedLineTradeAgreement>
             <ram:SpecifiedLineTradeDelivery>
-                <ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>
+                <ram:BilledQuantity unitCode="HUR">12</ram:BilledQuantity>
             </ram:SpecifiedLineTradeDelivery>
             <ram:SpecifiedLineTradeSettlement>
                 <ram:ApplicableTradeTax>
@@ -39,7 +39,7 @@
                     <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
                 </ram:ApplicableTradeTax>
                 <ram:SpecifiedTradeSettlementLineMonetarySummation>
-                    <ram:LineTotalAmount>1250.00</ram:LineTotalAmount>
+                    <ram:LineTotalAmount>1320.00</ram:LineTotalAmount>
                 </ram:SpecifiedTradeSettlementLineMonetarySummation>
             </ram:SpecifiedLineTradeSettlement>
         </ram:IncludedSupplyChainTradeLineItem>
@@ -64,9 +64,9 @@
                 </ram:SpecifiedTaxRegistration>
             </ram:SellerTradeParty>
             <ram:BuyerTradeParty>
-                <ram:Name>TechConseil SAS</ram:Name>
+                <ram:Name>Charlotte Solutions SCI</ram:Name>
                 <ram:SpecifiedLegalOrganization>
-                    <ram:ID schemeID="0002">123456789</ram:ID>
+                    <ram:ID schemeID="0002">109009309</ram:ID>
                 </ram:SpecifiedLegalOrganization>
                 <ram:PostalTradeAddress>
                     <ram:LineOne>5 avenue du Commerce</ram:LineOne>
@@ -75,10 +75,10 @@
                     <ram:CountryID>FR</ram:CountryID>
                 </ram:PostalTradeAddress>
                 <ram:URIUniversalCommunication>
-                    <ram:URIID schemeID="0009">12345678900002</ram:URIID>
+                    <ram:URIID schemeID="0009">10900930900002</ram:URIID>
                 </ram:URIUniversalCommunication>
                 <ram:SpecifiedTaxRegistration>
-                    <ram:ID schemeID="VA">FR12123456789</ram:ID>
+                    <ram:ID schemeID="VA">FR10109009309</ram:ID>
                 </ram:SpecifiedTaxRegistration>
             </ram:BuyerTradeParty>
         </ram:ApplicableHeaderTradeAgreement>
@@ -92,9 +92,9 @@
                 </ram:PayeePartyCreditorFinancialAccount>
             </ram:SpecifiedTradeSettlementPaymentMeans>
             <ram:ApplicableTradeTax>
-                <ram:CalculatedAmount>250.00</ram:CalculatedAmount>
+                <ram:CalculatedAmount>264.00</ram:CalculatedAmount>
                 <ram:TypeCode>VAT</ram:TypeCode>
-                <ram:BasisAmount>1250.00</ram:BasisAmount>
+                <ram:BasisAmount>1320.00</ram:BasisAmount>
                 <ram:CategoryCode>S</ram:CategoryCode>
                 <ram:RateApplicablePercent>20.00</ram:RateApplicablePercent>
             </ram:ApplicableTradeTax>
@@ -104,11 +104,11 @@
                 </ram:DueDateDateTime>
             </ram:SpecifiedTradePaymentTerms>
             <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
-                <ram:LineTotalAmount>1250.00</ram:LineTotalAmount>
-                <ram:TaxBasisTotalAmount>1250.00</ram:TaxBasisTotalAmount>
-                <ram:TaxTotalAmount currencyID="EUR">250.00</ram:TaxTotalAmount>
-                <ram:GrandTotalAmount>1500.00</ram:GrandTotalAmount>
-                <ram:DuePayableAmount>1500.00</ram:DuePayableAmount>
+                <ram:LineTotalAmount>1320.00</ram:LineTotalAmount>
+                <ram:TaxBasisTotalAmount>1320.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">264.00</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>1584.00</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>1584.00</ram:DuePayableAmount>
             </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         </ram:ApplicableHeaderTradeSettlement>
     </rsm:SupplyChainTradeTransaction>

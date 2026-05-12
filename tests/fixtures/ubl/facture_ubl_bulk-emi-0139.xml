@@ -8,7 +8,7 @@
     <cbc:IssueDate>2025-12-27</cbc:IssueDate>
     <cbc:DueDate>2025-12-28</cbc:DueDate>
     <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
-    <cbc:Note>Étude de faisabilité projet</cbc:Note>
+    <cbc:Note>Audit sécurité applicative</cbc:Note>
     <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
     <cbc:BuyerReference>BC-BULK-EMI-0139</cbc:BuyerReference>
     <cac:AccountingSupplierParty>
@@ -33,8 +33,8 @@
     </cac:AccountingSupplierParty>
     <cac:AccountingCustomerParty>
         <cac:Party>
-            <cac:EndpointID schemeID="0009">13614552900002</cac:EndpointID>
-            <cac:PartyName><cbc:Name>RechercheCommerce EURL</cbc:Name></cac:PartyName>
+            <cac:EndpointID schemeID="0009">12565649500002</cac:EndpointID>
+            <cac:PartyName><cbc:Name>Développement Textile SA</cbc:Name></cac:PartyName>
             <cac:PostalAddress>
                 <cbc:StreetName>5 avenue du Commerce</cbc:StreetName>
                 <cbc:CityName>Lyon</cbc:CityName>
@@ -42,12 +42,12 @@
                 <cac:Country><cbc:IdentificationCode>FR</cbc:IdentificationCode></cac:Country>
             </cac:PostalAddress>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>FR13136145529</cbc:CompanyID>
+                <cbc:CompanyID>FR12125656495</cbc:CompanyID>
                 <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
             </cac:PartyTaxScheme>
             <cac:PartyLegalEntity>
-                <cbc:RegistrationName>RechercheCommerce EURL</cbc:RegistrationName>
-                <cbc:CompanyID schemeID="0002">136145529</cbc:CompanyID>
+                <cbc:RegistrationName>Développement Textile SA</cbc:RegistrationName>
+                <cbc:CompanyID schemeID="0002">125656495</cbc:CompanyID>
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingCustomerParty>
@@ -61,10 +61,10 @@
     </cac:PaymentMeans>
 
     <cac:TaxTotal>
-        <cbc:TaxAmount currencyID="EUR">1160.00</cbc:TaxAmount>
+        <cbc:TaxAmount currencyID="EUR">870.00</cbc:TaxAmount>
         <cac:TaxSubtotal>
-            <cbc:TaxableAmount currencyID="EUR">5800.00</cbc:TaxableAmount>
-            <cbc:TaxAmount currencyID="EUR">1160.00</cbc:TaxAmount>
+            <cbc:TaxableAmount currencyID="EUR">4350.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">870.00</cbc:TaxAmount>
             <cac:TaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -73,18 +73,18 @@
         </cac:TaxSubtotal>
     </cac:TaxTotal>
     <cac:LegalMonetaryTotal>
-        <cbc:LineExtensionAmount currencyID="EUR">5800.00</cbc:LineExtensionAmount>
-        <cbc:TaxExclusiveAmount currencyID="EUR">5800.00</cbc:TaxExclusiveAmount>
-        <cbc:TaxInclusiveAmount currencyID="EUR">6960.00</cbc:TaxInclusiveAmount>
-        <cbc:PayableAmount currencyID="EUR">6960.00</cbc:PayableAmount>
+        <cbc:LineExtensionAmount currencyID="EUR">4350.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">4350.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">5220.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">5220.00</cbc:PayableAmount>
     </cac:LegalMonetaryTotal>
     <cac:InvoiceLine>
         <cbc:ID>1</cbc:ID>
-        <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
-        <cbc:LineExtensionAmount currencyID="EUR">5800.00</cbc:LineExtensionAmount>
+        <cbc:InvoicedQuantity unitCode="C62">3</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">4350.00</cbc:LineExtensionAmount>
         <cac:Item>
-            <cbc:Description>Étude de faisabilité projet</cbc:Description>
-            <cbc:Name>Étude de faisabilité projet</cbc:Name>
+            <cbc:Description>Audit sécurité applicative</cbc:Description>
+            <cbc:Name>Audit sécurité applicative</cbc:Name>
             <cac:ClassifiedTaxCategory>
                 <cbc:ID>S</cbc:ID>
                 <cbc:Percent>20.00</cbc:Percent>
@@ -92,7 +92,7 @@
             </cac:ClassifiedTaxCategory>
         </cac:Item>
         <cac:Price>
-            <cbc:PriceAmount currencyID="EUR">5800.00</cbc:PriceAmount>
+            <cbc:PriceAmount currencyID="EUR">1450.00</cbc:PriceAmount>
         </cac:Price>
     </cac:InvoiceLine>
 </Invoice>

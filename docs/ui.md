@@ -7,20 +7,20 @@ l'API HTTP directement. Phase 1 = lecture seule (dashboard + liste + détail).
 ## Authentification & isolation tenant
 
 L'UI est protégée par l'`auth_middleware` (cf.
-[crates/pdp-app/src/security.rs](../crates/pdp-app/src/security.rs)). Trois
+[crates/pdp-app/src/security.rs](../crates/pdp-app/src/security.rs)). Deux
 voies d'authentification, dans l'ordre de résolution du middleware :
 
-1. **`dev_open: true`** (config-ui-demo.yaml) — aucun header / cookie requis,
-   le middleware injecte un contexte `PdpAdmin` de complaisance. Utile pour
-   la démo locale et les screenshots. **Ne JAMAIS activer en prod.**
-2. **Cookie de session** `ferrite_session` (Phase B) — issu du formulaire
-   `/login`. Le cookie est HMAC-signé (HttpOnly, SameSite=Lax) et porte
-   le `principal` du user + une expiration. Le `SecurityContext` est
+1. **Cookie de session** `ferrite_session` — issu du formulaire `/login`.
+   Le cookie est HMAC-signé (HttpOnly, SameSite=Lax) et porte le
+   `principal` du user + une expiration. Le `SecurityContext` est
    reconstruit à partir de `state.users` à chaque requête (lookup
    in-memory, pas de DB). TTL configurable (`session_ttl_secs`, défaut 8h).
-3. **Bearer token** (clients API) — header `Authorization: Bearer <token>`,
+2. **Bearer token** (clients API) — header `Authorization: Bearer <token>`,
    cherché dans `state.tokens` (table en mémoire alimentée par la config
    `http_server.tokens:`).
+
+Pas de mode "bypass d'auth" : même la démo locale passe par `/login` avec
+des utilisateurs de démo prédéfinis dans `config-ui-demo.yaml`.
 
 Tout `?siren=X` passé en query est validé par l'extractor `AuthorizedSiren`
 contre le `SecurityContext` du porteur :
@@ -37,7 +37,6 @@ contre le `SecurityContext` du porteur :
 
 ```yaml
 http_server:
-  dev_open: false
   session_secret: "<32+ octets aléatoires, gardé secret>"
   session_ttl_secs: 28800   # 8h par défaut
 

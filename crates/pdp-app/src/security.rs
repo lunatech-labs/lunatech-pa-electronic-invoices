@@ -3,9 +3,9 @@
 //! # Modèle
 //!
 //! Chaque requête HTTP est associée à un [`SecurityContext`] résolu par le
-//! middleware [`crate::server::auth_middleware`] : soit à partir du header
-//! `Authorization: Bearer <token>`, soit (en mode `dev_open`) un contexte
-//! admin de complaisance pour la démo locale.
+//! middleware [`crate::server::auth_middleware`] : soit à partir d'un
+//! cookie de session (login web), soit à partir du header
+//! `Authorization: Bearer <token>` (clients API).
 //!
 //! Le contexte porte :
 //! - un `principal` (libellé logique du porteur, pour audit log)
@@ -47,18 +47,6 @@ pub struct SecurityContext {
 }
 
 impl SecurityContext {
-    /// Mode développement (`dev_open: true` dans la config). Donne un
-    /// contexte admin "de complaisance" qui ne doit JAMAIS être utilisé en
-    /// production. C'est ce qui permet à la démo locale (config-ui-demo.yaml)
-    /// de fonctionner sans configurer de tokens.
-    pub fn dev_open() -> Self {
-        Self {
-            principal: "dev".to_string(),
-            allowed_sirens: Vec::new(),
-            role: Role::PdpAdmin,
-        }
-    }
-
     /// `true` si le porteur peut accéder aux flux d'un SIREN donné.
     ///
     /// - `Tenant` → uniquement si `siren` est dans `allowed_sirens`
@@ -254,14 +242,6 @@ mod tests {
         };
         assert!(c.can_access("123456789"));
         assert!(c.is_cross_tenant_reader());
-    }
-
-    #[test]
-    fn dev_open_is_admin() {
-        let c = SecurityContext::dev_open();
-        assert_eq!(c.role, Role::PdpAdmin);
-        assert!(c.can_access("anything"));
-        assert_eq!(c.principal, "dev");
     }
 
     #[test]

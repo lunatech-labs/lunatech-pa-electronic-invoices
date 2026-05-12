@@ -121,15 +121,12 @@ pub struct AppState {
     /// Store pour la traçabilité (lecture). Indirection via `dyn TraceBackend`
     /// pour permettre de tester l'UI/API avec un mock 100% mémoire.
     pub trace_store: Option<Arc<dyn pdp_trace::TraceBackend>>,
-    /// Table de lookup `token → SecurityContext`. Vide = aucun token configuré.
-    /// Si `dev_open == true` ET la table est vide, le middleware injecte un
-    /// contexte admin de complaisance (mode démo). Sinon, toute requête
-    /// vers une route protégée est refusée en 401.
+    /// Table de lookup `token → SecurityContext`. Vide = aucun client API
+    /// configuré. Toute requête vers une route protégée sans Bearer token
+    /// valide (ou cookie de session valide) est refusée en 401.
     pub tokens: std::collections::HashMap<String, crate::security::SecurityContext>,
-    /// Mode développement — voir `crate::security::SecurityContext::dev_open`.
-    pub dev_open: bool,
-    /// Comptes utilisateurs pour le login web (Phase B). Liste plate
-    /// (re-clonée depuis la config) — pas de DB, pas d'index.
+    /// Comptes utilisateurs pour le login web. Liste plate (re-clonée depuis
+    /// la config) — pas de DB, pas d'index.
     pub users: Vec<pdp_config::model::UserConfig>,
     /// Secret HMAC pour signer les cookies de session.
     pub session_secret: Vec<u8>,
@@ -155,6 +152,11 @@ pub struct AppState {
     pub request_timeout: Duration,
     /// Rate limiter optionnel (None = désactivé)
     pub rate_limiter: Option<Arc<RateLimiter>>,
+    /// Répertoire racine où sont stockées les entreprises (un sous-dossier
+    /// par SIREN, cf. `pdp_config::tenant`). `None` = administration des
+    /// entreprises désactivée. Utilisé exclusivement par les écrans
+    /// `/ui/admin/*` pour lister et créer des entreprises.
+    pub tenants_dir: Option<std::path::PathBuf>,
 }
 
 /// Flux entrant reçu via l'API HTTP
@@ -296,10 +298,9 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         ))
         .with_state(state.clone());
 
-    // Interface web — protégée par auth_middleware (avec dev_open: true en
-    // démo, l'utilisateur est implicitement admin et peut consulter n'importe
-    // quel SIREN ; en prod le middleware exige un Bearer token et
-    // l'extractor `AuthorizedSiren` rejettera tout `?siren=X` hors scope).
+    // Interface web — protégée par auth_middleware. Toute requête doit
+    // avoir un cookie de session (login web) ou un Bearer token valide ;
+    // l'extractor `AuthorizedSiren` rejette en 403 les `?siren=X` hors scope.
     let ui_routes = Router::new()
         .route("/ui", get(crate::ui::handle_dashboard))
         .route("/ui/emises", get(crate::ui::handle_flows_emises))
@@ -323,6 +324,17 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/ui/flows/{flow_id}/download/pdf", get(crate::ui::handle_download_pdf))
         .route("/ui/flows/{flow_id}/download/facturx", get(crate::ui::handle_download_facturx))
         .route("/ui/flows/{flow_id}/download/attachment", get(crate::ui::handle_download_attachment))
+        // Administration (réservée au rôle PdpAdmin — vérifié dans chaque
+        // handler par `admin::require_admin`).
+        .route("/ui/admin", get(crate::admin::handle_admin_dashboard))
+        .route(
+            "/ui/admin/entreprises/new",
+            get(crate::admin::handle_admin_entreprise_new),
+        )
+        .route(
+            "/ui/admin/entreprises",
+            post(crate::admin::handle_admin_entreprise_create),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state.clone());
 
@@ -353,12 +365,10 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
 /// Middleware d'authentification.
 ///
 /// Résolution du `SecurityContext`, dans cet ordre :
-/// 1. **`dev_open: true`** (config démo) : aucun header requis,
-///    contexte admin de complaisance.
-/// 2. **Cookie de session** `ferrite_session` (login web Phase B) : si
-///    présent ET valide ET le `principal` existe encore dans
-///    `state.users`, on construit le `SecurityContext` à partir du user.
-/// 3. **`Authorization: Bearer <token>`** (clients API) : lookup dans
+/// 1. **Cookie de session** `ferrite_session` (login web) : si présent ET
+///    valide ET le `principal` existe encore dans `state.users`, on
+///    construit le `SecurityContext` à partir du user.
+/// 2. **`Authorization: Bearer <token>`** (clients API) : lookup dans
 ///    `state.tokens`. Inconnu ou manquant → réponse selon le type de
 ///    requête (UI = redirect 303 vers `/login`, API = 401 JSON).
 async fn auth_middleware(
@@ -366,9 +376,7 @@ async fn auth_middleware(
     mut req: axum::extract::Request,
     next: middleware::Next,
 ) -> axum::response::Response {
-    let ctx = if state.dev_open {
-        std::sync::Arc::new(crate::security::SecurityContext::dev_open())
-    } else if let Some(c) = resolve_from_cookie(&state, &req) {
+    let ctx = if let Some(c) = resolve_from_cookie(&state, &req) {
         std::sync::Arc::new(c)
     } else if let Some(c) = resolve_from_bearer(&state, &req) {
         std::sync::Arc::new(c)
@@ -1980,6 +1988,10 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt; // for `oneshot`
 
+    /// Token admin par défaut utilisé par les fixtures de test pour passer
+    /// l'`auth_middleware` depuis qu'on a retiré le mode `dev_open`.
+    const TEST_ADMIN_TOKEN: &str = "tok-test-admin";
+
     /// Helper: build une table de tokens en `PdpAdmin` (compat ancien comportement).
     /// Utilisé par les tests historiques d'auth qui ne testent QUE la liste blanche
     /// de tokens, pas l'isolation tenant.
@@ -2007,7 +2019,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            tokens: legacy_admin_tokens(&[TEST_ADMIN_TOKEN]), users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2015,6 +2027,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         })
     }
 
@@ -2027,7 +2040,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            tokens: legacy_admin_tokens(&[TEST_ADMIN_TOKEN]), users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2035,6 +2048,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         })
     }
 
@@ -2047,7 +2061,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: Some("test-secret".to_string()),
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            tokens: legacy_admin_tokens(&[TEST_ADMIN_TOKEN]), users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2055,6 +2069,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         });
         (state, rx)
     }
@@ -2069,7 +2084,7 @@ mod tests {
             webhook_secret: None,
             trace_store: None,
             tokens: legacy_admin_tokens(&["valid-token-123", "valid-token-456"]),
-            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2077,6 +2092,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         })
     }
 
@@ -2247,6 +2263,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/healthcheck")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2274,6 +2291,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -2306,6 +2324,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -2330,6 +2349,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -2356,6 +2376,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -2384,6 +2405,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -2412,6 +2434,7 @@ mod tests {
             .method("POST")
             .header("Content-Type", "application/json")
             .header("X-Webhook-Signature", &signature)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body_bytes))
             .unwrap();
 
@@ -2439,6 +2462,7 @@ mod tests {
             .method("POST")
             .header("Content-Type", "application/json")
             .header("X-Webhook-Signature", "sha256=badbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadb")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body_bytes))
             .unwrap();
 
@@ -2465,6 +2489,7 @@ mod tests {
             .uri("/v1/webhooks/callback")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body_bytes))
             .unwrap();
 
@@ -2492,6 +2517,7 @@ mod tests {
             .uri("/v1/webhooks/callback")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body_bytes))
             .unwrap();
 
@@ -2515,6 +2541,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/healthcheck")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2537,6 +2564,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -2559,7 +2587,7 @@ mod tests {
                 webhook_secret: None,
                 trace_store: None,
                 tokens: legacy_admin_tokens(&["my-secret-token"]),
-                dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+                users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
                 metrics: Metrics::default(),
                 annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -2567,6 +2595,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
             });
             (state, rx)
         };
@@ -2628,7 +2657,7 @@ mod tests {
             pdp_matricule: "9999".to_string(),
             flow_sender: tx,
             webhook_secret: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            tokens: legacy_admin_tokens(&[TEST_ADMIN_TOKEN]), users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             trace_store: None,
             metrics: Metrics::default(),
             annuaire_store: None,
@@ -2637,6 +2666,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         });
         let app = build_api_router(state);
 
@@ -2648,6 +2678,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -2668,6 +2699,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows/some-flow-id?siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2749,6 +2781,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows/some-flow-id?docType=Garbage&siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2773,6 +2806,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows/some-flow-id?docType=Metadata&siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2790,6 +2824,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows/some-flow-id?docType=Original&siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2806,6 +2841,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows/some-flow-id?siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2822,6 +2858,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/stats?siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2837,6 +2874,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/stats?siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2852,6 +2890,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows?status=error&siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2868,6 +2907,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows?siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2887,6 +2927,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows?status=unknown&siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2906,6 +2947,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/flows?status=error&siren=123456789")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2925,6 +2967,7 @@ mod tests {
         let req = Request::builder()
             .uri("/metrics")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2952,6 +2995,7 @@ mod tests {
         let req = Request::builder()
             .uri("/metrics")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -2974,6 +3018,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3014,6 +3059,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3049,6 +3095,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3080,6 +3127,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3100,7 +3148,7 @@ mod tests {
             webhook_secret: Some("e2e-secret".to_string()),
             trace_store: None,
             tokens: legacy_admin_tokens(&["e2e-token-valid"]),
-            dev_open: false, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3108,6 +3156,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         });
         let app = build_api_router(state);
 
@@ -3123,6 +3172,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body.clone()))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -3157,6 +3207,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/healthcheck")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -3166,6 +3217,7 @@ mod tests {
         let req = Request::builder()
             .uri("/metrics")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3195,6 +3247,7 @@ mod tests {
                 .uri("/v1/flows?siren=123456789")
                 .method("POST")
                 .header("Content-Type", &content_type)
+                .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
                 .body(Body::from(body))
                 .unwrap();
 
@@ -3228,6 +3281,7 @@ mod tests {
             let req = Request::builder()
                 .uri("/v1/flows?siren=123456789").method("POST")
                 .header("Content-Type", &ct)
+                .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
                 .body(Body::from(body)).unwrap();
 
             let _ = app.oneshot(req).await.unwrap();
@@ -3241,6 +3295,7 @@ mod tests {
         let app = build_api_router(state);
         let req = Request::builder()
             .uri("/metrics").method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty()).unwrap();
         let resp = app.oneshot(req).await.unwrap();
         let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -3275,6 +3330,7 @@ mod tests {
             .uri("/v1/webhooks")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(webhook_create_body()))
             .unwrap();
 
@@ -3306,6 +3362,7 @@ mod tests {
             .uri("/v1/webhooks")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3331,6 +3388,7 @@ mod tests {
             .uri("/v1/webhooks")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3346,6 +3404,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/webhooks")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -3367,6 +3426,7 @@ mod tests {
             .uri("/v1/webhooks")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(webhook_create_body()))
             .unwrap();
         let _ = app.clone().oneshot(req).await.unwrap();
@@ -3375,6 +3435,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/webhooks")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3393,6 +3454,7 @@ mod tests {
             .uri("/v1/webhooks")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(webhook_create_body()))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -3404,6 +3466,7 @@ mod tests {
         let req = Request::builder()
             .uri(format!("/v1/webhooks/{}", webhook_id))
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3425,6 +3488,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/webhooks/00000000-0000-0000-0000-000000000000")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -3442,6 +3506,7 @@ mod tests {
             .uri("/v1/webhooks")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(webhook_create_body()))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -3458,6 +3523,7 @@ mod tests {
             .uri(format!("/v1/webhooks/{}", webhook_id))
             .method("PATCH")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(patch_body))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -3467,6 +3533,7 @@ mod tests {
         let req = Request::builder()
             .uri(format!("/v1/webhooks/{}", webhook_id))
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3485,6 +3552,7 @@ mod tests {
             .uri("/v1/webhooks")
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(webhook_create_body()))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -3496,6 +3564,7 @@ mod tests {
         let req = Request::builder()
             .uri(format!("/v1/webhooks/{}", webhook_id))
             .method("DELETE")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -3505,6 +3574,7 @@ mod tests {
         let req = Request::builder()
             .uri(format!("/v1/webhooks/{}", webhook_id))
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3526,6 +3596,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/routing-code/siret:12345678901234/code:0224ABC")
             .method("GET")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -3544,6 +3615,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/routing-code/siret:12345678901234/code:0224ABC")
             .method("DELETE")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -3566,6 +3638,7 @@ mod tests {
         let req = Request::builder()
             .uri("/v1/webhooks/00000000-0000-0000-0000-000000000000")
             .method("DELETE")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -3587,7 +3660,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            tokens: legacy_admin_tokens(&[TEST_ADMIN_TOKEN]), users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3595,6 +3668,7 @@ mod tests {
             max_flow_size_bytes: max_size,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
+            tenants_dir: None,
         });
         (state, rx)
     }
@@ -3607,7 +3681,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            tokens: legacy_admin_tokens(&[TEST_ADMIN_TOKEN]), users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3615,6 +3689,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(secs),
             rate_limiter: None,
+            tenants_dir: None,
         })
     }
 
@@ -3626,7 +3701,7 @@ mod tests {
             flow_sender: tx,
             webhook_secret: None,
             trace_store: None,
-            tokens: std::collections::HashMap::new(), dev_open: true, users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
+            tokens: legacy_admin_tokens(&[TEST_ADMIN_TOKEN]), users: Vec::new(), session_secret: b"test-secret-32-bytes-long-padding-padding".to_vec(), session_ttl_secs: 3600, revocations: std::sync::Arc::new(crate::session::RevocationList::new()),
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
@@ -3634,6 +3709,7 @@ mod tests {
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: Some(Arc::new(RateLimiter::new(per_minute))),
+            tenants_dir: None,
         })
     }
 
@@ -3651,6 +3727,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3676,6 +3753,7 @@ mod tests {
             .uri("/v1/flows?siren=123456789")
             .method("POST")
             .header("Content-Type", &content_type)
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::from(body))
             .unwrap();
 
@@ -3705,6 +3783,7 @@ mod tests {
 
         let req = Request::builder()
             .uri("/slow")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
 
@@ -3722,6 +3801,7 @@ mod tests {
 
         let req = Request::builder()
             .uri("/v1/healthcheck")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3738,6 +3818,7 @@ mod tests {
         let make_req = || {
             Request::builder()
                 .uri("/v1/webhooks")
+                .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
                 .body(Body::empty())
                 .unwrap()
         };
@@ -3766,6 +3847,7 @@ mod tests {
         for _ in 0..5 {
             let req = Request::builder()
                 .uri("/v1/webhooks")
+                .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
                 .body(Body::empty())
                 .unwrap();
             let resp = app.clone().oneshot(req).await.unwrap();
@@ -3794,17 +3876,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_ui_dashboard_no_siren_shows_picker() {
+        // Sans `?siren=` et avec un token admin, on doit voir le picker
+        // d'entreprises (liste cliquable). Aucune entreprise n'est
+        // configurée dans le fixture → message "Aucune entreprise".
         let state = test_app_state();
         let app = build_api_router(state);
 
-        let req = Request::builder().uri("/ui").body(Body::empty()).unwrap();
+        let req = Request::builder().uri("/ui").header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}")).body(Body::empty()).unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
         let body = body_string(resp).await;
-        assert!(body.contains("Aucun SIREN sélectionné"));
-        assert!(body.contains("Choisir un tenant"));
-        assert!(body.contains("<form"));
+        assert!(body.contains("Choisir une entreprise"));
+        assert!(body.contains("Aucune entreprise enregistrée"));
     }
 
     #[tokio::test]
@@ -3815,6 +3899,7 @@ mod tests {
 
         let req = Request::builder()
             .uri("/ui?siren=123456789")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3833,6 +3918,7 @@ mod tests {
 
         let req = Request::builder()
             .uri("/ui/flows")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3848,13 +3934,14 @@ mod tests {
 
         let req = Request::builder()
             .uri("/ui/emises")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
         let body = body_string(resp).await;
-        assert!(body.contains("Aucun SIREN sélectionné"));
+        assert!(body.contains("Choisir une entreprise"));
     }
 
     #[tokio::test]
@@ -3864,6 +3951,7 @@ mod tests {
 
         let req = Request::builder()
             .uri("/ui/flows/inexistant?siren=123456789")
+            .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -3881,7 +3969,7 @@ mod tests {
         let state = test_app_state();
         let app = build_api_router(state);
 
-        let req = Request::builder().uri("/ui").body(Body::empty()).unwrap();
+        let req = Request::builder().uri("/ui").header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}")).body(Body::empty()).unwrap();
         let resp = app.oneshot(req).await.unwrap();
         let body = body_string(resp).await;
 
@@ -3921,6 +4009,7 @@ mod tests {
         ] {
             let req = axum::http::Request::builder()
                 .uri(path)
+                .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
                 .body(axum::body::Body::empty())
                 .unwrap();
             let resp = app.clone().oneshot(req).await.unwrap();
@@ -3943,7 +4032,7 @@ mod tests {
         let app = build_api_router(state);
 
         for path in &["/ui", "/ui/flows", "/ui/flows/abc?siren=123456789"] {
-            let req = Request::builder().uri(*path).body(Body::empty()).unwrap();
+            let req = Request::builder().uri(*path).header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}")).body(Body::empty()).unwrap();
             let resp = app.clone().oneshot(req).await.unwrap();
             assert_eq!(
                 resp.status(),
@@ -3965,19 +4054,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ui_routes_open_with_dev_open() {
-        // En `dev_open: true` (config démo), les routes UI sont accessibles
-        // sans token (le middleware injecte un contexte admin).
-        let state = test_app_state(); // dev_open: true par défaut
+    async fn test_ui_routes_accessible_with_admin_token() {
+        // Avec un Bearer token admin valide, les routes UI passent l'auth
+        // et l'extractor `AuthorizedSiren` ne s'applique pas (pas de
+        // `?siren=` requis sur ces pages — le picker est affiché).
+        let state = test_app_state();
         let app = build_api_router(state);
 
         for path in &["/ui", "/ui/emises", "/ui/recues"] {
-            let req = Request::builder().uri(*path).body(Body::empty()).unwrap();
+            let req = Request::builder()
+                .uri(*path)
+                .header("authorization", format!("Bearer {TEST_ADMIN_TOKEN}"))
+                .body(Body::empty())
+                .unwrap();
             let resp = app.clone().oneshot(req).await.unwrap();
             assert_eq!(
                 resp.status(),
                 StatusCode::OK,
-                "UI path {} en dev_open doit passer sans Bearer",
+                "UI path {} avec token admin doit retourner 200",
                 path
             );
         }

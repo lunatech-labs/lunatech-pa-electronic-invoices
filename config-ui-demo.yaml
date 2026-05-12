@@ -25,37 +25,50 @@ validation:
 http_server:
   host: "127.0.0.1"
   port: 8080
-  # `dev_open: true` autorise toutes les requêtes sans Bearer token et leur
-  # donne un contexte admin. C'est ce qui permet à `pdp demo populate`,
-  # aux screenshots du README et à l'exploration locale de fonctionner sans
-  # configurer de tokens.
-  #
-  # ⚠️ NE JAMAIS activer `dev_open: true` en production : un client
-  # quelconque peut alors consulter n'importe quel SIREN sans
-  # authentification. En prod, mettre `dev_open: false` et configurer
-  # `tokens:` avec liaison `allowed_sirens` pour chaque porteur.
-  dev_open: true
-  # Exemple de configuration de tokens (clients API) en mode prod :
-  # tokens:
-  #   - token: "tok-techconseil-readonly"
-  #     principal: "techconseil-app"
-  #     allowed_sirens: ["123456789"]
-  #     role: tenant
-  #   - token: "tok-pdp-support"
-  #     principal: "support-team"
-  #     role: pdp_operator
-  #
-  # Exemple d'utilisateurs (login web) :
-  # session_secret: "<32+ octets aléatoires, gardé secret>"
-  # session_ttl_secs: 28800
-  # users:
-  #   - email: "alice@techconseil.fr"
-  #     password: "..."
-  #     principal: "alice@tc"
-  #     allowed_sirens: ["123456789"]
-  #     role: tenant
+  # Secret HMAC pour signer les cookies de session du login web. En prod,
+  # remplacer par une chaîne aléatoire d'au moins 32 octets gardée secrète.
+  session_secret: "demo-session-secret-32-bytes-padding-padding"
+  session_ttl_secs: 28800  # 8 heures
+  # Comptes de démo accessibles via `/login`. Mot de passe en clair pour
+  # ne pas alourdir le setup local — en prod, utiliser un hash argon2id
+  # (commande `pdp hash-password <plaintext>`).
+  users:
+    - email: "admin@ferrite.demo"
+      password: "admin"
+      principal: "admin"
+      role: pdp_admin
+    # Les comptes tenant sont câblés sur des SIRENs qui existent dans
+    # l'annuaire F14 démo ET pour lesquels les fixtures `tests/fixtures/`
+    # contiennent des factures (en tant que vendeur ET acheteur).
+    # `pdp demo seed` peuple l'annuaire + injecte les fixtures.
+    - email: "alice@techconseil.demo"
+      password: "alice"
+      principal: "alice@techconseil"
+      allowed_sirens: ["123456789"]  # TechConseil SAS — 244 factures
+      role: tenant
+    - email: "charlotte@solutions.demo"
+      password: "charlotte"
+      principal: "charlotte@solutions"
+      allowed_sirens: ["109009309"]  # Charlotte Solutions SCI
+      role: tenant
+    - email: "dupont@menuiserie.demo"
+      password: "dupont"
+      principal: "dupont@menuiserie"
+      allowed_sirens: ["111222333"]  # Menuiserie Artisanale Dupont EURL
+      role: tenant
+  # Bearer tokens pour clients API. Le token `tok-demo-admin` est utilisé
+  # par défaut par `pdp demo seed` pour pousser les fixtures via l'API.
+  tokens:
+    - token: "tok-demo-admin"
+      principal: "demo-seeder"
+      role: pdp_admin
 
 routes: []
+
+# Répertoire de stockage des entreprises (un sous-dossier par SIREN).
+# Permet les écrans d'administration `/ui/admin/*` (réservés au rôle
+# `pdp_admin` — se connecter avec `admin@ferrite.demo` / `admin`).
+tenants_dir: tenants
 
 polling:
   interval_secs: 60
