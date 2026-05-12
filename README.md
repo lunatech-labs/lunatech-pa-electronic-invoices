@@ -98,30 +98,45 @@ est identifié comme **vendeur OU acheteur** d'un flux (le même SIREN voit
 
 <p align="center"><img src="assets/screenshots/dashboard.png" alt="Dashboard Ferrite" width="900"></p>
 
-### Liste `/ui/flows?siren={SIREN}`
+### Factures émises `/ui/emises?siren={SIREN}` et reçues `/ui/recues?siren={SIREN}`
 
-Tableau paginé avec filtres direction (émises / reçues), statut
-(OK / ERREUR / EN_ATTENTE), plage de dates, et sélecteur de pagination
-(25 / 50 / 100 / 200 par page). Le badge ↑/↓ indique le sens, l'icône 📎
-le nombre de pièces jointes, le badge rouge ERREUR remplace le statut
-brut quand la facture a `error_count > 0`.
+Deux écrans dédiés (le tenant vendeur ne voit pas les mêmes statuts que le
+tenant acheteur). Tableau paginé avec filtres statut (OK / ERREUR /
+EN_ATTENTE), plage de dates, et sélecteur de pagination
+(25 / 50 / 100 / 200). Les statuts affichés sont les libellés AFNOR
+officiels (XP Z12-012 Annexe A V1.2, codes 200-501 : Déposée, Émise,
+Reçue, Mise à disposition, Prise en charge, Approuvée, En litige,
+Refusée, Encaissée, Rejetée…) — direction-aware (un vendeur ne voit
+jamais « Reçue » sur ses propres factures).
 
-<p align="center"><img src="assets/screenshots/factures.png" alt="Liste des factures" width="900"></p>
+<p align="center"><img src="assets/screenshots/factures-emises.png" alt="Factures émises" width="900"></p>
+<p align="center"><img src="assets/screenshots/factures-recues.png" alt="Factures reçues" width="900"></p>
 
 ### Détail facture `/ui/flows/{flowId}?siren={SIREN}`
 
-Métadonnées complètes (vendeur/acheteur + SIREN, format, totaux HT/TVA/TTC,
-date d'émission, statut), pièces jointes téléchargeables (extraites à la
-volée du XML/PDF, jamais stockées en base), liens de téléchargement
-XML brut / PDF Factur-X, et **timeline du pipeline** horodatée.
+Métadonnées complètes (vendeur/acheteur + SIREN, **type de fichier
+original** badgé — UBL / CII / Factur-X avec nom complet du standard,
+totaux HT/TVA/TTC, date d'émission, statut AFNOR), pièces jointes
+téléchargeables (extraites à la volée du XML/PDF, jamais stockées en
+base), **téléchargements XML brut + Factur-X généré à la volée** (PDF/A-3
+avec CII embarqué via Typst pour les sources UBL/CII), et timeline AFNOR
+horodatée (seuls les statuts officiels — Déposée, Émise, Reçue —
+apparaissent ; les libellés pipeline internes PARSÉ/VALIDÉ/TRANSFORMÉ
+sont masqués).
+
+Les pièces jointes affichées sont de **vrais documents avec données
+réelles** : bon de commande PDF (template Typst dédié, ≠ rendu de la
+facture), bordereau de livraison PNG, détail des lignes CSV — chacun
+généré via `pdp tools gen-attachments` à partir des données de la
+facture (raison sociale, SIRET, lignes BG-25, montants).
 
 <p align="center"><img src="assets/screenshots/facture-detail.png" alt="Détail d'une facture avec PJ" width="900"></p>
 
-Sur une facture en erreur, le badge `ERREUR` remplace le statut brut, une
-section "Erreurs" liste les règles violées (ici BR-FR-10, vendeur absent
-de l'annuaire PPF) et la timeline est **tronquée à la première erreur** —
-les statuts pipeline qui suivent (DISTRIBUÉ après une validation KO) ne
-reflètent pas l'issue métier de la facture et ne sont pas affichés :
+Sur une facture en erreur, le badge `Rejetée` (CDV 213) remplace le
+statut brut, une section "Erreurs" liste les règles violées (ici BR-FR-10,
+vendeur absent de l'annuaire PPF) et la timeline est **tronquée à la
+première erreur** — les statuts pipeline qui suivent ne reflètent pas
+l'issue métier de la facture et ne sont pas affichés :
 
 <p align="center"><img src="assets/screenshots/facture-detail-erreur.png" alt="Détail d'une facture en erreur" width="900"></p>
 
