@@ -48,7 +48,7 @@ typst = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # SFTP
-russh = "0.44"
+russh = "0.60"
 russh-sftp = "2.0"
 russh-keys = "0.44"
 
