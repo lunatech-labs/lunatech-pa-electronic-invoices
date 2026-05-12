@@ -4,7 +4,7 @@
 // (Le module `ui` est utilisé indirectement par server.rs, mais on l'importe
 // quand même pour assurer le linking quand ce binaire est compilé seul.)
 #[allow(unused_imports)]
-use pdp_app::{server, ui, webhooks};
+use pdp_app::{server, ui, webhooks, webhooks_subscriber};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -390,6 +390,42 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
         None => webhooks::WebhookStore::new(),
     });
 
+    // Bus d'événements interne (pdp-events) : seulement si pg_pool dispo.
+    // - publie chaque transition du cycle de vie dans la table outbox `events`
+    // - alimente les subscribers (webhooks AFNOR, et bientôt l'archivage ES)
+    let event_bus: Option<pdp_events::EventBus> = match &pg_pool {
+        Some(pool) => {
+            let store = std::sync::Arc::new(pdp_events::EventStore::new(pool.clone()));
+            match store.migrate().await {
+                Ok(()) => {
+                    let bus = pdp_events::EventBus::new(store.clone());
+                    // Subscribers webhook (In + Out) : remplacent l'appel direct
+                    // au WebhookDispatcher dans server.rs et le WebhookAckProcessor.
+                    let sub_in = webhooks_subscriber::WebhooksSubscriber::new(
+                        webhook_store.clone(),
+                        "In",
+                    );
+                    let sub_out = webhooks_subscriber::WebhooksSubscriber::new(
+                        webhook_store.clone(),
+                        "Out",
+                    );
+                    pdp_events::DispatcherWorker::new(store.clone(), sub_in).spawn();
+                    pdp_events::DispatcherWorker::new(store.clone(), sub_out).spawn();
+                    tracing::info!("Bus d'événements pdp-events activé (PostgreSQL)");
+                    Some(bus)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Migration pdp-events échouée, bus désactivé");
+                    None
+                }
+            }
+        }
+        None => {
+            tracing::info!("Bus pdp-events désactivé (pas de PostgreSQL configuré)");
+            None
+        }
+    };
+
     // Construire le router avec la route HTTP inbound
     let router = build_router(
         &config,
@@ -397,6 +433,7 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
         Some(http_exchange_rx),
         cli_mode,
         webhook_store.clone(),
+        event_bus.clone(),
     )
     .await?;
 
@@ -485,6 +522,7 @@ async fn cmd_start(config_path: &std::path::Path, mode_str: &str) -> Result<()> 
             metrics: server::Metrics::default(),
             annuaire_store,
             webhook_store: webhook_store.clone(),
+            event_bus: event_bus.clone(),
             max_flow_size_bytes: http_config.max_flow_size_bytes,
             request_timeout: std::time::Duration::from_secs(http_config.request_timeout_secs),
             rate_limiter: http_config
@@ -569,7 +607,7 @@ async fn cmd_run(config_path: &std::path::Path, mode_str: &str) -> Result<()> {
     tracing::info!(mode = ?cli_mode, "Exécution unique de toutes les routes");
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
     let webhook_store = std::sync::Arc::new(webhooks::WebhookStore::new());
-    let router = build_router(&config, base_dir, None, cli_mode, webhook_store).await?;
+    let router = build_router(&config, base_dir, None, cli_mode, webhook_store, None).await?;
     let results = router.execute_all().await;
 
     let mut total_success = 0;
@@ -599,7 +637,7 @@ async fn cmd_run_route(config_path: &std::path::Path, route_id: &str) -> Result<
     let config = pdp_config::load_config(config_path.to_str().unwrap_or("config.yaml"))?;
     let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
     let webhook_store = std::sync::Arc::new(webhooks::WebhookStore::new());
-    let router = build_router(&config, base_dir, None, CliMode::Both, webhook_store).await?;
+    let router = build_router(&config, base_dir, None, CliMode::Both, webhook_store, None).await?;
 
     tracing::info!(route_id = %route_id, "Exécution de la route");
     let exchanges = router.execute_route(route_id).await?;
@@ -946,6 +984,7 @@ async fn build_router(
     http_rx: Option<tokio::sync::mpsc::Receiver<pdp_core::Exchange>>,
     cli_mode: CliMode,
     webhook_store: std::sync::Arc<webhooks::WebhookStore>,
+    event_bus: Option<pdp_events::EventBus>,
 ) -> Result<pdp_core::Router> {
     let store = match pdp_trace::TraceStore::new(&config.elasticsearch.url).await {
         Ok(s) => std::sync::Arc::new(s),
@@ -954,6 +993,16 @@ async fn build_router(
             std::sync::Arc::new(pdp_trace::TraceStore::noop())
         }
     };
+
+    // Si le bus d'événements est actif, brancher pdp-trace comme subscriber :
+    // chaque événement de cycle de vie est répliqué dans Elasticsearch via
+    // `TraceEventSubscriber`. Le `TraceProcessor` reste actif pour l'archivage
+    // de l'exchange (XML/PDF) — concern distinct de l'événement.
+    if let Some(ref bus) = event_bus {
+        let trace_sub = pdp_trace::TraceEventSubscriber::new(store.clone());
+        pdp_events::DispatcherWorker::new(bus.store().clone(), trace_sub).spawn();
+        tracing::info!("TraceEventSubscriber branché sur le bus");
+    }
 
     // Construire les producers PPF et AFNOR si configurés
     let ppf_producer = build_ppf_producer(config)?;
@@ -1119,21 +1168,26 @@ async fn build_router(
                 builder = add_emission_processors(
                     builder, config, route_config, &store,
                     &annuaire_client, &partner_directory, &annuaire_service, &intra_pdp_tx,
-                    &webhook_store,
+                    &webhook_store, &event_bus,
                 );
             }
             pdp_config::PipelineMode::Reception => {
                 builder = add_reception_processors(
                     builder, config, route_config, &store, &annuaire_service,
-                    &webhook_store,
+                    &webhook_store, &event_bus,
                 );
             }
         }
 
-        // Destination + trace finale
+        // Destination + trace finale + événement Distributed (si bus actif)
         builder = builder
             .to_destination(producer)
-            .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())));
+            .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())));
+        if let Some(ref bus) = event_bus {
+            builder = builder.process(Box::new(
+                pdp_events::LifecycleProcessor::distributed(bus.clone()),
+            ));
+        }
 
         if let Some(error_handler) = error_handler {
             builder = builder.on_error(error_handler);
@@ -1244,13 +1298,25 @@ async fn build_router(
                     config.validation.br_fr_enabled,
                     true,
                 )))
-                .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+                .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::validated(store.clone())));
+
+            if let Some(ref bus) = event_bus {
+                builder = builder.process(Box::new(
+                    pdp_events::LifecycleProcessor::from_status(bus.clone()),
+                ));
+            }
 
             // Validation annuaire PPF (G1.63) — vendeur + acheteur
             builder = builder.process(Box::new(pdp_annuaire::AnnuaireValidationProcessor::new(
                 annuaire_service.clone(),
                 pdp_annuaire::ValidationMode::Emission,
             )));
+
+            if let Some(ref bus) = event_bus {
+                builder = builder.process(Box::new(
+                    pdp_events::LifecycleProcessor::from_status(bus.clone()),
+                ));
+            }
 
             // Flux 1 PPF (TOUJOURS en émission)
             if let Some(ppf) = tenant_ppf {
@@ -1280,11 +1346,16 @@ async fn build_router(
             // CDAR émission (CDV 200, 213 ou 221 selon les erreurs)
             builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(pdp_id, pdp_name)));
 
-            // Destination + trace finale
+            // Destination + trace finale + événement Distributed
             builder = builder
                 .to_destination(producer)
-                .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
-                .on_error(error_handler);
+                .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())));
+            if let Some(ref bus) = event_bus {
+                builder = builder.process(Box::new(
+                    pdp_events::LifecycleProcessor::distributed(bus.clone()),
+                ));
+            }
+            builder = builder.on_error(error_handler);
 
             let route = builder.build()?;
             router.add_route(route)?;
@@ -1334,7 +1405,7 @@ async fn build_router(
                 validate: true,
                 generate_cdar: true,
                 cdar_receiver: None,
-            }, &store, &annuaire_service, &webhook_store);
+            }, &store, &annuaire_service, &webhook_store, &event_bus);
 
             // Error handler avec alertes
             let http_error_dir = alert_config
@@ -1357,7 +1428,7 @@ async fn build_router(
 
             builder = builder
                 .to_destination(producer)
-                .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
+                .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())))
                 .on_error(Box::new(http_alert_handler));
 
             let route = builder.build()?;
@@ -1399,7 +1470,7 @@ async fn build_router(
             validate: true,
             generate_cdar: true,
             cdar_receiver: None,
-        }, &store, &annuaire_service, &webhook_store);
+        }, &store, &annuaire_service, &webhook_store, &event_bus);
 
         let intra_error_dir = alert_config
             .map(|a| a.error_dir.clone())
@@ -1410,8 +1481,13 @@ async fn build_router(
 
         intra_builder = intra_builder
             .to_destination(intra_producer)
-            .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
-            .on_error(Box::new(intra_alert_handler));
+            .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())));
+        if let Some(ref bus) = event_bus {
+            intra_builder = intra_builder.process(Box::new(
+                pdp_events::LifecycleProcessor::distributed(bus.clone()),
+            ));
+        }
+        intra_builder = intra_builder.on_error(Box::new(intra_alert_handler));
 
         let route = intra_builder.build()?;
         router.add_route(route)?;
@@ -1443,7 +1519,7 @@ async fn build_router(
                 .from_source(Box::new(ppf_return_consumer));
 
             builder = builder
-                .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
+                .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::received(store.clone())))
                 .process(Box::new(pdp_core::processor::LogProcessor::info(
                     "ppf-return",
                 )))
@@ -1464,7 +1540,7 @@ async fn build_router(
 
             builder = builder
                 .to_destination(archive_producer)
-                .process(Box::new(pdp_trace::TraceProcessor::distributed(store.clone())))
+                .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())))
                 .on_error(Box::new(alert_handler));
 
             let route = builder.build()?;
@@ -1543,7 +1619,7 @@ fn add_common_processors(
     ppf_producer: &Option<std::sync::Arc<pdp_client::PpfSftpProducer>>,
 ) -> pdp_core::RouteBuilder {
     let mut builder = builder
-        .process(Box::new(pdp_trace::TraceProcessor::received(store.clone())))
+        .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::received(store.clone())))
         .process(Box::new(pdp_core::processor::LogProcessor::info("reception")))
         .process(Box::new(pdp_core::reception::ReceptionProcessor::strict()))
         .process(Box::new(pdp_cdar::IrrecevabiliteProcessor::new(
@@ -1562,7 +1638,7 @@ fn add_common_processors(
 
     builder
         .process(Box::new(pdp_invoice::ParseProcessor::new()))
-        .process(Box::new(pdp_trace::TraceProcessor::parsed(store.clone())))
+        .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::parsed(store.clone())))
         .process(Box::new(pdp_trace::DuplicateCheckProcessor::new(store.clone())))
 }
 
@@ -1578,6 +1654,7 @@ fn add_emission_processors(
     annuaire_service: &Option<std::sync::Arc<pdp_annuaire::AnnuaireService>>,
     _intra_pdp_tx: &tokio::sync::mpsc::Sender<pdp_core::Exchange>,
     webhook_store: &std::sync::Arc<webhooks::WebhookStore>,
+    event_bus: &Option<pdp_events::EventBus>,
 ) -> pdp_core::RouteBuilder {
     // Validation
     if route_config.validate {
@@ -1590,13 +1667,20 @@ fn add_emission_processors(
                 config.validation.br_fr_enabled,
                 true,
             )))
-            .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+            .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::validated(store.clone())));
 
-        // Webhook flow.ack.updated dès que la facture est validée (ackStatus="Ok")
-        builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
-            webhook_store.clone(),
-            "Out", // émission = direction Out
-        )));
+        // Publication événement Validated → bus si dispo,
+        // sinon fallback WebhookAckProcessor (ancien chemin direct).
+        if let Some(bus) = event_bus {
+            builder = builder.process(Box::new(
+                pdp_events::LifecycleProcessor::from_status(bus.clone()),
+            ));
+        } else {
+            builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+                webhook_store.clone(),
+                "Out",
+            )));
+        }
     }
 
     // Validation annuaire PPF (G1.63) — vendeur + acheteur
@@ -1605,11 +1689,17 @@ fn add_emission_processors(
         pdp_annuaire::ValidationMode::Emission,
     )));
 
-    // Webhook flow.ack.updated après validation annuaire (signale erreur si vendeur/acheteur inconnu)
-    builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
-        webhook_store.clone(),
-        "Out",
-    )));
+    // Événement post-validation annuaire (rejet éventuel si BR-FR-10/11 KO).
+    if let Some(bus) = event_bus {
+        builder = builder.process(Box::new(
+            pdp_events::LifecycleProcessor::from_status(bus.clone()),
+        ));
+    } else {
+        builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+            webhook_store.clone(),
+            "Out",
+        )));
+    }
 
     // Flux 1 PPF (TOUJOURS en émission — données réglementaires)
     if let Some(ref ppf) = config.ppf {
@@ -1632,7 +1722,12 @@ fn add_emission_processors(
         };
         builder = builder
             .process(Box::new(pdp_transform::TransformProcessor::new(target_format)))
-            .process(Box::new(pdp_trace::TraceProcessor::transformed(store.clone())));
+            .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::transformed(store.clone())));
+        if let Some(bus) = event_bus {
+            builder = builder.process(Box::new(
+                pdp_events::LifecycleProcessor::transformed(bus.clone()),
+            ));
+        }
     }
 
     // Résolution de routage (avec détection intra-PDP) — AVANT le CdarProcessor
@@ -1677,6 +1772,7 @@ fn add_reception_processors(
     store: &std::sync::Arc<pdp_trace::TraceStore>,
     annuaire_service: &Option<std::sync::Arc<pdp_annuaire::AnnuaireService>>,
     webhook_store: &std::sync::Arc<webhooks::WebhookStore>,
+    event_bus: &Option<pdp_events::EventBus>,
 ) -> pdp_core::RouteBuilder {
     // Validation
     if route_config.validate {
@@ -1689,13 +1785,18 @@ fn add_reception_processors(
                 config.validation.br_fr_enabled,
                 true,
             )))
-            .process(Box::new(pdp_trace::TraceProcessor::validated(store.clone())));
+            .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::validated(store.clone())));
 
-        // Webhook flow.ack.updated (réception → direction "In")
-        builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
-            webhook_store.clone(),
-            "In",
-        )));
+        if let Some(bus) = event_bus {
+            builder = builder.process(Box::new(
+                pdp_events::LifecycleProcessor::from_status(bus.clone()),
+            ));
+        } else {
+            builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+                webhook_store.clone(),
+                "In",
+            )));
+        }
     }
 
     // Validation annuaire PPF (G1.63) — vendeur uniquement en réception
@@ -1704,11 +1805,17 @@ fn add_reception_processors(
         pdp_annuaire::ValidationMode::Reception,
     )));
 
-    // Webhook après validation annuaire
-    builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
-        webhook_store.clone(),
-        "In",
-    )));
+    // Événement post-validation annuaire (bus, ou fallback webhook direct).
+    if let Some(bus) = event_bus {
+        builder = builder.process(Box::new(
+            pdp_events::LifecycleProcessor::from_status(bus.clone()),
+        ));
+    } else {
+        builder = builder.process(Box::new(webhooks::WebhookAckProcessor::new(
+            webhook_store.clone(),
+            "In",
+        )));
+    }
 
     // PAS de Flux 1 PPF — la PDP émettrice l'a déjà fait
 
@@ -1724,7 +1831,12 @@ fn add_reception_processors(
         };
         builder = builder
             .process(Box::new(pdp_transform::TransformProcessor::new(target_format)))
-            .process(Box::new(pdp_trace::TraceProcessor::transformed(store.clone())));
+            .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::transformed(store.clone())));
+        if let Some(bus) = event_bus {
+            builder = builder.process(Box::new(
+                pdp_events::LifecycleProcessor::transformed(bus.clone()),
+            ));
+        }
     }
 
     // CDAR réception (CDV 202 "Reçue" ou 213 "Rejetée")

@@ -5,6 +5,13 @@ selon AFNOR XP Z12-014 V1.3 (Cas d'usage B2B), tels qu'implémentés dans Ferrit
 Chaque workflow est illustré par un diagramme de séquence Mermaid et la
 liste précise des processors qui s'enchaînent.
 
+> **Note architecture** : les diagrammes ci-dessous mentionnent `TraceProcessor::*` et
+> `WebhookAckProcessor` — c'est l'ancienne nomenclature, conservée pour rester
+> lisibles côté pédagogie. Depuis la V3 de la migration vers le bus, ces appels sont
+> remplacés par `ExchangeSnapshotProcessor` (snapshot XML/PDF) + `LifecycleProcessor`
+> (publication d'événements sur le bus). Les webhooks AFNOR et l'archivage des
+> événements dans Elasticsearch sont des subscribers du bus. Voir [events.md](events.md).
+
 | # | Workflow | UC AFNOR | Statut Ferrite |
 |---|----------|----------|----------------|
 | [1](#1-émission-classique-uc1) | Émission classique | UC1 § 2.1 | ✅ |

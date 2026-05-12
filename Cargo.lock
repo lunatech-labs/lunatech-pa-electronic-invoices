@@ -3331,6 +3331,7 @@ dependencies = [
  "pdp-config",
  "pdp-core",
  "pdp-ereporting",
+ "pdp-events",
  "pdp-invoice",
  "pdp-sftp",
  "pdp-trace",
@@ -3443,6 +3444,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdp-events"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "pdp-core",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "testcontainers",
+ "testcontainers-modules",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "pdp-invoice"
 version = "0.1.0"
 dependencies = [
@@ -3516,6 +3535,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "pdp-core",
+ "pdp-events",
  "reqwest",
  "serde",
  "serde_json",

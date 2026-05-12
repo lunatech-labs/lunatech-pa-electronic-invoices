@@ -5,6 +5,7 @@ members = [
     "crates/pdp-invoice",
     "crates/pdp-transform",
     "crates/pdp-trace",
+    "crates/pdp-events",
     "crates/pdp-cdar",
     "crates/pdp-config",
     "crates/pdp-validate",

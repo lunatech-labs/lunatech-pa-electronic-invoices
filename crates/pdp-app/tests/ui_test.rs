@@ -281,6 +281,7 @@ fn build_state(backend: Arc<dyn TraceBackend>) -> Arc<AppState> {
         metrics: Metrics::default(),
         annuaire_store: None,
         webhook_store: Arc::new(WebhookStore::new()),
+        event_bus: None,
         max_flow_size_bytes: 100 * 1024 * 1024,
         request_timeout: std::time::Duration::from_secs(30),
         rate_limiter: None,

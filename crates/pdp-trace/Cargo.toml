@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 pdp-core = { path = "../pdp-core" }
+pdp-events = { path = "../pdp-events" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }

@@ -1,25 +1,33 @@
 use async_trait::async_trait;
 use pdp_core::error::PdpResult;
 use pdp_core::exchange::Exchange;
-use pdp_core::model::{FlowEvent, FlowStatus};
+use pdp_core::model::FlowStatus;
 use pdp_core::processor::Processor;
 
 use crate::store::TraceStore;
 use std::sync::Arc;
 
-/// Processor de traçabilité : enregistre chaque passage dans le pipeline
-pub struct TraceProcessor {
+/// Processor d'archivage : prend un snapshot de l'`Exchange` (XML, PDF,
+/// métadonnées) dans Elasticsearch à un jalon du pipeline.
+///
+/// Depuis la V3 de la migration vers `pdp-events`, ce processor ne publie
+/// plus d'événement de cycle de vie. Les événements sont émis sur le bus
+/// par `pdp_events::LifecycleProcessor` et persistés par le subscriber
+/// `TraceEventSubscriber` (qui appelle [`TraceStore::record_event`]).
+///
+/// Les constructeurs `received/parsed/validated/...` sont conservés pour
+/// la lisibilité de la chaîne de pipeline et pour les logs `tracing`.
+/// Ils ne diffèrent que par le `step_name`.
+pub struct ExchangeSnapshotProcessor {
     store: Arc<TraceStore>,
     step_name: String,
-    status: FlowStatus,
 }
 
-impl TraceProcessor {
-    pub fn new(store: Arc<TraceStore>, step_name: &str, status: FlowStatus) -> Self {
+impl ExchangeSnapshotProcessor {
+    pub fn new(store: Arc<TraceStore>, step_name: &str, _status: FlowStatus) -> Self {
         Self {
             store,
             step_name: step_name.to_string(),
-            status,
         }
     }
 
@@ -45,49 +53,21 @@ impl TraceProcessor {
 }
 
 #[async_trait]
-impl Processor for TraceProcessor {
+impl Processor for ExchangeSnapshotProcessor {
     fn name(&self) -> &str {
-        "TraceProcessor"
+        "ExchangeSnapshotProcessor"
     }
 
     async fn process(&self, exchange: Exchange) -> PdpResult<Exchange> {
-        let route_id = exchange
-            .get_header("route.id")
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let invoice_key = exchange.invoice.as_ref().map(|i| i.key_string());
-
-        let message = format!(
-            "Étape '{}' - fichier: {} | statut: {}",
-            self.step_name,
-            exchange.source_filename.as_deref().unwrap_or("N/A"),
-            self.status,
-        );
-
-        let mut event = FlowEvent::new(exchange.flow_id, &route_id, self.status.clone(), &message);
-        if let Some(ref key) = invoice_key {
-            event = event.with_invoice_key(key);
-        }
-
-        // L'ordre est important : on enregistre d'abord le document
-        // d'exchange (upsert avec arrays initialisées), puis on append
-        // l'événement. Inversé, le fallback de `record_event` créerait
-        // un doc orphelin avec un exchange_id aléatoire.
         if let Err(e) = self.store.record_exchange(&exchange).await {
-            tracing::error!(error = %e, "Erreur d'enregistrement de l'exchange");
+            tracing::error!(error = %e, "Snapshot d'exchange échoué");
         }
-        if let Err(e) = self.store.record_event(&event).await {
-            tracing::error!(error = %e, "Erreur d'enregistrement de l'événement de trace");
-        }
-
         tracing::debug!(
             step = %self.step_name,
             flow_id = %exchange.flow_id,
             exchange_id = %exchange.id,
-            "Trace enregistrée"
+            "Exchange archivé"
         );
-
         Ok(exchange)
     }
 }

@@ -1,6 +1,18 @@
 # Traçabilité et archivage — Elasticsearch
 
-Le module `pdp-trace` assure la traçabilité complète des flux de facturation et l'archivage des documents (XML, PDF) dans **Elasticsearch**.
+> **Architecture post-migration** : depuis la V3 de la migration vers [`pdp-events`](events.md),
+> le journal d'audit faisant autorité est la table PostgreSQL `events`. `pdp-trace` est
+> désormais découpé en deux concerns :
+>
+> 1. **`ExchangeSnapshotProcessor`** — pipeline. Archive l'`Exchange` complet (XML brut +
+>    PDF base64 + métadonnées) dans Elasticsearch aux jalons. Ne publie plus d'événements.
+> 2. **`TraceEventSubscriber`** — consommateur du bus. Réplique chaque événement émis sur
+>    le bus dans le champ `events` du document ES (idempotent via `event.id`).
+>
+> Un alias `TraceProcessor = ExchangeSnapshotProcessor` est conservé, marqué
+> `#[deprecated]`, le temps que les usages externes migrent.
+
+Le module `pdp-trace` assure l'archivage des documents (XML, PDF) et expose une API de lecture pour l'UI / l'API HTTP. L'historique chronologique d'une facture est interrogeable soit dans Elasticsearch (champ `events` du document), soit directement dans PostgreSQL (table `events` — source de vérité pour l'audit).
 
 ## Architecture
 
@@ -80,11 +92,15 @@ let store = TraceStore::for_test().await?;
 ### Enregistrement
 
 ```rust
-// Enregistrer un exchange complet (facture + XML + PDF + métadonnées)
-// L'index est déterminé automatiquement par le SIREN vendeur
+// Enregistrer un exchange complet (facture + XML + PDF + métadonnées).
+// Appelé par ExchangeSnapshotProcessor dans le pipeline.
+// L'index est déterminé automatiquement par le SIREN vendeur.
 store.record_exchange(&exchange).await?;
 
-// Enregistrer un événement de flux (ajouté au document existant)
+// Enregistrer un événement de flux dans le tableau `events` du document ES.
+// Idempotent : si un événement avec le même `event.id` existe déjà, no-op.
+// Appelé par TraceEventSubscriber depuis le bus pdp-events,
+// pas directement par le pipeline.
 let event = FlowEvent::new(flow_id, "parse", FlowStatus::Parsed, "Facture parsée");
 store.record_event(&event).await?;
 ```
@@ -114,23 +130,33 @@ let doc = store.get_exchange("uuid-xxx", Some("123456789")).await?;
 let sirens = store.list_sirens().await?;
 ```
 
-## Intégration pipeline
+## Intégration pipeline (post-V3)
 
-Le `TraceProcessor` enregistre automatiquement chaque étape du pipeline :
+Deux responsabilités, deux composants :
 
 ```
-Réception → TraceProcessor::received()
+Pipeline (étapes successives)
     │
-Parsing → TraceProcessor::parsed()
+    ├─► ExchangeSnapshotProcessor::received()    ──► record_exchange()  (snapshot XML/PDF dans pdp-{siren})
+    │                                                  ↑
+    ├─► ExchangeSnapshotProcessor::parsed()       ──► idem
+    ├─► ExchangeSnapshotProcessor::validated()    ──► idem
+    ├─► ExchangeSnapshotProcessor::transformed()  ──► idem
+    └─► ExchangeSnapshotProcessor::distributed()  ──► idem
     │
-Validation → TraceProcessor::validated()
-    │
-Transformation → TraceProcessor::transformed()
-    │
-Distribution → TraceProcessor::distributed()
+    └─► LifecycleProcessor::* (à chaque jalon) ──► bus pdp-events
+                                                       │
+                                                       ▼
+                                              TraceEventSubscriber
+                                                       │
+                                                       ▼
+                                              record_event()  (append idempotent dans events[])
 ```
 
-Chaque étape ajoute un événement horodaté dans le document ES de l'exchange.
+- Le `ExchangeSnapshotProcessor` (ex-`TraceProcessor`) upsert le document ES avec le contenu complet de l'`Exchange` aux jalons clés. Il ne publie aucun événement.
+- Le `LifecycleProcessor` publie sur le bus une transition à chaque étape (14 variantes possibles). Le subscriber `TraceEventSubscriber` consomme ces événements et les append au tableau `events` du document ES, avec dédup par `event.id` (rejouage at-least-once supporté).
+
+Le tableau `events` du document ES reste donc à jour pour l'UI, mais la **source de vérité d'audit** est la table PostgreSQL `events` du crate `pdp-events`.
 
 ## Configuration
 

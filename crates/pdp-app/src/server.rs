@@ -144,6 +144,11 @@ pub struct AppState {
     pub annuaire_store: Option<pdp_annuaire::AnnuaireStore>,
     /// Store des webhooks (in-memory, partagé)
     pub webhook_store: Arc<crate::webhooks::WebhookStore>,
+    /// Bus d'événements interne (`pdp-events`). Si `Some`, les transitions
+    /// du cycle de vie sont publiées sur le bus ; les webhooks AFNOR sont
+    /// dispatchés par le subscriber correspondant. Si `None`, fallback sur
+    /// l'ancien chemin (dispatch direct depuis le pipeline).
+    pub event_bus: Option<pdp_events::EventBus>,
     /// Taille max acceptée pour un flux entrant (octets) — au-delà : 413
     pub max_flow_size_bytes: usize,
     /// Timeout par requête (au-delà : 408 Request Timeout)
@@ -888,23 +893,41 @@ async fn handle_receive_flow(
         Ok(_) => {
             state.metrics.flows_accepted.fetch_add(1, Ordering::Relaxed);
 
-            // Dispatcher webhook : événement flow.received
-            // Non-bloquant — exécuté en arrière-plan pour ne pas ralentir le pipeline
-            let store = state.webhook_store.clone();
-            let flow_id_clone = flow_id.clone();
-            let flow_type = flow_info.flow_type.clone().unwrap_or_else(|| "Unknown".to_string());
-            tokio::spawn(async move {
-                let dispatcher = crate::webhooks::WebhookDispatcher::new(store);
-                dispatcher
-                    .dispatch(
-                        crate::webhooks::WebhookEventType::FlowReceived,
-                        &flow_id_clone,
-                        &flow_type,
-                        "In",
-                        Some("Pending"),
-                    )
-                    .await;
-            });
+            // Notification "flow.received" : passe par le bus si dispo, sinon
+            // fallback sur l'ancien chemin (dispatch direct webhook).
+            let flow_type = flow_info
+                .flow_type
+                .clone()
+                .unwrap_or_else(|| "Unknown".to_string());
+            if let Some(bus) = state.event_bus.clone() {
+                let flow_uuid = uuid::Uuid::parse_str(&flow_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
+                let flow_type_for_event = flow_type.clone();
+                tokio::spawn(async move {
+                    let evt = pdp_events::Event::new(flow_uuid, pdp_events::EventKind::Received)
+                        .with_step("reception")
+                        .with_payload(serde_json::json!({ "flow_type": flow_type_for_event }));
+                    if let Err(e) = bus.publish(evt).await {
+                        tracing::error!(error = %e, "Publication événement Received échouée");
+                    }
+                });
+            } else {
+                // Bus indisponible : ancien chemin (dispatch webhook direct).
+                let store = state.webhook_store.clone();
+                let flow_id_clone = flow_id.clone();
+                let flow_type_clone = flow_type.clone();
+                tokio::spawn(async move {
+                    let dispatcher = crate::webhooks::WebhookDispatcher::new(store);
+                    dispatcher
+                        .dispatch(
+                            crate::webhooks::WebhookEventType::FlowReceived,
+                            &flow_id_clone,
+                            &flow_type_clone,
+                            "In",
+                            Some("Pending"),
+                        )
+                        .await;
+                });
+            }
 
             // Headers de réponse : echo Request-Id pour corrélation logs (XP Z12-013)
             let mut response_headers = axum::http::HeaderMap::new();
@@ -1988,6 +2011,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -2007,6 +2031,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -2026,6 +2051,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -2047,6 +2073,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -2536,6 +2563,7 @@ mod tests {
                 metrics: Metrics::default(),
                 annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -2605,6 +2633,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -3075,6 +3104,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -3561,6 +3591,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: max_size,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: None,
@@ -3580,6 +3611,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(secs),
             rate_limiter: None,
@@ -3598,6 +3630,7 @@ mod tests {
             metrics: Metrics::default(),
             annuaire_store: None,
             webhook_store: std::sync::Arc::new(crate::webhooks::WebhookStore::new()),
+            event_bus: None,
             max_flow_size_bytes: 100 * 1024 * 1024,
             request_timeout: std::time::Duration::from_secs(30),
             rate_limiter: Some(Arc::new(RateLimiter::new(per_minute))),

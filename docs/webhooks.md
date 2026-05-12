@@ -105,6 +105,12 @@ Les champs absents ne sont pas modifiés.
 | `flow.received` | Réception de flux via `POST /v1/flows` | flowId, flowType, flowDirection, ackStatus |
 | `flow.ack.updated` | Statut d'acquittement modifié | idem |
 
+> Depuis l'introduction du [bus d'événements interne](events.md), ces deux événements
+> webhook AFNOR sont produits par le `WebhooksSubscriber` à partir des événements de
+> cycle de vie (14 transitions internes). Le mapping `EventKind` → événement AFNOR est
+> documenté dans [events.md](events.md#subscribers-de-référence). Le pipeline n'appelle
+> plus directement le dispatcher webhook — il publie sur le bus, et le bus relaie.
+
 ### Payload envoyé au callback
 
 ```json
@@ -165,18 +171,26 @@ Réservé pour évolution future (champ supporté en lecture mais pas appliqué)
 
 ## Code de retour côté callback
 
-Le webhook est considéré comme **livré avec succès** si la réponse HTTP est dans la plage `2xx`. Sinon, l'erreur est loguée mais ne bloque pas le pipeline.
+Le webhook est considéré comme **livré avec succès** si la réponse HTTP est dans la plage `2xx`.
 
-**Pas de retry automatique** dans la version actuelle — le client doit gérer ses propres reprises sur erreurs.
+**Retry exponentiel** : 3 tentatives par défaut, délai initial 500 ms, multiplicateur ×2, plafond 30 s. Configurable via `RetryConfig`. Au-delà, l'erreur est tracée mais ne bloque pas le pipeline.
+
+## Pipeline interne
+
+```
+        publish()              fan-out (DispatcherWorker)
+pipeline ─────────► event bus ────────────────────────────► WebhooksSubscriber ──► WebhookDispatcher ──► callback HTTPS
+                    (pdp-events)                            (events.md)            (retry + HMAC)
+                          │
+                          ▼
+                  table `events` (audit)
+```
+
+Le bus garantit at-least-once : un événement publié sera distribué au subscriber webhook même en cas de redémarrage entre la publication et la livraison. Détails : [events.md](events.md).
 
 ## Storage
 
-Les webhooks sont actuellement stockés **en mémoire** (HashMap protégé par `RwLock`). Cela signifie :
-
-- Les abonnements sont **perdus au redémarrage** de la PDP
-- Pas de partage entre instances (pas multi-nœud)
-
-**Migration future** : passer à PostgreSQL pour persistance et partage multi-instance.
+Les abonnements webhook (table `webhooks`) sont persistés en PostgreSQL : multi-instance et survit aux redémarrages. Un fallback in-memory existe pour les tests.
 
 ## Exemples curl
 
@@ -262,6 +276,7 @@ curl -X DELETE http://localhost:8080/v1/webhooks/550e8400-e29b-41d4-a716-4466554
 | Signature HMAC-SHA256 | ✅ |
 | Auth BASIC sur callback | ✅ |
 | Auth OAUTH2 sur callback | ⚠️ (modèle accepté, exécution future) |
-| Persistance | ❌ (in-memory pour l'instant) |
-| Headers `Request-Id` / `Organization-Id` | ❌ (à ajouter) |
-| Retry sur erreur callback | ❌ (à ajouter) |
+| Persistance | ✅ PostgreSQL (fallback in-memory pour tests) |
+| Headers `Request-Id` / `Organization-Id` | ✅ |
+| Retry sur erreur callback | ✅ exponentiel (3 tentatives, 500 ms → 30 s) |
+| Distribution durable (at-least-once) | ✅ via bus interne `pdp-events` |

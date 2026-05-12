@@ -81,7 +81,7 @@ PDP Facture est une plateforme modulaire en Rust implémentant le rôle de **Pla
 
 ### 2.1 Crates (modules)
 
-Le projet est découpé en 12 crates Rust indépendantes :
+Le projet est découpé en 13 crates Rust indépendantes :
 
 | Crate | Responsabilité |
 |-------|---------------|
@@ -94,7 +94,8 @@ Le projet est découpé en 12 crates Rust indépendantes :
 | `pdp-peppol` | Protocole PEPPOL : SBDH, SMP/SML lookup, modèle AS4 ; le transport AS4 réel est délégué à **Oxalis** (AP certifié) via volumes Docker partagés |
 | `pdp-client` | Communication PPF (SFTP tar.gz), AFNOR Flow Service (HTTP), Annuaire PISTE (OAuth2) |
 | `pdp-sftp` | Consumer et Producer SFTP générique (russh), authentification RSA |
-| `pdp-trace` | Archivage et traçabilité Elasticsearch (un index par SIREN) |
+| `pdp-trace` | Archivage Elasticsearch (un index par SIREN). Bascule en cours vers consommateur du bus `pdp-events`. |
+| `pdp-events` | **Bus d'événements interne et journal d'audit** : outbox PostgreSQL, 14 transitions, dispatcher at-least-once. Source de vérité pour l'audit fiscal. Voir [events.md](events.md). |
 | `pdp-config` | Chargement de la configuration YAML |
 | `pdp-app` | Binaire CLI, serveur HTTP axum, orchestration des routes |
 
@@ -112,8 +113,11 @@ pdp-app
  ├── pdp-peppol ── pdp-core
  ├── pdp-client ── pdp-core, pdp-sftp
  ├── pdp-sftp ── pdp-core
- └── pdp-trace ── pdp-core
+ ├── pdp-trace ── pdp-core
+ └── pdp-events ── pdp-core
 ```
+
+Le crate `pdp-events` est le système nerveux du pipeline : les processeurs publient des événements (14 transitions du cycle de vie), une table outbox PostgreSQL fait foi pour l'audit, et les abonnés internes (webhooks AFNOR, archivage Elasticsearch, métriques) consomment indépendamment. Détails et garanties dans [events.md](events.md).
 
 ---
 
@@ -883,13 +887,26 @@ Le serveur HTTP (axum) implémente le rôle de **récepteur** du Flow Service AF
 
 ## 16. Traçabilité et archivage
 
-### 16.1 Architecture Elasticsearch
+### 16.1 Journal d'audit — `pdp-events` (source de vérité)
+
+Le bus interne `pdp-events` matérialise le journal d'audit fiscal dans PostgreSQL (table `events`, schéma idempotent). Chaque transition de `FlowStatus` produit un événement immuable, identifié par un `sequence BIGSERIAL` (ordre total). Les requêtes d'audit s'appuient sur les index `events(invoice_key)`, `events(flow_id)` et `events(tenant_siren)`.
+
+Garanties :
+- **Durabilité** : un événement publié avec succès est persisté avant tout fan-out.
+- **At-least-once** : chaque subscriber reçoit chaque événement au moins une fois (clef d'idempotence : `event.id`).
+- **Isolation** : un subscriber bloqué ne pénalise pas les autres.
+
+Voir [events.md](events.md) pour le détail (schéma, API, mappings).
+
+### 16.2 Archivage Elasticsearch — `pdp-trace`
 
 - **Un index par SIREN** : `pdp-traces-{siren}` (ex: `pdp-traces-123456789`)
 - Stockage des documents XML et PDF en champ binaire
 - Recherche full-text sur les métadonnées
 
-### 16.2 Données archivées
+> Cible architecture : `pdp-trace` devient un consommateur du bus (`ArchiveElasticSubscriber`) plutôt qu'un point d'appel direct dans le pipeline. Détails et état d'avancement dans [tracabilite.md](tracabilite.md).
+
+### 16.3 Données archivées
 
 | Champ | Description |
 |-------|-------------|
@@ -902,7 +919,7 @@ Le serveur HTTP (axum) implémente le rôle de **récepteur** du Flow Service AF
 | `status` | Dernier statut connu |
 | `xml_content` | XML source archivé |
 | `pdf_content` | PDF archivé (si applicable) |
-| `events` | Historique des événements de cycle de vie |
+| `events` | Historique des événements de cycle de vie (miroir indexé du journal `events`) |
 
 ---
 
@@ -1054,7 +1071,8 @@ Les secrets (client_id, client_secret, webhook_secret) supportent la substitutio
 | `pdp-peppol` | 53 | SBDH, SMP lookup, AS4, inter-PDP |
 | `pdp-client` | 42 | PPF SFTP, AFNOR Flow, Annuaire, routage |
 | `pdp-sftp` | 7 | Consumer, Producer, patterns |
-| `pdp-trace` | 2 | Archivage Elasticsearch |
+| `pdp-trace` | 9 | Archivage ES, idempotence record_event, TraceEventSubscriber |
+| `pdp-events` | 9 | Outbox PostgreSQL, dispatcher at-least-once, isolation des subscribers (testcontainers) |
 | `pdp-config` | 3 | Chargement YAML |
 | `pdp-app` | 12+ | Serveur HTTP (healthcheck, multipart, SHA-256, HMAC webhooks) |
 | **Total** | **774+** | |

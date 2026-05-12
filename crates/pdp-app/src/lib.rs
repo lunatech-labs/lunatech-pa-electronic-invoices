@@ -8,3 +8,4 @@ pub mod server;
 pub mod session;
 pub mod ui;
 pub mod webhooks;
+pub mod webhooks_subscriber;

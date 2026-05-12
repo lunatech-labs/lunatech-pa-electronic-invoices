@@ -665,9 +665,22 @@ impl TraceStore {
                     let doc_id = hit["_id"].as_str().unwrap_or("");
 
                     if !doc_id.is_empty() {
+                        // Idempotence : on n'ajoute l'événement que si son id
+                        // n'est pas déjà présent. Le bus pdp-events garantit
+                        // l'unicité d'event.id ; un rejouage at-least-once
+                        // ne crée donc pas de doublon dans `events`.
                         let update_body = serde_json::json!({
                             "script": {
-                                "source": "ctx._source.events.add(params.event); ctx._source.status = params.status; ctx._source.updated_at = params.now",
+                                "source": "if (ctx._source.events == null) { ctx._source.events = []; } \
+                                          boolean exists = false; \
+                                          for (int i = 0; i < ctx._source.events.size(); i++) { \
+                                              if (ctx._source.events[i].id == params.event.id) { exists = true; break; } \
+                                          } \
+                                          if (!exists) { \
+                                              ctx._source.events.add(params.event); \
+                                              ctx._source.status = params.status; \
+                                              ctx._source.updated_at = params.now; \
+                                          }",
                                 "params": {
                                     "event": entry,
                                     "status": event.status.to_string(),

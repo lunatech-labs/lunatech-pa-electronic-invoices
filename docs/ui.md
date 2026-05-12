@@ -323,8 +323,9 @@ crates/pdp-app/tests/ui_test.rs — tests d'intégration (mock InMemoryTraceBack
 crates/pdp-trace/src/backend.rs — trait `TraceBackend` (lecture, dyn-compatible)
 crates/pdp-trace/src/store.rs   — `TraceStore` (impl ES) + filtre tenant
                                   (seller_siren OR buyer_siren) + count_exchanges
-crates/pdp-trace/src/processor.rs — TraceProcessor (record_exchange + record_event,
-                                  ordre fixé pour l'upsert d'events)
+crates/pdp-trace/src/processor.rs — ExchangeSnapshotProcessor (record_exchange seul ;
+                                  les événements arrivent via TraceEventSubscriber
+                                  qui consomme le bus pdp-events)
 ```
 
 **Indirection lecture par trait** : l'UI ne dépend pas du `TraceStore`

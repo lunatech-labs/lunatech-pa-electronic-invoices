@@ -41,9 +41,14 @@ pub mod store;
 pub mod processor;
 pub mod dedup;
 pub mod init;
+pub mod event_subscriber;
 
 pub use backend::TraceBackend;
 pub use store::TraceStore;
-pub use processor::TraceProcessor;
+pub use processor::ExchangeSnapshotProcessor;
+/// Alias rétrocompat : ancien nom utilisé avant la migration V3 vers `pdp-events`.
+#[deprecated(note = "Renommé en `ExchangeSnapshotProcessor` — le processor ne publie plus d'événement, seulement un snapshot ES")]
+pub type TraceProcessor = ExchangeSnapshotProcessor;
 pub use dedup::DuplicateCheckProcessor;
 pub use init::init_tracing;
+pub use event_subscriber::TraceEventSubscriber;
