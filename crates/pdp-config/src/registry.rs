@@ -15,7 +15,6 @@ pub struct TenantRegistryEntry {
     pub siren: String,
     pub tenant_dir: PathBuf,
     pub config: TenantConfig,
-    pub initial_sequence: u64,
 }
 
 impl TenantRegistryEntry {
@@ -59,7 +58,6 @@ impl TenantRegistry {
                         siren: entry.siren.clone(),
                         tenant_dir: entry.tenant_dir,
                         config: entry.config,
-                        initial_sequence: entry.initial_sequence,
                     },
                 );
             }
@@ -80,7 +78,6 @@ impl TenantRegistry {
                     siren: entry.siren.clone(),
                     tenant_dir: entry.tenant_dir,
                     config: entry.config,
-                    initial_sequence: entry.initial_sequence,
                 },
             );
             tracing::info!(

@@ -10,12 +10,17 @@
 //!     in/                   # Le client dépose ses factures ici (émission)
 //!     out/                  # La PDP dépose les factures reçues + CDV ici
 //!     config.yaml           # Configuration spécifique (optionnel)
-//!     sequence.txt          # Compteur séquence PPF (auto-généré)
 //!     certs/                # Certificats (optionnel)
 //! ```
 //!
 //! Si `config.yaml` est absent, un tenant minimal est créé automatiquement
 //! avec les répertoires `in/` et `out/` comme source et destination.
+//!
+//! Note : le numéro de séquence des flux PPF est **par PDP** (cf. spec PPF
+//! v3.1 §3.4.6 — identifiant de flux construit à partir du `code_application`
+//! de l'émetteur, donc de la PDP, pas de l'entreprise). Il est porté par
+//! `PpfSftpProducer` côté `pdp-client` et persisté dans le `sequence_file`
+//! déclaré dans `config.ppf.sftp.sequence_file` (config racine), pas ici.
 
 use std::path::{Path, PathBuf};
 use crate::model::{PdpIdentity, TenantConfig};
@@ -29,8 +34,6 @@ pub struct TenantEntry {
     pub tenant_dir: PathBuf,
     /// Configuration chargée ou auto-générée
     pub config: TenantConfig,
-    /// Séquence PPF initiale (chargée depuis sequence.txt)
-    pub initial_sequence: u64,
 }
 
 impl TenantEntry {
@@ -55,21 +58,6 @@ impl TenantEntry {
 /// Vérifie qu'un nom de répertoire est un SIREN valide (9 chiffres)
 pub fn is_valid_siren(name: &str) -> bool {
     name.len() == 9 && name.chars().all(|c| c.is_ascii_digit())
-}
-
-/// Charge le numéro de séquence depuis `sequence.txt` dans le répertoire tenant
-pub fn load_sequence(tenant_dir: &Path) -> u64 {
-    let path = tenant_dir.join("sequence.txt");
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0)
-}
-
-/// Persiste le numéro de séquence dans `sequence.txt`
-pub fn save_sequence(tenant_dir: &Path, seq: u64) -> std::io::Result<()> {
-    let path = tenant_dir.join("sequence.txt");
-    std::fs::write(&path, seq.to_string())
 }
 
 /// Charge la configuration d'un tenant depuis son répertoire.
@@ -177,13 +165,10 @@ pub fn discover_tenants(tenants_dir: &Path) -> Result<Vec<TenantEntry>, String> 
             }
         };
 
-        let initial_sequence = load_sequence(&path);
-
         let tenant = TenantEntry {
             siren: dir_name,
             tenant_dir: path,
             config,
-            initial_sequence,
         };
 
         // Créer in/ et out/ s'ils n'existent pas
@@ -215,9 +200,6 @@ pub fn synthetic_tenant(config: &crate::model::PdpConfig) -> TenantEntry {
             ppf: config.ppf.clone(),
             afnor: config.afnor.clone(),
         },
-        initial_sequence: config.ppf.as_ref()
-            .and_then(|p| p.initial_sequence)
-            .unwrap_or(0),
     }
 }
 
@@ -238,28 +220,12 @@ mod tests {
     }
 
     #[test]
-    fn test_load_sequence_missing_file() {
-        let dir = TempDir::new().unwrap();
-        assert_eq!(load_sequence(dir.path()), 0);
-    }
-
-    #[test]
-    fn test_load_save_sequence() {
-        let dir = TempDir::new().unwrap();
-        save_sequence(dir.path(), 42).unwrap();
-        assert_eq!(load_sequence(dir.path()), 42);
-        save_sequence(dir.path(), 999).unwrap();
-        assert_eq!(load_sequence(dir.path()), 999);
-    }
-
-    #[test]
     fn test_in_out_dirs() {
         let dir = TempDir::new().unwrap();
         let entry = TenantEntry {
             siren: "123456789".to_string(),
             tenant_dir: dir.path().to_path_buf(),
             config: auto_config("123456789"),
-            initial_sequence: 0,
         };
         assert_eq!(entry.in_dir(), dir.path().join("in"));
         assert_eq!(entry.out_dir(), dir.path().join("out"));
@@ -272,7 +238,6 @@ mod tests {
             siren: "123456789".to_string(),
             tenant_dir: dir.path().to_path_buf(),
             config: auto_config("123456789"),
-            initial_sequence: 0,
         };
 
         assert!(!entry.in_dir().exists());
@@ -331,13 +296,11 @@ pdp:
 routes: []
 "#;
         fs::write(tenant_dir.join("config.yaml"), config_yaml).unwrap();
-        fs::write(tenant_dir.join("sequence.txt"), "42").unwrap();
 
         let result = discover_tenants(dir.path()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].siren, "123456789");
         assert_eq!(result[0].config.pdp.name, "Test Tenant");
-        assert_eq!(result[0].initial_sequence, 42);
         // in/ et out/ créés automatiquement
         assert!(result[0].in_dir().is_dir());
         assert!(result[0].out_dir().is_dir());
