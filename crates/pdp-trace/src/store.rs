@@ -96,6 +96,15 @@ pub struct ExchangeDocument {
     /// Code statut AFNOR du CDV généré par notre PDP (200/202/213/221/501).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_cdv_status_code: Option<u16>,
+    /// XML du CDV 203 (Mise à disposition) — émis APRÈS un 202 Reçue par
+    /// `CdvDispositionProcessor`, quand la facture a été écrite vers la
+    /// destination buyer. Slot séparé pour préserver le 202 d'origine
+    /// dans `generated_cdv_xml`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition_cdv_xml: Option<String>,
+    /// Code statut du CDV de mise à disposition (toujours 203 si présent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition_cdv_status_code: Option<u16>,
     pub attachment_count: usize,
     pub attachment_filenames: Vec<String>,
     pub events: Vec<EventEntry>,
@@ -330,6 +339,8 @@ impl TraceStore {
                     "converted_format": { "type": "keyword" },
                     "generated_cdv_xml": { "type": "text", "index": false },
                     "generated_cdv_status_code": { "type": "short" },
+                    "disposition_cdv_xml": { "type": "text", "index": false },
+                    "disposition_cdv_status_code": { "type": "short" },
                     "attachment_count": { "type": "integer" },
                     "attachment_filenames": { "type": "keyword" },
                     "events": {
@@ -504,6 +515,20 @@ impl TraceStore {
             {
                 exchange
                     .get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+            } else {
+                None
+            },
+            // CDV 203 Mise à disposition — capté quand
+            // `CdvDispositionProcessor` a posé `cdv.disposition.generated`.
+            disposition_cdv_xml: if exchange.get_header("cdv.disposition.generated").is_some() {
+                exchange.get_property("cdv.disposition.xml").cloned()
+            } else {
+                None
+            },
+            disposition_cdv_status_code: if exchange.get_header("cdv.disposition.generated").is_some() {
+                exchange
+                    .get_property("cdv.disposition.status_code")
                     .and_then(|s| s.parse::<u16>().ok())
             } else {
                 None

@@ -2884,6 +2884,12 @@ fn render_flow_detail(
                     f = html_escape(flow_id), s = html_escape(siren), code = code,
                 ));
             }
+            if let Some(code) = doc.disposition_cdv_status_code {
+                links.push(format!(
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv-disposition?siren={s}">⬇️ CDV {code} (mise à disposition)</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren), code = code,
+                ));
+            }
             if links.is_empty() {
                 String::new()
             } else {
@@ -2990,6 +2996,32 @@ pub async fn handle_download_cdv(
     };
     let code = doc.generated_cdv_status_code.unwrap_or(0);
     let filename = format!("cdv-{:03}-{}.xml", code, flow_id);
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "application/xml; charset=utf-8".parse().unwrap());
+    if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
+        headers.insert("content-disposition", v);
+    }
+    (StatusCode::OK, headers, xml).into_response()
+}
+
+/// GET /ui/flows/{flowId}/download/cdv-disposition
+/// Télécharge le CDV 203 (Mise à disposition) émis par notre PDP après
+/// l'écriture de la facture vers la destination buyer.
+pub async fn handle_download_cdv_disposition(
+    State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
+    Path(flow_id): Path<String>,
+) -> impl IntoResponse {
+    let siren = siren.as_str();
+    let doc = match lookup_doc(&state, siren, &flow_id).await {
+        Some(d) => d,
+        None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
+    };
+    let xml = match doc.disposition_cdv_xml {
+        Some(x) => x,
+        None => return (StatusCode::NOT_FOUND, "Aucun CDV 203 pour ce flux").into_response(),
+    };
+    let filename = format!("cdv-203-{}.xml", flow_id);
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("content-type", "application/xml; charset=utf-8".parse().unwrap());
     if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
@@ -3256,6 +3288,8 @@ mod tests {
             cdv_status_code: None,
             generated_cdv_xml: None,
             generated_cdv_status_code: None,
+            disposition_cdv_xml: None,
+            disposition_cdv_status_code: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,

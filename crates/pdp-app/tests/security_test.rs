@@ -178,6 +178,8 @@ fn doc_for(seller_siren: &str, buyer_siren: &str, invoice: &str) -> ExchangeDocu
         cdv_status_code: None,
         generated_cdv_xml: None,
         generated_cdv_status_code: None,
+        disposition_cdv_xml: None,
+        disposition_cdv_status_code: None,
         raw_xml: Some("<Invoice/>".into()),
         raw_pdf_base64: None,
         converted_xml: None,

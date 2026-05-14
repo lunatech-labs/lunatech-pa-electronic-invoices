@@ -1385,10 +1385,23 @@ async fn build_router(
             // (XP Z12-012 §A.1 — la PDP doit rendre disponible le CDV au client).
             builder = builder.process(Box::new(pdp_cdar::CdvFileWriterProcessor::new(out_path.clone())));
 
-            // Destination + trace finale + événement Distributed
-            builder = builder
-                .to_destination(producer)
-                .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())));
+            // Destination = écriture vers le buyer (ou autre PDP / PPF).
+            builder = builder.to_destination(producer);
+
+            // Après l'écriture, si on était en réception (CDV 202), émettre
+            // le CDV 203 Mise à disposition — la facture est maintenant
+            // accessible à l'acheteur (XP Z12-012 §A.1 : 202 → 203).
+            // Auto-gated : no-op si le CDV précédent n'était pas 202.
+            // **Doit s'exécuter avant le snapshot pour que les fields
+            // `disposition_cdv_*` soient indexés en ES.**
+            builder = builder.process(Box::new(pdp_cdar::CdvDispositionProcessor::new(
+                pdp_id,
+                pdp_name,
+                out_path.clone(),
+            )));
+
+            // Trace finale + événement Distributed (capture les 2 CDVs).
+            builder = builder.process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())));
             if let Some(ref bus) = event_bus {
                 builder = builder.process(Box::new(
                     pdp_events::LifecycleProcessor::distributed(bus.clone()),
@@ -3075,6 +3088,8 @@ mod tests {
             cdv_status_code: None,
             generated_cdv_xml: None,
             generated_cdv_status_code: None,
+            disposition_cdv_xml: None,
+            disposition_cdv_status_code: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,

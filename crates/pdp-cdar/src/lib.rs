@@ -22,7 +22,7 @@
 //! | 206 | Approuvée partiellement | Traitement |
 //! | 207 | En litige | Traitement |
 //! | 208 | Suspendue | Traitement |
-//! | 209 | Mise à disposition | Traitement |
+//! | 203 | Mise à disposition | Transmission |
 //! | 210 | Refusée | Traitement |
 //! | 211 | En cours de paiement | Traitement |
 //! | 212 | Encaissée | Traitement |
@@ -79,6 +79,6 @@ pub use model::{
 };
 pub use generator::CdarGenerator;
 pub use parser::CdarParser;
-pub use processor::{CdarProcessor, CdarMode, CdvFileWriterProcessor, CdvReceptionProcessor, DocumentTypeRouter, IrrecevabiliteProcessor};
+pub use processor::{CdarProcessor, CdarMode, CdvDispositionProcessor, CdvFileWriterProcessor, CdvReceptionProcessor, DocumentTypeRouter, IrrecevabiliteProcessor};
 pub use cdv_return::CdvReturnProcessor;
 pub use ppf_relay::CdvPpfRelayProcessor;

@@ -347,6 +347,8 @@ fn doc(
         cdv_status_code: None,
         generated_cdv_xml: None,
         generated_cdv_status_code: None,
+        disposition_cdv_xml: None,
+        disposition_cdv_status_code: None,
         raw_xml: Some(format!("<Invoice id=\"{}\"/>", invoice_number)),
         raw_pdf_base64: None,
         converted_xml: None,

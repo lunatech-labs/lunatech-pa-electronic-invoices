@@ -737,6 +737,104 @@ fn map_reception_to_irrecevabilite(rule_ids: &str, filename: &str) -> (StatusRea
 }
 
 // ============================================================
+// CdvDispositionProcessor — émet le CDV 203 après réception réussie
+// ============================================================
+
+/// Processor qui complète la transmission côté réception en émettant un
+/// CDV 203 (Mise à disposition) une fois que la facture a été écrite vers
+/// la sortie destination (donc accessible à l'acheteur).
+///
+/// XP Z12-012 §A.1 : le cycle de vie transmission est
+/// `200 Déposée → 201 Émise → 202 Reçue → 203 Mise à disposition`. Notre
+/// PDP réceptrice doit attester de chacune des étapes qu'elle franchit.
+/// Le 203 doit donc être émis après l'écriture vers la destination buyer.
+///
+/// Le processor est idempotent et auto-gated :
+/// - Si `cdv.status_code == 202` (le dernier CDV était une Reçue), génère 203.
+/// - Sinon (200 Déposée côté émission, 213 Rejetée, etc.), no-op.
+///
+/// Le CDV 203 généré est :
+/// - écrit dans `{base_dir}/cdar/{flow_id}-cdv-203.xml`
+/// - stocké dans les propriétés `cdv.disposition.xml` + `cdv.disposition.status_code`
+///   pour capture en ES via `ExchangeDocument.disposition_cdv_*`.
+///
+/// Important : ce processor NE modifie PAS `cdv.xml` / `cdv.status_code` qui
+/// portent toujours le 202 d'origine. Le 203 vit dans un slot séparé.
+pub struct CdvDispositionProcessor {
+    generator: CdarGenerator,
+    base_dir: std::path::PathBuf,
+}
+
+impl CdvDispositionProcessor {
+    pub fn new(
+        pdp_siren: &str,
+        pdp_name: &str,
+        base_dir: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            generator: CdarGenerator::new(pdp_siren, pdp_name),
+            base_dir: base_dir.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl Processor for CdvDispositionProcessor {
+    fn name(&self) -> &str {
+        "CdvDispositionProcessor"
+    }
+
+    async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        // Auto-gate : on n'émet le 203 que si le CDV précédent était une
+        // Reçue (202). Sinon (200 Déposée côté émission, 213 Rejetée,
+        // 221 ERREUR_ROUTAGE, 501 Irrecevable), no-op.
+        let previous_code = exchange
+            .get_property("cdv.status_code")
+            .and_then(|s| s.parse::<u16>().ok());
+        if previous_code != Some(202) {
+            return Ok(exchange);
+        }
+        let invoice = match exchange.invoice.as_ref() {
+            Some(i) => i,
+            None => return Ok(exchange),
+        };
+        let invoice_type_code = invoice.invoice_type_code.as_deref().unwrap_or("380");
+        let cdv = self
+            .generator
+            .generate_mise_a_disposition(invoice, invoice_type_code);
+        let xml = self.generator.to_xml(&cdv)?;
+        tracing::info!(
+            invoice = %invoice.invoice_number,
+            "Génération CDV 203 (Mise à disposition — réception)"
+        );
+
+        // Écrire sur disque (séparé du CDV 202 par le suffixe -cdv-203.xml)
+        let dir = self.base_dir.join("cdar");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(error = %e, dir = %dir.display(), "Échec création répertoire CDV 203");
+        } else {
+            let filename = format!("{}-cdv-203.xml", exchange.flow_id);
+            let path = dir.join(&filename);
+            if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+                tracing::warn!(error = %e, path = %path.display(), "Échec écriture CDV 203");
+            } else {
+                tracing::info!(
+                    flow_id = %exchange.flow_id,
+                    path = %path.display(),
+                    "CDV 203 écrit sur disque"
+                );
+            }
+        }
+
+        // Slot séparé : ne pas écraser cdv.xml (qui porte le 202).
+        exchange.set_property("cdv.disposition.xml", &xml);
+        exchange.set_property("cdv.disposition.status_code", "203");
+        exchange.set_header("cdv.disposition.generated", "true");
+        Ok(exchange)
+    }
+}
+
+// ============================================================
 // CdvFileWriterProcessor — matérialise le CDV XML sur disque
 // ============================================================
 
