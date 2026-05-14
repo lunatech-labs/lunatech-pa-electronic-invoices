@@ -478,6 +478,54 @@ ul.link-list {
 }
 ul.link-list a { font-size: 13.5px; }
 
+/* Filtres statut en pills cliquables (au-dessus de la table) */
+.pill-filters {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 0.9rem;
+}
+.pill-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line-2);
+    background: #fff;
+    color: var(--ink-2);
+    text-decoration: none;
+    transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.pill-filter:hover {
+    border-color: var(--ink-2);
+    color: var(--ink);
+    background: var(--bg-2);
+    text-decoration: none;
+}
+.pill-filter::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--muted-2);
+}
+.pill-filter.pill-ok::before { background: var(--good); }
+.pill-filter.pill-wait::before { background: var(--warn); }
+.pill-filter.pill-err::before { background: var(--bad); }
+.pill-filter.pill-default::before { display: none; }
+.pill-filter.active {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--bg);
+}
+.pill-filter.active.pill-ok { border-color: var(--good-ink); background: var(--good-soft); color: var(--good-ink); }
+.pill-filter.active.pill-wait { border-color: var(--warn-ink); background: var(--warn-soft); color: var(--warn-ink); }
+.pill-filter.active.pill-err { border-color: var(--bad-ink); background: var(--bad-soft); color: var(--bad-ink); }
+.pill-filter.active::before { background: currentColor; opacity: 0.8; }
+
 .card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -1274,10 +1322,16 @@ pub async fn handle_dashboard(
             let pending = stats.total_exchanges - stats.total_distributed - stats.total_errors;
             let tenant_name = resolve_tenant_name(&state, s).await;
             let tenant_label = tenant_name.as_deref().unwrap_or(s);
-            // Sparkline 14 jours sur la KPI "Total flux". Best-effort : si ES
-            // ne répond pas, on retombe sur un Vec vide → SVG vide.
-            let daily = store.daily_counts_for_siren(s, 14).await.unwrap_or_default();
-            let sparkline = sparkline_svg(&daily, 60, 22);
+            // 4 sparklines 14 jours (total / distribués / pending / erreurs) en
+            // une seule requête ES via filter aggregations. Best-effort.
+            let bk = store
+                .daily_breakdown_for_siren(s, 14)
+                .await
+                .unwrap_or_else(|_| pdp_trace::store::DailyBreakdown::zeros(14));
+            let spk_total = sparkline_svg(&bk.total, 60, 22);
+            let spk_distributed = sparkline_svg(&bk.distributed, 60, 22);
+            let spk_pending = sparkline_svg(&bk.pending, 60, 22);
+            let spk_errors = sparkline_svg(&bk.errors, 60, 22);
             format!(
                 r#"<div class="app-title">
     <h1>Flux <span class="serif">en circulation</span></h1>
@@ -1288,22 +1342,25 @@ pub async fn handle_dashboard(
         <div class="kpi-label">Total flux</div>
         <div class="kpi-value">{total}</div>
         <div class="kpi-delta">14 jours · index <code>pdp-{siren}</code></div>
-        {sparkline}
+        {spk_total}
     </div>
     <div class="kpi-card success">
         <div class="kpi-label">Distribués</div>
         <div class="kpi-value success">{distributed}</div>
         <div class="kpi-delta">{pct}% du total</div>
+        {spk_distributed}
     </div>
     <div class="kpi-card warn">
         <div class="kpi-label">En attente</div>
         <div class="kpi-value warning">{pending}</div>
         <div class="kpi-delta">Routage / annuaire PPF</div>
+        {spk_pending}
     </div>
     <div class="kpi-card bad">
         <div class="kpi-label">En erreur</div>
         <div class="kpi-value error">{errors}</div>
         <div class="kpi-delta bad">Rejets BR-FR ou pipeline</div>
+        {spk_errors}
     </div>
 </div>
 <div class="card">
@@ -1325,7 +1382,10 @@ pub async fn handle_dashboard(
                 } else {
                     0
                 },
-                sparkline = sparkline,
+                spk_total = spk_total,
+                spk_distributed = spk_distributed,
+                spk_pending = spk_pending,
+                spk_errors = spk_errors,
             )
         }
     };
@@ -1709,27 +1769,72 @@ async fn render_flows_list(
                     format!(r#"<option value="{n}"{sel}>{n} / page</option>"#)
                 })
                 .collect::<String>();
+            // Filtres statut : pills cliquables (lien GET) qui préservent les
+            // autres params (from/to/page_size) via la query string. Match le
+            // pattern .pill du design Ferrite Landing.
+            let pill_link = |value: &str, label: &str, klass: &str| -> String {
+                let active = q.status.as_deref() == if value.is_empty() {
+                    None
+                } else {
+                    Some(value)
+                };
+                let mut qs = format!("siren={}", html_escape(s));
+                if !value.is_empty() {
+                    // Encodage URL minimal pour le status (peut contenir É, etc.)
+                    let enc: String = value
+                        .bytes()
+                        .map(|b| match b {
+                            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'~' => {
+                                (b as char).to_string()
+                            }
+                            _ => format!("%{:02X}", b),
+                        })
+                        .collect();
+                    qs.push_str(&format!("&status={}", enc));
+                }
+                if let Some(f) = q.from.as_deref().filter(|x| !x.is_empty()) {
+                    qs.push_str(&format!("&from={}", html_escape(f)));
+                }
+                if let Some(t) = q.to.as_deref().filter(|x| !x.is_empty()) {
+                    qs.push_str(&format!("&to={}", html_escape(t)));
+                }
+                if page_size != 50 {
+                    qs.push_str(&format!("&page_size={page_size}"));
+                }
+                format!(
+                    r#"<a href="{path}?{qs}" class="pill-filter {klass}{active_cls}">{label}</a>"#,
+                    path = direction.route_path(),
+                    qs = qs,
+                    klass = klass,
+                    active_cls = if active { " active" } else { "" },
+                    label = label,
+                )
+            };
+            let status_pills = format!(
+                r#"<div class="pill-filters">
+        {all}{ok}{wait}{err}
+    </div>"#,
+                all = pill_link("", "Tous", "pill-default"),
+                ok = pill_link("DISTRIBUÉ", "Distribués", "pill-ok"),
+                wait = pill_link("EN_ATTENTE", "En attente", "pill-wait"),
+                err = pill_link("ERREUR", "Rejetés (213)", "pill-err"),
+            );
             let filters_form = format!(
-                r#"<form method="get" action="{action}" class="filters">
+                r#"{status_pills}
+<form method="get" action="{action}" class="filters">
     <input type="hidden" name="siren" value="{siren}">
-    <select name="status">
-        <option value="">— Tous les statuts —</option>
-        <option value="DISTRIBUÉ" {sel_dist}>Transmise au destinataire</option>
-        <option value="ERREUR" {sel_err}>Rejetée (213)</option>
-        <option value="EN_ATTENTE" {sel_pending}>En cours de traitement</option>
-    </select>
+    <input type="hidden" name="status" value="{status}">
     <input type="date" name="from" value="{from}" placeholder="Du">
     <input type="date" name="to" value="{to}" placeholder="Au">
     <select name="page_size" title="Factures par page">
         {page_size_opts}
     </select>
-    <button type="submit">Filtrer</button>
+    <button type="submit">Appliquer</button>
 </form>"#,
+                status_pills = status_pills,
                 action = direction.route_path(),
                 siren = html_escape(s),
-                sel_dist = if q.status.as_deref() == Some("DISTRIBUÉ") { "selected" } else { "" },
-                sel_err = if q.status.as_deref() == Some("ERREUR") { "selected" } else { "" },
-                sel_pending = if q.status.as_deref() == Some("EN_ATTENTE") { "selected" } else { "" },
+                status = html_escape(q.status.as_deref().unwrap_or("")),
                 from = q.from.as_deref().unwrap_or(""),
                 to = q.to.as_deref().unwrap_or(""),
                 page_size_opts = page_size_opts,

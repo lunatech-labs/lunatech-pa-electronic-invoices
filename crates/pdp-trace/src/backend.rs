@@ -12,7 +12,7 @@ use async_trait::async_trait;
 
 use pdp_core::error::PdpResult;
 
-use crate::store::{ExchangeDocument, ExchangeSummary, TraceStats};
+use crate::store::{DailyBreakdown, ExchangeDocument, ExchangeSummary, TraceStats};
 
 /// Méthodes de lecture du store de traçabilité utilisées par les handlers
 /// HTTP et UI. Tout est `async` (le store ES répond via HTTP).
@@ -77,6 +77,12 @@ pub trait TraceBackend: Send + Sync {
     async fn daily_counts_for_siren(&self, _siren: &str, days: u32) -> PdpResult<Vec<i64>> {
         Ok(vec![0; days as usize])
     }
+
+    /// Breakdown quotidien : total, distribués, pending, erreurs sur `days` jours.
+    /// Implémentation par défaut : zéros (les backends ES surchargent).
+    async fn daily_breakdown_for_siren(&self, _siren: &str, days: u32) -> PdpResult<DailyBreakdown> {
+        Ok(DailyBreakdown::zeros(days as usize))
+    }
 }
 
 #[async_trait]
@@ -137,5 +143,9 @@ impl TraceBackend for crate::store::TraceStore {
 
     async fn daily_counts_for_siren(&self, siren: &str, days: u32) -> PdpResult<Vec<i64>> {
         crate::store::TraceStore::daily_counts_for_siren(self, siren, days).await
+    }
+
+    async fn daily_breakdown_for_siren(&self, siren: &str, days: u32) -> PdpResult<DailyBreakdown> {
+        crate::store::TraceStore::daily_breakdown_for_siren(self, siren, days).await
     }
 }

@@ -132,6 +132,29 @@ pub struct TraceStats {
     pub total_distributed: i64,
 }
 
+/// Séries temporelles quotidiennes utilisées par les sparklines du dashboard.
+/// Chaque Vec<i64> est de longueur `days` (alignée à droite : index 0 = jour le
+/// plus ancien, dernier index = aujourd'hui).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyBreakdown {
+    pub total: Vec<i64>,
+    pub distributed: Vec<i64>,
+    pub pending: Vec<i64>,
+    pub errors: Vec<i64>,
+}
+
+impl DailyBreakdown {
+    /// Constructeur "vide" — utile en fallback quand ES ne répond pas.
+    pub fn zeros(days: usize) -> Self {
+        Self {
+            total: vec![0; days],
+            distributed: vec![0; days],
+            pending: vec![0; days],
+            errors: vec![0; days],
+        }
+    }
+}
+
 /// Résumé d'un exchange (pour les listes)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExchangeSummary {
@@ -1229,13 +1252,110 @@ impl TraceStore {
         })
     }
 
-    /// Renvoie le nombre de flux par jour pour un tenant sur les `days`
-    /// derniers jours (compteur cumulatif sur `seller_siren OR buyer_siren`),
-    /// dans l'ordre chronologique. Utilisé par les sparklines UI.
+    /// Renvoie 4 séries quotidiennes (total / distribués / erreurs / pending)
+    /// pour un tenant sur les `days` derniers jours, dans l'ordre chronologique.
+    /// Utilisé par les sparklines des 4 KPI du dashboard.
     ///
-    /// Utilise une agrégation ES `date_histogram` sur `created_at` avec
-    /// `extended_bounds` pour garantir un point par jour (même à zéro).
-    /// Retourne un `Vec<i64>` de longueur `days`.
+    /// Une seule requête ES avec un `date_histogram` + 2 `filter` sub-aggregations.
+    /// Pending est dérivé côté Rust (`total - distribués - erreurs`).
+    pub async fn daily_breakdown_for_siren(
+        &self,
+        siren: &str,
+        days: u32,
+    ) -> PdpResult<DailyBreakdown> {
+        let index = self.index_pattern();
+        let now = chrono::Utc::now();
+        let from = now - chrono::Duration::days(days as i64 - 1);
+        let body = serde_json::json!({
+            "size": 0,
+            "query": {
+                "bool": {
+                    "should": [
+                        { "term": { "seller_siren": siren } },
+                        { "term": { "buyer_siren": siren } }
+                    ],
+                    "minimum_should_match": 1
+                }
+            },
+            "aggs": {
+                "by_day": {
+                    "date_histogram": {
+                        "field": "created_at",
+                        "calendar_interval": "1d",
+                        "min_doc_count": 0,
+                        "extended_bounds": {
+                            "min": from.format("%Y-%m-%d").to_string(),
+                            "max": now.format("%Y-%m-%d").to_string(),
+                        },
+                        "time_zone": "UTC",
+                    },
+                    "aggs": {
+                        "distributed": {
+                            "filter": {
+                                "bool": {
+                                    "must": [
+                                        { "term": { "error_count": 0 } },
+                                        { "terms": { "status": TERMINAL_OK_STATUSES } }
+                                    ]
+                                }
+                            }
+                        },
+                        "errors": {
+                            "filter": {
+                                "bool": {
+                                    "should": [
+                                        { "range": { "error_count": { "gt": 0 } } },
+                                        { "terms": { "status": TERMINAL_FAIL_STATUSES } }
+                                    ],
+                                    "minimum_should_match": 1
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let n = days as usize;
+        let resp = self
+            .client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Aggregation daily_breakdown échouée: {}", e)))?;
+        if !resp.status().is_success() {
+            return Ok(DailyBreakdown::zeros(n));
+        }
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+        let buckets = json["aggregations"]["by_day"]["buckets"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut total = vec![0i64; n];
+        let mut distributed = vec![0i64; n];
+        let mut errors = vec![0i64; n];
+        let start = n.saturating_sub(buckets.len());
+        for (i, b) in buckets.iter().enumerate() {
+            let idx = start + i;
+            if idx >= n { break; }
+            total[idx] = b["doc_count"].as_i64().unwrap_or(0);
+            distributed[idx] = b["distributed"]["doc_count"].as_i64().unwrap_or(0);
+            errors[idx] = b["errors"]["doc_count"].as_i64().unwrap_or(0);
+        }
+        let pending: Vec<i64> = total
+            .iter()
+            .zip(distributed.iter())
+            .zip(errors.iter())
+            .map(|((t, d), e)| (t - d - e).max(0))
+            .collect();
+        Ok(DailyBreakdown { total, distributed, pending, errors })
+    }
+
+    /// Variante legacy : ne retourne que la série `total`. Conservée pour
+    /// compatibilité, redirige vers `daily_breakdown_for_siren`.
     pub async fn daily_counts_for_siren(
         &self,
         siren: &str,
