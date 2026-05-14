@@ -59,6 +59,15 @@ const CSS: &str = r#"
     --radius: 10px;
     --radius-sm: 6px;
     --shadow: 0 1px 0 rgba(15,15,12,.04), 0 8px 24px -16px rgba(15,15,12,.10);
+    /* Slots utilisés par sidebar / table — passés en variables pour que le
+       @media (prefers-color-scheme: dark) puisse les override sans dépendre
+       de l'ordre des règles CSS. */
+    --sidebar-bg: #FCFBF7;
+    --sidebar-item-active-bg: #FFFFFF;
+    --table-head-bg: #FCFBF7;
+    --table-row-hover-bg: #FCFBF7;
+    --tenant-avatar-grad-from: #0E0E0C;
+    --tenant-avatar-grad-to: #3A3A33;
 }
 
 /* Dark mode auto via media query système. Pas de toggle UI : la CSP
@@ -87,15 +96,19 @@ const CSS: &str = r#"
         --bad-soft: oklch(0.30 0.10 25 / 0.5);
         --bad-ink: oklch(0.80 0.15 25);
         --shadow: 0 1px 0 rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.5);
+        /* Slots dark mode — override les vars utilisées par sidebar/table */
+        --sidebar-bg: #131311;
+        --sidebar-item-active-bg: #161613;
+        --table-head-bg: #1A1A17;
+        --table-row-hover-bg: #1A1A17;
+        --tenant-avatar-grad-from: oklch(0.78 0.13 50);
+        --tenant-avatar-grad-to: #3A3A33;
     }
-    /* Quelques ajustements ponctuels difficiles à exprimer via vars seules. */
+    /* Quelques ajustements qui restent en règles explicites parce qu'ils
+       ciblent des combinateurs ou des pseudo-classes non re-themables via
+       les seules variables CSS. */
     body { background: var(--bg); color: var(--ink); }
     header.legacy-topbar { background: rgba(15,15,13,.85); }
-    thead { background: #1A1A17; }
-    tr:hover td { background: #1A1A17; }
-    .sidebar { background: #131311; }
-    .sidebar .item.active { background: var(--card); }
-    .sidebar .tenant .ava { background: linear-gradient(135deg, var(--accent-ink), #3A3A33); }
     .pj-badge { background: var(--bg-2); color: var(--ink); }
     .filters input, .filters select { background: var(--card); color: var(--ink); }
     .filters button { background: var(--ink); color: var(--bg); }
@@ -132,7 +145,7 @@ body {
     min-height: 100vh;
 }
 .sidebar {
-    background: #FCFBF7;
+    background: var(--sidebar-bg);
     border-right: 1px solid var(--line);
     padding: 16px 12px 18px;
     display: flex;
@@ -186,7 +199,7 @@ body {
     width: 26px;
     height: 26px;
     border-radius: 6px;
-    background: linear-gradient(135deg, var(--ink), #3A3A33);
+    background: linear-gradient(135deg, var(--tenant-avatar-grad-from), var(--tenant-avatar-grad-to));
     color: #fff;
     display: flex;
     align-items: center;
@@ -243,7 +256,7 @@ body {
     color: var(--ink);
 }
 .sidebar .item.active {
-    background: #fff;
+    background: var(--sidebar-item-active-bg);
     border-color: var(--line);
     color: var(--ink);
     font-weight: 500;
@@ -565,7 +578,7 @@ ul.link-list a { font-size: 13.5px; }
 }
 
 table { width: 100%; border-collapse: collapse; }
-thead { background: #FCFBF7; }
+thead { background: var(--table-head-bg); }
 th, td {
     padding: 0.7rem 0.75rem;
     text-align: left;
@@ -579,7 +592,7 @@ th {
     text-transform: uppercase;
     letter-spacing: 0.06em;
 }
-tr:hover td { background: #FCFBF7; }
+tr:hover td { background: var(--table-row-hover-bg); }
 td.num, th.num {
     font-family: 'Geist Mono',monospace;
     font-size: 12px;

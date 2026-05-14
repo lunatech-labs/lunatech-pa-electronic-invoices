@@ -1480,6 +1480,13 @@ async fn build_router(
 
             builder = builder
                 .to_destination(producer)
+                // Après l'écriture vers la destination, si CDV précédent était
+                // 202 Reçue, émet 203 Mise à disposition (XP Z12-012 §A.1).
+                .process(Box::new(pdp_cdar::CdvDispositionProcessor::new(
+                    &config.pdp.id,
+                    &config.pdp.name,
+                    &default_output,
+                )))
                 .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())))
                 .on_error(Box::new(http_alert_handler));
 
@@ -1533,6 +1540,13 @@ async fn build_router(
 
         intra_builder = intra_builder
             .to_destination(intra_producer)
+            // Après l'écriture intra-PDP vers la destination buyer, émet 203
+            // Mise à disposition si le précédent CDV était 202 Reçue.
+            .process(Box::new(pdp_cdar::CdvDispositionProcessor::new(
+                &config.pdp.id,
+                &config.pdp.name,
+                &default_output,
+            )))
             .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())));
         if let Some(ref bus) = event_bus {
             intra_builder = intra_builder.process(Box::new(
