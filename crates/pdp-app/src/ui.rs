@@ -394,6 +394,8 @@ main {
     letter-spacing: 0;
 }
 .kpi-delta.bad { color: var(--bad-ink); }
+.muted-p { color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.muted-p strong { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
 .kpi-delta code {
     background: var(--bg-2);
     padding: 1px 5px;
@@ -704,6 +706,14 @@ header nav form.logout-form button:hover {
 }
 "#;
 
+/// Compteurs affichés à droite des items de la sidebar (`Émises 412`).
+/// Tous optionnels — `None` masque la pastille.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct SidebarCounts {
+    pub emises: Option<i64>,
+    pub recues: Option<i64>,
+}
+
 pub(crate) fn page_shell(
     title: &str,
     active: &str,
@@ -711,7 +721,25 @@ pub(crate) fn page_shell(
     ctx: &crate::security::SecurityContext,
     body: &str,
 ) -> String {
+    page_shell_with_counts(title, active, siren, ctx, &SidebarCounts::default(), body)
+}
+
+pub(crate) fn page_shell_with_counts(
+    title: &str,
+    active: &str,
+    siren: Option<&str>,
+    ctx: &crate::security::SecurityContext,
+    counts: &SidebarCounts,
+    body: &str,
+) -> String {
     let siren_q = siren.map(|s| format!("?siren={}", s)).unwrap_or_default();
+    let fmt_count = |n: Option<i64>| -> String {
+        match n {
+            Some(v) if v >= 1000 => format!("{} {}", v / 1000, format!("{:03}", v % 1000)),
+            Some(v) => v.to_string(),
+            None => String::new(),
+        }
+    };
     let item = |path: &str, label: &str, key: &str, icon: &str, count: &str| {
         let class = if key == active { "item active" } else { "item" };
         let count_html = if count.is_empty() {
@@ -735,6 +763,8 @@ pub(crate) fn page_shell(
     let ic_recues = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>"##;
     let ic_annuaire = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>"##;
     let ic_admin = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>"##;
+    let ic_pulse = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>"##;
+    let ic_chart = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-6 6-4-4-4 4"/></svg>"##;
     // Tenant card : avatar + label dérivés du domaine de l'email
     // (`alice@techconseil.demo` → label "Techconseil", avatar "TC"), SIREN
     // formaté en 3-3-3 dessous. Quand la page n'a pas de SIREN (admin global),
@@ -867,6 +897,9 @@ pub(crate) fn page_shell(
         {emises_link}
         {recues_link}
         <a href="/annuaire" class="item">{ic_annuaire}<span>Annuaire PPF</span></a>
+        <div class="group">Outils</div>
+        <a href="/v1/healthcheck" class="item" target="_blank" rel="noopener">{ic_pulse}<span>Healthcheck API</span></a>
+        <a href="/metrics" class="item" target="_blank" rel="noopener">{ic_chart}<span>Métriques Prometheus</span></a>
         {admin_section}
         <div class="footer">
             {logout_block}
@@ -880,9 +913,11 @@ pub(crate) fn page_shell(
         css = CSS,
         tenant_card = tenant_card,
         dashboard_link = item("", "Tableau de bord", "dashboard", ic_dashboard, ""),
-        emises_link = item("/emises", "Factures émises", "emises", ic_emises, ""),
-        recues_link = item("/recues", "Factures reçues", "recues", ic_recues, ""),
+        emises_link = item("/emises", "Factures émises", "emises", ic_emises, &fmt_count(counts.emises)),
+        recues_link = item("/recues", "Factures reçues", "recues", ic_recues, &fmt_count(counts.recues)),
         ic_annuaire = ic_annuaire,
+        ic_pulse = ic_pulse,
+        ic_chart = ic_chart,
         admin_section = admin_section,
         logout_block = logout_block,
         crumbs = crumbs,
@@ -1127,14 +1162,11 @@ pub async fn handle_dashboard(
     </div>
 </div>
 <div class="card">
-    <h2>Raccourcis <span class="serif">d'opération</span></h2>
-    <ul class="link-list">
-        <li><a href="/ui/emises?siren={siren}">→ Suivi des factures émises</a></li>
-        <li><a href="/ui/recues?siren={siren}">→ Suivi des factures reçues</a></li>
-        <li><a href="/ui/emises?siren={siren}&status=ERREUR">→ Émises en erreur</a></li>
-        <li><a href="/ui/recues?siren={siren}&status=ERREUR">→ Reçues en erreur</a></li>
-        <li><a href="/v1/healthcheck">→ Healthcheck API</a></li>
-        <li><a href="/metrics">→ Métriques Prometheus</a></li>
+    <h2>Cycle de vie <span class="serif">en un coup d'œil</span></h2>
+    <p class="muted-p">Sur les <strong>{total}</strong> flux du tenant, <strong>{distributed}</strong> ont atteint l'état terminal AFNOR (Émise / Mise à disposition), <strong>{pending}</strong> attendent une étape de routage ou d'annuaire, et <strong>{errors}</strong> ont été rejetés (BR-FR, doublon ou erreur pipeline).</p>
+    <ul class="link-list" style="margin-top:0.9rem">
+        <li><a href="/ui/emises?siren={siren}&status=ERREUR">→ Voir les factures émises en erreur</a></li>
+        <li><a href="/ui/recues?siren={siren}&status=ERREUR">→ Voir les factures reçues en erreur</a></li>
     </ul>
 </div>"#,
                 tenant_label = html_escape(tenant_label),
@@ -1152,14 +1184,37 @@ pub async fn handle_dashboard(
         }
     };
 
-    html_response(&page_shell(
+    let counts = sidebar_counts_for(&state, siren).await;
+    html_response(&page_shell_with_counts(
         "Dashboard",
         "dashboard",
         siren,
         &ctx,
+        &counts,
         &body,
     ))
     .into_response()
+}
+
+/// Calcule les compteurs émises/reçues pour le tenant courant — affichés à
+/// droite des items de la sidebar. Best-effort : si ES ne répond pas, on
+/// retombe sur `None` et la pastille ne s'affiche pas.
+async fn sidebar_counts_for(
+    state: &crate::server::AppState,
+    siren: Option<&str>,
+) -> SidebarCounts {
+    let Some(s) = siren else { return SidebarCounts::default() };
+    let Some(store) = state.trace_store.as_ref() else { return SidebarCounts::default() };
+    SidebarCounts {
+        emises: store
+            .count_exchanges(s, None, None, None, Some("emises"))
+            .await
+            .ok(),
+        recues: store
+            .count_exchanges(s, None, None, None, Some("recues"))
+            .await
+            .ok(),
+    }
 }
 
 /// Résout la raison sociale d'une entreprise pour un SIREN donné.
@@ -1663,11 +1718,13 @@ async fn render_flows_list(
         }
     };
 
-    html_response(&page_shell(
+    let counts = sidebar_counts_for(&state, siren).await;
+    html_response(&page_shell_with_counts(
         direction.page_title(),
         direction.nav_key(),
         siren,
         &ctx,
+        &counts,
         &body,
     ))
     .into_response()
@@ -2102,11 +2159,13 @@ pub async fn handle_flow_detail(
         }
         _ => "emises",
     };
-    html_response(&page_shell(
+    let counts = sidebar_counts_for(&state, siren).await;
+    html_response(&page_shell_with_counts(
         "Détail flux",
         nav_active,
         siren,
         &ctx,
+        &counts,
         &body,
     ))
     .into_response()
