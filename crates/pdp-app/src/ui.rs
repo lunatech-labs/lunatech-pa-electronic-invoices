@@ -79,7 +79,185 @@ body {
 .mono, code { font-family: 'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace; }
 .serif { font-family: 'Instrument Serif',Georgia,serif; font-style: italic; font-weight: 400; }
 
-header {
+/* ============================================================
+   Layout principal : sidebar 220px + main
+   ============================================================ */
+.app-layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: 100vh;
+}
+.sidebar {
+    background: #FCFBF7;
+    border-right: 1px solid var(--line);
+    padding: 16px 12px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    overflow-y: auto;
+}
+.sidebar .brand-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 8px 14px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 8px;
+}
+.sidebar .brand-row img {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+.sidebar .brand-row b {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+}
+.sidebar .brand-row small {
+    color: var(--muted);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-left: 1px solid var(--line);
+    padding-left: 8px;
+    margin-left: 2px;
+}
+.sidebar .tenant {
+    margin: 0 4px 12px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+.sidebar .tenant .ava {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, var(--ink), #3A3A33);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+}
+.sidebar .tenant .meta {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+    min-width: 0;
+}
+.sidebar .tenant .meta b {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sidebar .tenant .meta span {
+    font-family: 'Geist Mono',monospace;
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 1px;
+}
+.sidebar .group {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-2);
+    padding: 8px 10px 6px;
+    font-weight: 500;
+}
+.sidebar .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    font-size: 13px;
+    color: var(--ink-2);
+    text-decoration: none;
+    margin: 1px 0;
+    transition: background .12s ease;
+    border: 1px solid transparent;
+}
+.sidebar .item:hover {
+    background: var(--bg-2);
+    text-decoration: none;
+    color: var(--ink);
+}
+.sidebar .item.active {
+    background: #fff;
+    border-color: var(--line);
+    color: var(--ink);
+    font-weight: 500;
+    box-shadow: 0 1px 0 rgba(0,0,0,.02);
+}
+.sidebar .item svg {
+    opacity: 0.55;
+    flex-shrink: 0;
+}
+.sidebar .item.active svg { opacity: 0.85; }
+.sidebar .item .count {
+    margin-left: auto;
+    font-family: 'Geist Mono',monospace;
+    font-size: 11px;
+    color: var(--muted);
+}
+.sidebar .footer {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.sidebar .footer .principal {
+    font-family: 'Geist Mono',monospace;
+    font-size: 11px;
+    color: var(--muted);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 4px;
+}
+.sidebar .footer form.logout-form {
+    display: inline;
+}
+.sidebar .footer form.logout-form button {
+    background: transparent;
+    border: 1px solid var(--line-2);
+    color: var(--ink);
+    padding: 0.3rem 0.7rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 11.5px;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background .12s ease, border-color .12s ease;
+}
+.sidebar .footer form.logout-form button:hover {
+    background: var(--bg-2);
+    border-color: var(--ink-2);
+}
+
+/* legacy header — masqué quand le layout sidebar est utilisé */
+header.legacy-topbar {
     background: rgba(250,250,247,.85);
     backdrop-filter: saturate(140%) blur(10px);
     -webkit-backdrop-filter: saturate(140%) blur(10px);
@@ -139,7 +317,43 @@ header nav a {
 header nav a:hover { color: var(--ink); }
 header nav a.active { color: var(--ink); font-weight: 500; }
 
-main { max-width: 1200px; margin: 2.2rem auto; padding: 0 1.75rem; }
+main {
+    padding: 24px 32px 36px;
+    min-width: 0;
+}
+
+/* Breadcrumbs + app-title (au-dessus du contenu de chaque page) */
+.crumbs {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.crumbs .sep { color: var(--muted-2); }
+.crumbs .current { color: var(--ink-2); }
+.app-title {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+.app-title h1 {
+    font-size: 26px;
+    letter-spacing: -.025em;
+    margin: 0;
+    font-weight: 500;
+    line-height: 1.1;
+}
+.app-title .actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
 
 .kpi-grid {
     display: grid;
@@ -173,6 +387,29 @@ main { max-width: 1200px; margin: 2.2rem auto; padding: 0 1.75rem; }
 .kpi-value.success { color: var(--good-ink); }
 .kpi-value.warning { color: var(--warn-ink); }
 .kpi-value.error { color: var(--bad-ink); }
+.kpi-delta {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: var(--muted);
+    letter-spacing: 0;
+}
+.kpi-delta.bad { color: var(--bad-ink); }
+.kpi-delta code {
+    background: var(--bg-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+ul.link-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+ul.link-list a { font-size: 13.5px; }
 
 .card {
     background: var(--card);
@@ -475,35 +712,136 @@ pub(crate) fn page_shell(
     body: &str,
 ) -> String {
     let siren_q = siren.map(|s| format!("?siren={}", s)).unwrap_or_default();
-    let nav_link = |path: &str, label: &str, key: &str| {
-        let class = if key == active { "active" } else { "" };
+    let item = |path: &str, label: &str, key: &str, icon: &str, count: &str| {
+        let class = if key == active { "item active" } else { "item" };
+        let count_html = if count.is_empty() {
+            String::new()
+        } else {
+            format!(r#"<span class="count">{}</span>"#, count)
+        };
         format!(
-            r#"<a href="/ui{path}{q}" class="{class}">{label}</a>"#,
+            r#"<a href="/ui{path}{q}" class="{class}">{icon}<span>{label}</span>{count}</a>"#,
             path = path,
             q = siren_q,
             class = class,
+            icon = icon,
             label = label,
+            count = count_html,
         )
     };
-    // Lien Admin réservé au rôle PdpAdmin. La route est de toute façon
-    // protégée côté serveur (cf. `admin::require_admin`) mais on évite
-    // d'afficher un lien qui mène à un 403 aux opérateurs et tenants.
-    let admin_link = if is_admin(ctx) {
-        let class = if active == "admin" { "active" } else { "" };
-        format!(r#"<a href="/ui/admin" class="{class}">Admin</a>"#)
+    // Icônes SVG inline pour la sidebar — outline 14 px, stroke 2.
+    let ic_dashboard = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>"##;
+    let ic_emises = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>"##;
+    let ic_recues = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>"##;
+    let ic_annuaire = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>"##;
+    let ic_admin = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>"##;
+    // Tenant card : avatar + label dérivés du domaine de l'email
+    // (`alice@techconseil.demo` → label "Techconseil", avatar "TC"), SIREN
+    // formaté en 3-3-3 dessous. Quand la page n'a pas de SIREN (admin global),
+    // on affiche "Tous tenants".
+    let tenant_card = match siren {
+        Some(s) => {
+            let domain_org = ctx.principal
+                .split('@')
+                .nth(1)
+                .and_then(|d| d.split('.').next())
+                .unwrap_or("tenant");
+            let mut label_chars = domain_org.chars();
+            let label = match label_chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + label_chars.as_str(),
+                None => "Tenant".to_string(),
+            };
+            let avatar: String = domain_org
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .take(2)
+                .collect::<String>()
+                .to_uppercase();
+            let avatar = if avatar.is_empty() { "—".to_string() } else { avatar };
+            let siren_fmt = if s.len() == 9 {
+                format!("{} {} {}", &s[0..3], &s[3..6], &s[6..9])
+            } else {
+                s.to_string()
+            };
+            format!(
+                r#"<div class="tenant">
+            <div class="ava">{ava}</div>
+            <div class="meta">
+                <b>{label}</b>
+                <span>SIREN {siren}</span>
+            </div>
+        </div>"#,
+                ava = html_escape(&avatar),
+                label = html_escape(&label),
+                siren = html_escape(&siren_fmt),
+            )
+        }
+        None => r#"<div class="tenant">
+            <div class="ava">PD</div>
+            <div class="meta">
+                <b>Ferrite</b>
+                <span>Tous tenants</span>
+            </div>
+        </div>"#
+            .to_string(),
+    };
+    // Lien Admin réservé au rôle PdpAdmin (la route est protégée côté serveur).
+    let admin_section = if is_admin(ctx) {
+        let class = if active == "admin" { "item active" } else { "item" };
+        format!(
+            r#"<div class="group">Plateforme</div>
+        <a href="/ui/admin" class="{class}">{ic}<span>Admin</span></a>"#,
+            class = class,
+            ic = ic_admin,
+        )
     } else {
         String::new()
     };
-    // `/logout` n'accepte que POST (anti-CSRF basique : un simple GET ne
-    // doit pas pouvoir déconnecter). On rend un mini-formulaire dans la
-    // nav stylé comme un bouton — pas de JS.
     let logout_block = format!(
-        r#"<span class="nav-user">{principal}</span>
-        <form method="post" action="/logout" class="logout-form">
-            <button type="submit">Se déconnecter</button>
-        </form>"#,
+        r#"<span class="principal">{principal}</span>
+            <form method="post" action="/logout" class="logout-form">
+                <button type="submit">Sortir</button>
+            </form>"#,
         principal = html_escape(&ctx.principal),
     );
+    // Breadcrumbs : "Tenants / {tenant} / {section}". Le label tenant vient du
+    // domaine de l'email (cf. derivation tenant_card), et le label section est
+    // mappé depuis `active`. Pas de breadcrumbs sur les pages globales (admin
+    // sans siren).
+    let crumbs = {
+        let section_label = match active {
+            "dashboard" => Some("Tableau de bord"),
+            "emises" => Some("Factures émises"),
+            "recues" => Some("Factures reçues"),
+            "admin" => Some("Administration"),
+            _ => None,
+        };
+        match (siren, section_label) {
+            (Some(_), Some(section)) => {
+                let domain_org = ctx
+                    .principal
+                    .split('@')
+                    .nth(1)
+                    .and_then(|d| d.split('.').next())
+                    .unwrap_or("tenant");
+                let mut label_chars = domain_org.chars();
+                let tenant_label = match label_chars.next() {
+                    Some(c) => c.to_uppercase().collect::<String>() + label_chars.as_str(),
+                    None => "Tenant".to_string(),
+                };
+                format!(
+                    r#"<div class="crumbs"><span>Tenants</span><span class="sep">/</span><span>{tenant}</span><span class="sep">/</span><span class="current">{section}</span></div>"#,
+                    tenant = html_escape(&tenant_label),
+                    section = html_escape(section),
+                )
+            }
+            (None, Some(section)) => format!(
+                r#"<div class="crumbs"><span>Plateforme</span><span class="sep">/</span><span class="current">{section}</span></div>"#,
+                section = html_escape(section),
+            ),
+            _ => String::new(),
+        }
+    };
     format!(
         r#"<!DOCTYPE html>
 <html lang="fr">
@@ -516,32 +854,38 @@ pub(crate) fn page_shell(
     <style>{css}</style>
 </head>
 <body>
-    <header>
-        <img src="/ui/static/ferrite-icon.png" alt="" class="logo">
-        <div class="brand">
-            <span class="name">Ferrite</span>
-            <span class="tagline">Plateforme Agréée</span>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="brand-row">
+            <img src="/ui/static/ferrite-icon.png" alt="">
+            <b>Ferrite</b>
+            <small>PA</small>
         </div>
-        <h1>Suivi des factures</h1>
-        <nav>
-            {dashboard_link}
-            {emises_link}
-            {recues_link}
-            <a href="/annuaire">Annuaire</a>
-            {admin_link}
+        {tenant_card}
+        <div class="group">Tenant</div>
+        {dashboard_link}
+        {emises_link}
+        {recues_link}
+        <a href="/annuaire" class="item">{ic_annuaire}<span>Annuaire PPF</span></a>
+        {admin_section}
+        <div class="footer">
             {logout_block}
-        </nav>
-    </header>
-    <main>{body}</main>
+        </div>
+    </aside>
+    <main>{crumbs}{body}</main>
+</div>
 </body>
 </html>"#,
-        title = title,
+        title = html_escape(title),
         css = CSS,
-        dashboard_link = nav_link("", "Dashboard", "dashboard"),
-        emises_link = nav_link("/emises", "Émises", "emises"),
-        recues_link = nav_link("/recues", "Reçues", "recues"),
-        admin_link = admin_link,
+        tenant_card = tenant_card,
+        dashboard_link = item("", "Tableau de bord", "dashboard", ic_dashboard, ""),
+        emises_link = item("/emises", "Factures émises", "emises", ic_emises, ""),
+        recues_link = item("/recues", "Factures reçues", "recues", ic_recues, ""),
+        ic_annuaire = ic_annuaire,
+        admin_section = admin_section,
         logout_block = logout_block,
+        crumbs = crumbs,
         body = body,
     )
 }
@@ -754,54 +1098,56 @@ pub async fn handle_dashboard(
             });
             let pending = stats.total_exchanges - stats.total_distributed - stats.total_errors;
             let tenant_name = resolve_tenant_name(&state, s).await;
-            let header_title = match tenant_name.as_deref() {
-                Some(name) => format!(
-                    r#"{name} <small style="font-weight:400;color:#666">— SIREN {siren}</small>"#,
-                    name = html_escape(name),
-                    siren = html_escape(s),
-                ),
-                None => format!("Tenant : {}", html_escape(s)),
-            };
+            let tenant_label = tenant_name.as_deref().unwrap_or(s);
             format!(
-                r#"
-<div class="card">
-    <h2>{title}</h2>
-    <p style="color:#666">Toutes les valeurs proviennent de l'index Elasticsearch <code>pdp-{siren}</code>.</p>
+                r#"<div class="app-title">
+    <h1>Flux <span class="serif">en circulation</span></h1>
+    <div class="actions"><span class="pj-badge">{tenant_label}</span><span class="pj-badge">SIREN {siren}</span></div>
 </div>
 <div class="kpi-grid">
     <div class="kpi-card">
         <div class="kpi-label">Total flux</div>
         <div class="kpi-value">{total}</div>
+        <div class="kpi-delta">Index <code>pdp-{siren}</code></div>
     </div>
     <div class="kpi-card">
         <div class="kpi-label">Distribués</div>
         <div class="kpi-value success">{distributed}</div>
+        <div class="kpi-delta">{pct}% du total</div>
     </div>
     <div class="kpi-card">
         <div class="kpi-label">En attente</div>
         <div class="kpi-value warning">{pending}</div>
+        <div class="kpi-delta">Routage / annuaire PPF</div>
     </div>
     <div class="kpi-card">
         <div class="kpi-label">En erreur</div>
         <div class="kpi-value error">{errors}</div>
+        <div class="kpi-delta bad">Rejets BR-FR ou pipeline</div>
     </div>
 </div>
 <div class="card">
-    <h2>Actions</h2>
-    <p><a href="/ui/emises?siren={siren}">→ Suivi des factures émises</a></p>
-    <p><a href="/ui/recues?siren={siren}">→ Suivi des factures reçues</a></p>
-    <p><a href="/ui/emises?siren={siren}&status=ERREUR">→ Émises en erreur</a></p>
-    <p><a href="/ui/recues?siren={siren}&status=ERREUR">→ Reçues en erreur</a></p>
-    <p><a href="/v1/healthcheck">→ Healthcheck API</a></p>
-    <p><a href="/metrics">→ Métriques Prometheus</a></p>
-</div>
-"#,
-                title = header_title,
+    <h2>Raccourcis <span class="serif">d'opération</span></h2>
+    <ul class="link-list">
+        <li><a href="/ui/emises?siren={siren}">→ Suivi des factures émises</a></li>
+        <li><a href="/ui/recues?siren={siren}">→ Suivi des factures reçues</a></li>
+        <li><a href="/ui/emises?siren={siren}&status=ERREUR">→ Émises en erreur</a></li>
+        <li><a href="/ui/recues?siren={siren}&status=ERREUR">→ Reçues en erreur</a></li>
+        <li><a href="/v1/healthcheck">→ Healthcheck API</a></li>
+        <li><a href="/metrics">→ Métriques Prometheus</a></li>
+    </ul>
+</div>"#,
+                tenant_label = html_escape(tenant_label),
                 siren = html_escape(s),
                 total = stats.total_exchanges,
                 distributed = stats.total_distributed,
                 pending = pending.max(0),
                 errors = stats.total_errors,
+                pct = if stats.total_exchanges > 0 {
+                    (stats.total_distributed * 100) / stats.total_exchanges
+                } else {
+                    0
+                },
             )
         }
     };
@@ -1017,6 +1363,14 @@ impl FlowDirection {
             FlowDirection::Recues => "Factures reçues",
         }
     }
+    /// Variante HTML du titre avec accent serif italique sur le mot
+    /// directionnel — match le pattern éditorial du design (Geist + Instrument Serif).
+    fn page_title_html(&self) -> &'static str {
+        match self {
+            FlowDirection::Emises => r#"Factures <span class="serif">émises</span>"#,
+            FlowDirection::Recues => r#"Factures <span class="serif">reçues</span>"#,
+        }
+    }
     fn empty_label(&self) -> &'static str {
         match self {
             FlowDirection::Emises => "Aucune facture émise pour ces critères.",
@@ -1141,8 +1495,8 @@ async fn render_flows_list(
 
             let tenant_name = resolve_tenant_name(&state, s).await;
             let list_title = format!(
-                "{label} — {who} <small style=\"font-weight:400;color:#666\">SIREN {siren}</small>",
-                label = direction.page_title(),
+                "{label} — {who} <small style=\"font-weight:400;color:var(--muted)\">SIREN {siren}</small>",
+                label = direction.page_title_html(),
                 who = html_escape(tenant_name.as_deref().unwrap_or(s)),
                 siren = html_escape(s),
             );
