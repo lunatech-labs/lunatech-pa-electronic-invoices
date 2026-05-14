@@ -307,6 +307,7 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/ui/recues", get(crate::ui::handle_flows_recues))
         .route("/ui/emises/export.csv", get(crate::ui::handle_export_emises_csv))
         .route("/ui/recues/export.csv", get(crate::ui::handle_export_recues_csv))
+        .route("/ui/e-reporting", get(crate::ui::handle_e_reporting))
         // Backward-compat : `/ui/flows` redirige vers `/ui/emises` (les
         // captures README, bookmarks utilisateurs et la doc gardent leur
         // sens). On ne préserve pas la query string — la nouvelle nav

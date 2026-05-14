@@ -1030,12 +1030,15 @@ pub(crate) fn page_shell_with_counts(
             Some(s) => format!("/ui/emises?siren={}&status=DISTRIBU%C3%89", s),
             None => "/ui/emises".to_string(),
         };
+        let ereporting_active = if active == "e-reporting" { " active" } else { "" };
         format!(
             r#"<a href="{cdv}" class="item">{ic_cdv}<span>Cycle de vie (CDV)</span></a>
-        <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/cdar.md" class="item" target="_blank" rel="noopener">{ic_report}<span>E-reporting</span><span class="count soon">soon</span></a>
+        <a href="/ui/e-reporting{ereporting_q}" class="item{ereporting_active}">{ic_report}<span>E-reporting</span></a>
         <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/events.md" class="item" target="_blank" rel="noopener">{ic_webhook}<span>Webhooks</span></a>
         <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/peppol.md" class="item" target="_blank" rel="noopener">{ic_peppol}<span>PEPPOL AS4</span></a>"#,
             cdv = cdv_q,
+            ereporting_q = siren_q,
+            ereporting_active = ereporting_active,
             ic_cdv = ic_cdv,
             ic_report = ic_report,
             ic_webhook = ic_webhook,
@@ -1051,6 +1054,7 @@ pub(crate) fn page_shell_with_counts(
             "dashboard" => Some("Tableau de bord"),
             "emises" => Some("Factures émises"),
             "recues" => Some("Factures reçues"),
+            "e-reporting" => Some("E-reporting"),
             "admin" => Some("Administration"),
             _ => None,
         };
@@ -1707,6 +1711,94 @@ pub async fn handle_export_emises_csv(
     q: Query<FlowsListQuery>,
 ) -> axum::response::Response {
     export_flows_csv(state, ctx, q, FlowDirection::Emises).await
+}
+
+/// `GET /ui/e-reporting` — page d'aperçu E-reporting (Flux 10.1 → 10.4).
+///
+/// La PDP a la responsabilité d'agréger et de transmettre 4 flux périodiques
+/// au PPF (cf. AFNOR XP Z12-013 §10) :
+/// - 10.1 Transactions B2C
+/// - 10.2 Transactions B2B vers étranger
+/// - 10.3 Encaissements (état de paiement)
+/// - 10.4 Opérations exonérées
+///
+/// Cette page est en mode "Aperçu" pour l'instant : l'extraction et le push
+/// automatique vers le PPF sont en cours d'intégration ([`pdp_ereporting`]).
+pub async fn handle_e_reporting(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    Query(q): Query<DashboardQuery>,
+) -> axum::response::Response {
+    let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    if let Some(r) = auto_redirect_single_tenant(&ctx, owned_siren.as_deref(), "/ui/e-reporting") {
+        return r;
+    }
+    let siren = owned_siren.as_deref();
+    let body = match siren {
+        None => siren_picker(&state, &ctx, "/ui/e-reporting"),
+        Some(s) => format!(
+            r#"<div class="app-title">
+    <h1>E-reporting <span class="serif">périodique</span></h1>
+    <div class="actions"><span class="pj-badge">Aperçu</span><span class="pj-badge">SIREN {siren}</span></div>
+</div>
+<div class="banner">
+    Cette section est en cours d'intégration : les compteurs ci-dessous sont
+    indicatifs (réforme française 2026, AFNOR XP Z12-013 §10). L'extraction
+    automatique vers le PPF est gérée par <code>pdp-ereporting</code>.
+</div>
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Flux 10.1 · B2C</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-delta">Transactions avec consommateurs</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Flux 10.2 · B2B intl</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-delta">B2B vers / depuis l'étranger</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Flux 10.3 · Encaissements</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-delta">État de paiement (BR-FR-MAP)</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Flux 10.4 · Exonérées</div>
+        <div class="kpi-value">—</div>
+        <div class="kpi-delta">Opérations sans TVA française</div>
+    </div>
+</div>
+<div class="card">
+    <h2>Pourquoi <span class="serif">e-reporting</span> ?</h2>
+    <p class="muted-p">
+        Au-delà de la facturation électronique B2B (réforme 2026), la PDP doit
+        transmettre périodiquement au Portail Public de Facturation (PPF) les
+        transactions <strong>hors champ B2B FR</strong> : ventes aux particuliers,
+        opérations transfrontalières, encaissements et exonérations. Quatre flux
+        XML normalisés sont attendus :
+    </p>
+    <ul class="link-list" style="margin-top:0.8rem">
+        <li><a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/ereporting.md" target="_blank" rel="noopener">→ Documentation Ferrite e-reporting</a></li>
+        <li><a href="https://www.afnor.org/" target="_blank" rel="noopener">→ AFNOR XP Z12-013 (norme officielle)</a></li>
+        <li><a href="/ui/emises?siren={siren}">→ Voir les factures émises</a></li>
+    </ul>
+</div>"#,
+            siren = html_escape(s),
+        ),
+    };
+    let counts = sidebar_counts_for(&state, siren).await;
+    html_response(&page_shell_with_counts(
+        "E-reporting",
+        "e-reporting",
+        siren,
+        &ctx,
+        &counts,
+        &body,
+    ))
+    .into_response()
 }
 
 /// `GET /ui/recues/export.csv` — export CSV des factures reçues.
