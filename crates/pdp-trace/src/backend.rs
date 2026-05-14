@@ -68,6 +68,15 @@ pub trait TraceBackend: Send + Sync {
     /// Tous les flux en erreur, tous tenants confondus (utilisé par l'API
     /// `/v1/flows` quand on demande `?status=error`).
     async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>>;
+
+    /// Compteur quotidien des flux d'un tenant sur les `days` derniers jours
+    /// (seller OR buyer). Utilisé par les sparklines du dashboard.
+    /// Retour aligné à droite : index `days - 1` = aujourd'hui.
+    /// Implémentation par défaut : renvoie un Vec de zéros (sparkline vide).
+    /// Les backends qui supportent l'agrégation surchargent.
+    async fn daily_counts_for_siren(&self, _siren: &str, days: u32) -> PdpResult<Vec<i64>> {
+        Ok(vec![0; days as usize])
+    }
 }
 
 #[async_trait]
@@ -124,5 +133,9 @@ impl TraceBackend for crate::store::TraceStore {
 
     async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>> {
         crate::store::TraceStore::get_error_flows(self).await
+    }
+
+    async fn daily_counts_for_siren(&self, siren: &str, days: u32) -> PdpResult<Vec<i64>> {
+        crate::store::TraceStore::daily_counts_for_siren(self, siren, days).await
     }
 }

@@ -61,6 +61,50 @@ const CSS: &str = r#"
     --shadow: 0 1px 0 rgba(15,15,12,.04), 0 8px 24px -16px rgba(15,15,12,.10);
 }
 
+/* Dark mode auto via media query système. Pas de toggle UI : la CSP
+   `script-src 'self'` rendrait l'expérience compliquée. On suit l'OS. */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0F0F0D;
+        --bg-2: #181815;
+        --ink: #ECEAE0;
+        --ink-2: #C9C7BC;
+        --muted: #8A8980;
+        --muted-2: #5E5D55;
+        --line: #2A2A26;
+        --line-2: #3A3A33;
+        --card: #161613;
+        --accent: oklch(0.72 0.14 40);
+        --accent-soft: oklch(0.30 0.08 35 / 0.5);
+        --accent-ink: oklch(0.78 0.13 50);
+        --good: oklch(0.62 0.13 150);
+        --good-soft: oklch(0.28 0.08 150 / 0.5);
+        --good-ink: oklch(0.76 0.13 150);
+        --warn: oklch(0.74 0.13 75);
+        --warn-soft: oklch(0.30 0.10 75 / 0.5);
+        --warn-ink: oklch(0.82 0.13 75);
+        --bad: oklch(0.66 0.17 25);
+        --bad-soft: oklch(0.30 0.10 25 / 0.5);
+        --bad-ink: oklch(0.80 0.15 25);
+        --shadow: 0 1px 0 rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.5);
+    }
+    /* Quelques ajustements ponctuels difficiles à exprimer via vars seules. */
+    body { background: var(--bg); color: var(--ink); }
+    header.legacy-topbar { background: rgba(15,15,13,.85); }
+    thead { background: #1A1A17; }
+    tr:hover td { background: #1A1A17; }
+    .sidebar { background: #131311; }
+    .sidebar .item.active { background: var(--card); }
+    .sidebar .tenant .ava { background: linear-gradient(135deg, var(--accent-ink), #3A3A33); }
+    .pj-badge { background: var(--bg-2); color: var(--ink); }
+    .filters input, .filters select { background: var(--card); color: var(--ink); }
+    .filters button { background: var(--ink); color: var(--bg); }
+    .filters button:hover { background: #fff; }
+    .dl-btn { background: var(--ink); color: var(--bg) !important; }
+    .dl-btn:hover { background: #fff; }
+    code { background: var(--bg-2); color: var(--ink-2); }
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 ::selection { background: var(--accent); color: #fff; }
 
@@ -379,6 +423,17 @@ main {
     position: relative;
     overflow: hidden;
 }
+.kpi-card .spark {
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    color: var(--accent);
+    opacity: 0.65;
+    pointer-events: none;
+}
+.kpi-card.success .spark { color: var(--good); }
+.kpi-card.warn .spark { color: var(--warn); }
+.kpi-card.bad .spark { color: var(--bad); }
 .kpi-label {
     color: var(--muted);
     font-size: 11px;
@@ -730,6 +785,43 @@ header nav form.logout-form button:hover {
 pub(crate) struct SidebarCounts {
     pub emises: Option<i64>,
     pub recues: Option<i64>,
+}
+
+/// Rend un sparkline SVG inline à partir d'une série de points.
+///
+/// Le SVG remplit (width × height), avec une marge de 1 px en haut/bas pour
+/// éviter que le trait soit clippé. Si tous les points sont à zéro ou si la
+/// série est vide, renvoie une chaîne vide (pas de sparkline → pas de bruit
+/// visuel). La couleur de tracé est `currentColor`, donc se themeable via
+/// `color` côté CSS parent.
+pub(crate) fn sparkline_svg(points: &[i64], width: u32, height: u32) -> String {
+    if points.len() < 2 {
+        return String::new();
+    }
+    let max = points.iter().copied().max().unwrap_or(0);
+    if max == 0 {
+        return String::new();
+    }
+    let pad = 1.5_f64;
+    let plot_h = (height as f64) - 2.0 * pad;
+    let n = points.len() as f64 - 1.0;
+    let mut path = String::with_capacity(points.len() * 12);
+    for (i, &v) in points.iter().enumerate() {
+        let x = (i as f64) / n * (width as f64 - 1.0);
+        // y inversé : plus la valeur est grande, plus y est petit (haut du SVG).
+        let y = pad + plot_h * (1.0 - (v as f64) / (max as f64));
+        if i == 0 {
+            path.push_str(&format!("M{:.1} {:.1}", x, y));
+        } else {
+            path.push_str(&format!("L{:.1} {:.1}", x, y));
+        }
+    }
+    format!(
+        r#"<svg class="spark" width="{w}" height="{h}" viewBox="0 0 {w} {h}" fill="none" aria-hidden="true"><path d="{path}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>"#,
+        w = width,
+        h = height,
+        path = path,
+    )
 }
 
 pub(crate) fn page_shell(
@@ -1182,6 +1274,10 @@ pub async fn handle_dashboard(
             let pending = stats.total_exchanges - stats.total_distributed - stats.total_errors;
             let tenant_name = resolve_tenant_name(&state, s).await;
             let tenant_label = tenant_name.as_deref().unwrap_or(s);
+            // Sparkline 14 jours sur la KPI "Total flux". Best-effort : si ES
+            // ne répond pas, on retombe sur un Vec vide → SVG vide.
+            let daily = store.daily_counts_for_siren(s, 14).await.unwrap_or_default();
+            let sparkline = sparkline_svg(&daily, 60, 22);
             format!(
                 r#"<div class="app-title">
     <h1>Flux <span class="serif">en circulation</span></h1>
@@ -1191,19 +1287,20 @@ pub async fn handle_dashboard(
     <div class="kpi-card">
         <div class="kpi-label">Total flux</div>
         <div class="kpi-value">{total}</div>
-        <div class="kpi-delta">Index <code>pdp-{siren}</code></div>
+        <div class="kpi-delta">14 jours · index <code>pdp-{siren}</code></div>
+        {sparkline}
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card success">
         <div class="kpi-label">Distribués</div>
         <div class="kpi-value success">{distributed}</div>
         <div class="kpi-delta">{pct}% du total</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card warn">
         <div class="kpi-label">En attente</div>
         <div class="kpi-value warning">{pending}</div>
         <div class="kpi-delta">Routage / annuaire PPF</div>
     </div>
-    <div class="kpi-card">
+    <div class="kpi-card bad">
         <div class="kpi-label">En erreur</div>
         <div class="kpi-value error">{errors}</div>
         <div class="kpi-delta bad">Rejets BR-FR ou pipeline</div>
@@ -1228,6 +1325,7 @@ pub async fn handle_dashboard(
                 } else {
                     0
                 },
+                sparkline = sparkline,
             )
         }
     };

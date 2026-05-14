@@ -1229,6 +1229,81 @@ impl TraceStore {
         })
     }
 
+    /// Renvoie le nombre de flux par jour pour un tenant sur les `days`
+    /// derniers jours (compteur cumulatif sur `seller_siren OR buyer_siren`),
+    /// dans l'ordre chronologique. Utilisé par les sparklines UI.
+    ///
+    /// Utilise une agrégation ES `date_histogram` sur `created_at` avec
+    /// `extended_bounds` pour garantir un point par jour (même à zéro).
+    /// Retourne un `Vec<i64>` de longueur `days`.
+    pub async fn daily_counts_for_siren(
+        &self,
+        siren: &str,
+        days: u32,
+    ) -> PdpResult<Vec<i64>> {
+        let index = self.index_pattern();
+        let now = chrono::Utc::now();
+        let from = now - chrono::Duration::days(days as i64 - 1);
+        let body = serde_json::json!({
+            "size": 0,
+            "query": {
+                "bool": {
+                    "should": [
+                        { "term": { "seller_siren": siren } },
+                        { "term": { "buyer_siren": siren } }
+                    ],
+                    "minimum_should_match": 1
+                }
+            },
+            "aggs": {
+                "by_day": {
+                    "date_histogram": {
+                        "field": "created_at",
+                        "calendar_interval": "1d",
+                        "min_doc_count": 0,
+                        "extended_bounds": {
+                            "min": from.format("%Y-%m-%d").to_string(),
+                            "max": now.format("%Y-%m-%d").to_string(),
+                        },
+                        "time_zone": "UTC",
+                    }
+                }
+            }
+        });
+        let resp = self
+            .client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Aggregation daily_counts échouée: {}", e)))?;
+        if !resp.status().is_success() {
+            return Ok(vec![0; days as usize]);
+        }
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+        let buckets = json["aggregations"]["by_day"]["buckets"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let counts: Vec<i64> = buckets
+            .iter()
+            .map(|b| b["doc_count"].as_i64().unwrap_or(0))
+            .collect();
+        // L'agrégation peut retourner moins que `days` buckets si la fenêtre
+        // est partielle ; on aligne à droite (jours les plus récents en queue).
+        let mut padded = vec![0i64; days as usize];
+        let start = (days as usize).saturating_sub(counts.len());
+        for (i, c) in counts.iter().enumerate() {
+            if start + i < padded.len() {
+                padded[start + i] = *c;
+            }
+        }
+        Ok(padded)
+    }
+
     /// Récupère toutes les factures émises (status DISTRIBUÉ) d'un tenant
     /// sur une période donnée. Utilisé par l'e-reporting Flux 10.
     ///
