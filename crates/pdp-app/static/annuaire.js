@@ -66,6 +66,14 @@
             searchTime.textContent = `${elapsed}s`;
 
             resultsDiv.innerHTML = Object.values(grouped).map(renderCompany).join('');
+            // CSP `script-src 'self'` interdit les onclick inline → on rattache
+            // les handlers d'expand/collapse via addEventListener à chaque
+            // re-render. Sinon les cartes ne se déplient pas et les adresses
+            // (rendues dans `.detail-section` initialement display:none) restent
+            // invisibles.
+            resultsDiv.querySelectorAll('.result-card').forEach(card => {
+                card.addEventListener('click', () => card.classList.toggle('expanded'));
+            });
         } catch (e) {
             spinner.classList.remove('visible');
             resultsDiv.innerHTML = `<div class="empty-state">
@@ -182,7 +190,7 @@
         }
 
         return `
-        <div class="result-card" onclick="this.classList.toggle('expanded')">
+        <div class="result-card">
             <div class="result-header">
                 <div>
                     <div class="result-name">${escHtml(c.nom)}</div>
