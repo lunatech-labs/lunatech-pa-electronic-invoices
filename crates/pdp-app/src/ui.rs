@@ -216,6 +216,16 @@ body {
     font-size: 11px;
     color: var(--muted);
 }
+.sidebar .item .count.soon {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    color: var(--muted-2);
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
 .sidebar .footer {
     margin-top: auto;
     padding-top: 12px;
@@ -444,6 +454,14 @@ th {
     letter-spacing: 0.06em;
 }
 tr:hover td { background: #FCFBF7; }
+td.num, th.num {
+    font-family: 'Geist Mono',monospace;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+}
+td.num a { color: var(--accent-ink); }
+td.num a:hover { color: var(--accent); }
 
 .badge {
     display: inline-flex;
@@ -765,6 +783,12 @@ pub(crate) fn page_shell_with_counts(
     let ic_admin = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>"##;
     let ic_pulse = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>"##;
     let ic_chart = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-6 6-4-4-4 4"/></svg>"##;
+    // Icônes pour les items "Opérations" (mock, pointent vers vues filtrées ou
+    // endpoints existants — pas de UI dédiée pour ces concepts).
+    let ic_cdv = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>"##;
+    let ic_report = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>"##;
+    let ic_webhook = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>"##;
+    let ic_peppol = r##"<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/></svg>"##;
     // Tenant card : avatar + label dérivés du domaine de l'email
     // (`alice@techconseil.demo` → label "Techconseil", avatar "TC"), SIREN
     // formaté en 3-3-3 dessous. Quand la page n'a pas de SIREN (admin global),
@@ -834,6 +858,27 @@ pub(crate) fn page_shell_with_counts(
             </form>"#,
         principal = html_escape(&ctx.principal),
     );
+    // Items "Opérations" : concepts métier de la PDP (cycle de vie, e-reporting,
+    // webhooks, PEPPOL). Pas d'UI dédiée pour l'instant — on pointe vers les
+    // endpoints API ou les vues filtrées existantes. La pastille `count` reste
+    // muette (mock) car ces ressources n'ont pas de compteur centralisé.
+    let ops_items = {
+        let cdv_q = match siren {
+            Some(s) => format!("/ui/emises?siren={}&status=DISTRIBU%C3%89", s),
+            None => "/ui/emises".to_string(),
+        };
+        format!(
+            r#"<a href="{cdv}" class="item">{ic_cdv}<span>Cycle de vie (CDV)</span></a>
+        <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/cdar.md" class="item" target="_blank" rel="noopener">{ic_report}<span>E-reporting</span><span class="count soon">soon</span></a>
+        <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/events.md" class="item" target="_blank" rel="noopener">{ic_webhook}<span>Webhooks</span></a>
+        <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/peppol.md" class="item" target="_blank" rel="noopener">{ic_peppol}<span>PEPPOL AS4</span></a>"#,
+            cdv = cdv_q,
+            ic_cdv = ic_cdv,
+            ic_report = ic_report,
+            ic_webhook = ic_webhook,
+            ic_peppol = ic_peppol,
+        )
+    };
     // Breadcrumbs : "Tenants / {tenant} / {section}". Le label tenant vient du
     // domaine de l'email (cf. derivation tenant_card), et le label section est
     // mappé depuis `active`. Pas de breadcrumbs sur les pages globales (admin
@@ -897,6 +942,8 @@ pub(crate) fn page_shell_with_counts(
         {emises_link}
         {recues_link}
         <a href="/annuaire" class="item">{ic_annuaire}<span>Annuaire PPF</span></a>
+        <div class="group">Opérations</div>
+        {ops_items}
         <div class="group">Outils</div>
         <a href="/v1/healthcheck" class="item" target="_blank" rel="noopener">{ic_pulse}<span>Healthcheck API</span></a>
         <a href="/metrics" class="item" target="_blank" rel="noopener">{ic_chart}<span>Métriques Prometheus</span></a>
@@ -918,6 +965,7 @@ pub(crate) fn page_shell_with_counts(
         ic_annuaire = ic_annuaire,
         ic_pulse = ic_pulse,
         ic_chart = ic_chart,
+        ops_items = ops_items,
         admin_section = admin_section,
         logout_block = logout_block,
         crumbs = crumbs,
@@ -1639,12 +1687,12 @@ async fn render_flows_list(
                         );
                         format!(
                             r#"<tr>
-    <td><a href="/ui/flows/{flow_id}?siren={siren}">{invoice}</a></td>
+    <td class="num"><a href="/ui/flows/{flow_id}?siren={siren}">{invoice}</a></td>
     <td>{counterparty}</td>
     <td><span class="badge {badge}">{status}</span></td>
     <td>{pj}</td>
     <td>{errors}</td>
-    <td>{date}</td>
+    <td class="num">{date}</td>
 </tr>"#,
                             flow_id = html_escape(&e.flow_id),
                             siren = html_escape(s),
