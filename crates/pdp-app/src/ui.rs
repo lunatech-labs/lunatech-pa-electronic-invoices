@@ -525,6 +525,29 @@ ul.link-list a { font-size: 13.5px; }
 .pill-filter.active.pill-wait { border-color: var(--warn-ink); background: var(--warn-soft); color: var(--warn-ink); }
 .pill-filter.active.pill-err { border-color: var(--bad-ink); background: var(--bad-soft); color: var(--bad-ink); }
 .pill-filter.active::before { background: currentColor; opacity: 0.8; }
+.pill-filters.compact { margin-bottom: 0; }
+.pill-filters.compact .pill-filter { font-size: 11.5px; padding: 3px 9px; }
+
+/* Bouton "fantôme" (Exporter, Annuler, …) — bordure fine sans background */
+.btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    color: var(--ink);
+    font-size: 12.5px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background .12s ease, border-color .12s ease;
+}
+.btn-ghost:hover {
+    background: var(--bg-2);
+    border-color: var(--ink-2);
+    text-decoration: none;
+}
 
 .card {
     background: var(--card);
@@ -1676,6 +1699,112 @@ pub async fn handle_flows_recues(
     render_flows_list(state, ctx, q, FlowDirection::Recues).await
 }
 
+/// `GET /ui/emises/export.csv` — export CSV des factures émises (mêmes
+/// filtres que la liste UI).
+pub async fn handle_export_emises_csv(
+    State(state): State<Arc<AppState>>,
+    ctx: axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    q: Query<FlowsListQuery>,
+) -> axum::response::Response {
+    export_flows_csv(state, ctx, q, FlowDirection::Emises).await
+}
+
+/// `GET /ui/recues/export.csv` — export CSV des factures reçues.
+pub async fn handle_export_recues_csv(
+    State(state): State<Arc<AppState>>,
+    ctx: axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    q: Query<FlowsListQuery>,
+) -> axum::response::Response {
+    export_flows_csv(state, ctx, q, FlowDirection::Recues).await
+}
+
+async fn export_flows_csv(
+    state: Arc<AppState>,
+    axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    Query(q): Query<FlowsListQuery>,
+    direction: FlowDirection,
+) -> axum::response::Response {
+    let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    let siren = match owned_siren.as_deref() {
+        Some(s) => s,
+        None => return (StatusCode::BAD_REQUEST, "siren requis").into_response(),
+    };
+    let store = match &state.trace_store {
+        Some(st) => st,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, "TraceStore non configuré").into_response(),
+    };
+    // Pas de pagination pour l'export — on cap à 5000 pour éviter
+    // d'exploser la mémoire sur un tenant qui aurait des milliers de flux.
+    let status = non_empty(&q.status);
+    let from = non_empty(&q.from);
+    let to = non_empty(&q.to);
+    let exchanges = match store
+        .list_exchanges(siren, status, from, to, 0, 5000, Some(direction.nav_key()))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Liste échouée: {e}")).into_response(),
+    };
+
+    // Construction du CSV — encodage utf-8 + BOM pour Excel + séparateur `;`
+    // (locale FR : la virgule peut entrer en collision avec les décimales).
+    let mut csv = String::from("\u{FEFF}");
+    csv.push_str("N° facture;Vendeur;SIREN vendeur;Acheteur;SIREN acheteur;Statut AFNOR;Code CDV;Erreurs;Pièces jointes;Reçue le;Flow ID\n");
+    let dir = DisplayDirection::from_route(direction);
+    for e in &exchanges {
+        let (afnor_label, _) = afnor_status(&e.status, e.error_count, e.cdv_status_code, dir);
+        let row = format!(
+            "{inv};{vn};{vs};{bn};{bs};{st};{cdv};{err};{pj};{date};{fid}\n",
+            inv = csv_escape(e.invoice_number.as_deref().unwrap_or("")),
+            vn = csv_escape(e.seller_name.as_deref().unwrap_or("")),
+            vs = csv_escape(e.seller_siren.as_deref().unwrap_or("")),
+            bn = csv_escape(e.buyer_name.as_deref().unwrap_or("")),
+            bs = csv_escape(e.buyer_siren.as_deref().unwrap_or("")),
+            st = csv_escape(&afnor_label),
+            cdv = e.cdv_status_code.map(|c| c.to_string()).unwrap_or_default(),
+            err = e.error_count,
+            pj = e.attachment_count,
+            date = csv_escape(&e.created_at),
+            fid = csv_escape(&e.flow_id),
+        );
+        csv.push_str(&row);
+    }
+
+    let filename = format!(
+        "ferrite-{}-{}.csv",
+        match direction {
+            FlowDirection::Emises => "emises",
+            FlowDirection::Recues => "recues",
+        },
+        chrono::Utc::now().format("%Y-%m-%d"),
+    );
+    (
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!(r#"attachment; filename="{}""#, filename),
+            ),
+        ],
+        csv,
+    )
+        .into_response()
+}
+
+/// Échappement CSV minimal : guillemets doubles + double les `"` internes
+/// si la cellule contient un séparateur, un saut de ligne ou un `"`.
+fn csv_escape(s: &str) -> String {
+    if s.contains(';') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 async fn render_flows_list(
     state: Arc<AppState>,
     axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
@@ -1756,8 +1885,11 @@ async fn render_flows_list(
 
             let tenant_name = resolve_tenant_name(&state, s).await;
             let list_title = format!(
-                "{label} — {who} <small style=\"font-weight:400;color:var(--muted)\">SIREN {siren}</small>",
+                "{label}",
                 label = direction.page_title_html(),
+            );
+            let tenant_subtitle = format!(
+                r#"<span class="pj-badge">{who}</span><span class="pj-badge">SIREN {siren}</span>"#,
                 who = html_escape(tenant_name.as_deref().unwrap_or(s)),
                 siren = html_escape(s),
             );
@@ -1819,6 +1951,80 @@ async fn render_flows_list(
                 wait = pill_link("EN_ATTENTE", "En attente", "pill-wait"),
                 err = pill_link("ERREUR", "Rejetés (213)", "pill-err"),
             );
+            // Date range pills (7j / 30j / 90j / Tous) — preset rapides
+            // qui calculent from/to côté serveur. La pill active est celle qui
+            // matche exactement les valeurs from/to courantes (la pill "Tous"
+            // est active si les deux champs sont vides).
+            let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            let date_pill = |days_back: i64, label: &str| -> String {
+                let from_target = if days_back == 0 {
+                    String::new()
+                } else {
+                    (chrono::Utc::now() - chrono::Duration::days(days_back))
+                        .format("%Y-%m-%d")
+                        .to_string()
+                };
+                let to_target = if days_back == 0 {
+                    String::new()
+                } else {
+                    today_str.clone()
+                };
+                let active = q.from.as_deref().unwrap_or("") == from_target
+                    && q.to.as_deref().unwrap_or("") == to_target;
+                let mut qs = format!("siren={}", html_escape(s));
+                if let Some(st) = q.status.as_deref().filter(|x| !x.is_empty()) {
+                    let enc: String = st.bytes().map(|b| match b {
+                        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'~' => (b as char).to_string(),
+                        _ => format!("%{:02X}", b),
+                    }).collect();
+                    qs.push_str(&format!("&status={}", enc));
+                }
+                if !from_target.is_empty() {
+                    qs.push_str(&format!("&from={from_target}&to={to_target}"));
+                }
+                if page_size != 50 {
+                    qs.push_str(&format!("&page_size={page_size}"));
+                }
+                format!(
+                    r#"<a href="{path}?{qs}" class="pill-filter pill-default{active}">{label}</a>"#,
+                    path = direction.route_path(),
+                    qs = qs,
+                    active = if active { " active" } else { "" },
+                    label = label,
+                )
+            };
+            let date_pills = format!(
+                r#"<div class="pill-filters compact">{seven}{thirty}{ninety}{all}</div>"#,
+                seven = date_pill(7, "7 j"),
+                thirty = date_pill(30, "30 j"),
+                ninety = date_pill(90, "90 j"),
+                all = date_pill(0, "Tous"),
+            );
+
+            // Bouton "Exporter" → endpoint CSV qui rejoue les mêmes filtres.
+            let export_qs = {
+                let mut qs = format!("siren={}", html_escape(s));
+                if let Some(st) = q.status.as_deref().filter(|x| !x.is_empty()) {
+                    let enc: String = st.bytes().map(|b| match b {
+                        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'~' => (b as char).to_string(),
+                        _ => format!("%{:02X}", b),
+                    }).collect();
+                    qs.push_str(&format!("&status={enc}"));
+                }
+                if let Some(f) = q.from.as_deref().filter(|x| !x.is_empty()) {
+                    qs.push_str(&format!("&from={}", html_escape(f)));
+                }
+                if let Some(t) = q.to.as_deref().filter(|x| !x.is_empty()) {
+                    qs.push_str(&format!("&to={}", html_escape(t)));
+                }
+                qs
+            };
+            let export_btn = format!(
+                r##"<a href="{path}/export.csv?{qs}" class="btn-ghost">⬇ Exporter CSV</a>"##,
+                path = direction.route_path(),
+                qs = export_qs,
+            );
+
             let filters_form = format!(
                 r#"{status_pills}
 <form method="get" action="{action}" class="filters">
@@ -1947,8 +2153,11 @@ async fn render_flows_list(
             };
 
             format!(
-                r#"<div class="card">
-    <h2>{title}</h2>
+                r#"<div class="app-title">
+    <h1>{title}</h1>
+    <div class="actions">{tenant_subtitle}{date_pills}{export_btn}</div>
+</div>
+<div class="card">
     <div class="tenant-info">{intro}</div>
     {filters}
     <table>
@@ -1960,6 +2169,9 @@ async fn render_flows_list(
     {pagination}
 </div>"#,
                 title = list_title,
+                tenant_subtitle = tenant_subtitle,
+                date_pills = date_pills,
+                export_btn = export_btn,
                 intro = intro,
                 counterparty_label = counterparty_label,
                 filters = filters_form,
