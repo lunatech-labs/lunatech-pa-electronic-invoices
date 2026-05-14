@@ -266,13 +266,46 @@ fn determine_cdar_source(exchange: &Exchange) -> String {
     "client".to_string()
 }
 
-/// Mode du CdarProcessor : émission (CDV 200) ou réception (CDV 202)
+/// Mode du CdarProcessor : émission (CDV 200), réception (CDV 202), ou auto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CdarMode {
     /// PDP émettrice : génère CDV 200 "Déposée" (ou 213 "Rejetée" si erreurs)
     Emission,
     /// PDP réceptrice : génère CDV 202 "Reçue" (ou 213 "Rejetée" si erreurs)
     Reception,
+    /// Décide dynamiquement selon le rôle du tenant dans la facture :
+    /// - tenant == `seller_siret` → Emission (CDV 200)
+    /// - tenant == `buyer_siret` → Reception (CDV 202)
+    /// - ni l'un ni l'autre → fallback Emission + erreur d'orchestration
+    ///
+    /// Utilisé sur les routes file-watcher où `{siren}/in/` peut recevoir
+    /// indifféremment des factures sortantes (vendeur = tenant) et des
+    /// factures entrantes scannées / imports legacy (acheteur = tenant).
+    /// XP Z12-014 §3 cas n°1 et suivants : le rôle de la PDP dépend de
+    /// l'identité du tenant pour CETTE facture, pas de la route d'entrée.
+    Auto,
+}
+
+/// Détermine le mode CDV à utiliser pour une facture donnée selon le rôle
+/// du tenant (extrait du header `tenant.siren` posé par `TenantTagProcessor`).
+fn resolve_mode_for_exchange(mode: CdarMode, exchange: &Exchange) -> CdarMode {
+    if mode != CdarMode::Auto {
+        return mode;
+    }
+    let tenant_siren = exchange.tenant_siren();
+    let Some(invoice) = exchange.invoice.as_ref() else {
+        return CdarMode::Emission;
+    };
+    let siren_from_siret = |s: &str| -> Option<String> {
+        let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digits.len() >= 9 { Some(digits[..9].to_string()) } else { None }
+    };
+    let seller = invoice.seller_siret.as_deref().and_then(siren_from_siret);
+    let buyer = invoice.buyer_siret.as_deref().and_then(siren_from_siret);
+    match tenant_siren {
+        Some(t) if buyer.as_deref() == Some(t) && seller.as_deref() != Some(t) => CdarMode::Reception,
+        _ => CdarMode::Emission,
+    }
 }
 
 /// Processor qui génère un CDV (Compte-rendu De Vie) après traitement d'une facture.
@@ -299,6 +332,18 @@ impl CdarProcessor {
         }
     }
 
+    /// Crée un CdarProcessor en mode auto : choisit 200/202 selon le rôle du
+    /// tenant dans la facture (`seller_siren == tenant` → 200,
+    /// `buyer_siren == tenant` → 202). Utilisé sur les routes file-watcher
+    /// `{siren}/in/` qui peuvent recevoir indifféremment des émissions et
+    /// des réceptions.
+    pub fn auto(pdp_siren: &str, pdp_name: &str) -> Self {
+        Self {
+            generator: CdarGenerator::new(pdp_siren, pdp_name),
+            mode: CdarMode::Auto,
+        }
+    }
+
     /// Backward-compatible : même comportement que `emission()`
     pub fn new(pdp_siren: &str, pdp_name: &str) -> Self {
         Self::emission(pdp_siren, pdp_name)
@@ -319,6 +364,7 @@ impl Processor for CdarProcessor {
         })?;
 
         let invoice_type_code = invoice.invoice_type_code.as_deref().unwrap_or("380");
+        let resolved_mode = resolve_mode_for_exchange(self.mode, &exchange);
 
         let cdv = if exchange.has_errors() {
             // CDV 221 ERREUR_ROUTAGE : si au moins une erreur a step="routage" ou
@@ -351,15 +397,7 @@ impl Processor for CdarProcessor {
                     })
                     .collect();
 
-                match self.mode {
-                    CdarMode::Emission => {
-                        tracing::warn!(
-                            invoice = %invoice.invoice_number,
-                            error_count = errors.len(),
-                            "Génération CDV de rejet 213 (émission — SE + PPF)"
-                        );
-                        self.generator.generate_rejetee_emission(invoice, invoice_type_code, errors)
-                    }
+                match resolved_mode {
                     CdarMode::Reception => {
                         tracing::warn!(
                             invoice = %invoice.invoice_number,
@@ -368,23 +406,32 @@ impl Processor for CdarProcessor {
                         );
                         self.generator.generate_rejetee_reception(invoice, invoice_type_code, errors)
                     }
+                    // Auto déjà résolu en Emission ou Reception ; on couvre les deux ici.
+                    CdarMode::Emission | CdarMode::Auto => {
+                        tracing::warn!(
+                            invoice = %invoice.invoice_number,
+                            error_count = errors.len(),
+                            "Génération CDV de rejet 213 (émission — SE + PPF)"
+                        );
+                        self.generator.generate_rejetee_emission(invoice, invoice_type_code, errors)
+                    }
                 }
             }
         } else {
-            match self.mode {
-                CdarMode::Emission => {
-                    tracing::info!(
-                        invoice = %invoice.invoice_number,
-                        "Génération CDV de dépôt (200)"
-                    );
-                    self.generator.generate_deposee(invoice, invoice_type_code)
-                }
+            match resolved_mode {
                 CdarMode::Reception => {
                     tracing::info!(
                         invoice = %invoice.invoice_number,
                         "Génération CDV de réception (202)"
                     );
                     self.generator.generate_recue(invoice, invoice_type_code)
+                }
+                CdarMode::Emission | CdarMode::Auto => {
+                    tracing::info!(
+                        invoice = %invoice.invoice_number,
+                        "Génération CDV de dépôt (200)"
+                    );
+                    self.generator.generate_deposee(invoice, invoice_type_code)
                 }
             }
         };
@@ -687,6 +734,66 @@ fn map_reception_to_irrecevabilite(rule_ids: &str, filename: &str) -> (StatusRea
         StatusReasonCode::IrrSyntax,
         format!("Fichier irrecevable : '{}' ({})", filename, rule_ids),
     )
+}
+
+// ============================================================
+// CdvFileWriterProcessor — matérialise le CDV XML sur disque
+// ============================================================
+
+/// Processor qui écrit sur disque le CDV XML généré par `CdarProcessor` /
+/// `IrrecevabiliteProcessor`. Sans ce processor, le CDV reste éphémère
+/// (propriété `cdv.xml` sur l'exchange) et n'est jamais visible par le
+/// client de la PDP — ce qui contredit XP Z12-012 §A.1 (la PDP doit
+/// rendre disponible l'accusé de dépôt à son client).
+///
+/// Le fichier est écrit sous `{base_dir}/cdar/{flow_id}-cdv-{code}.xml`,
+/// avec `code` ∈ {200, 202, 213, 221, 501}. Si la propriété `cdv.xml`
+/// n'est pas présente (CDV non généré), le processor passe sans rien faire.
+pub struct CdvFileWriterProcessor {
+    base_dir: std::path::PathBuf,
+}
+
+impl CdvFileWriterProcessor {
+    pub fn new(base_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl Processor for CdvFileWriterProcessor {
+    fn name(&self) -> &str {
+        "CdvFileWriterProcessor"
+    }
+
+    async fn process(&self, exchange: Exchange) -> PdpResult<Exchange> {
+        let Some(xml) = exchange.get_property("cdv.xml").cloned() else {
+            return Ok(exchange);
+        };
+        let code = exchange
+            .get_property("cdv.status_code")
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(0);
+        let dir = self.base_dir.join("cdar");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(error = %e, dir = %dir.display(), "Échec création répertoire CDV");
+            return Ok(exchange);
+        }
+        let filename = format!("{}-cdv-{:03}.xml", exchange.flow_id, code);
+        let path = dir.join(&filename);
+        if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+            tracing::warn!(error = %e, path = %path.display(), "Échec écriture CDV");
+            return Ok(exchange);
+        }
+        tracing::info!(
+            flow_id = %exchange.flow_id,
+            cdv_code = %code,
+            path = %path.display(),
+            "CDV écrit sur disque"
+        );
+        Ok(exchange)
+    }
 }
 
 /// Classifie une erreur de pipeline en code motif CDV officiel

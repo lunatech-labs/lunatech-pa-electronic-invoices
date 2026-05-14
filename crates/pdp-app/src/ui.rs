@@ -2878,6 +2878,12 @@ fn render_flow_detail(
                     f = html_escape(flow_id), s = html_escape(siren),
                 ));
             }
+            if let Some(code) = doc.generated_cdv_status_code {
+                links.push(format!(
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv?siren={s}">⬇️ CDV {code} (généré)</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren), code = code,
+                ));
+            }
             if links.is_empty() {
                 String::new()
             } else {
@@ -2956,6 +2962,34 @@ pub async fn handle_download_xml(
         None => return (StatusCode::NOT_FOUND, "raw_xml absent (Factur-X ou non indexé)").into_response(),
     };
     let filename = doc.source_filename.unwrap_or_else(|| format!("{}.xml", flow_id));
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "application/xml; charset=utf-8".parse().unwrap());
+    if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
+        headers.insert("content-disposition", v);
+    }
+    (StatusCode::OK, headers, xml).into_response()
+}
+
+/// GET /ui/flows/{flowId}/download/cdv
+/// Télécharge le CDV (Compte-rendu De Vie) XML généré par notre PDP lors
+/// du dépôt de la facture (CDV 200/202/213/221/501). Stocké dans ES via
+/// `ExchangeDocument.generated_cdv_xml`.
+pub async fn handle_download_cdv(
+    State(state): State<Arc<AppState>>,
+    crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
+    Path(flow_id): Path<String>,
+) -> impl IntoResponse {
+    let siren = siren.as_str();
+    let doc = match lookup_doc(&state, siren, &flow_id).await {
+        Some(d) => d,
+        None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
+    };
+    let xml = match doc.generated_cdv_xml {
+        Some(x) => x,
+        None => return (StatusCode::NOT_FOUND, "Aucun CDV généré pour ce flux").into_response(),
+    };
+    let code = doc.generated_cdv_status_code.unwrap_or(0);
+    let filename = format!("cdv-{:03}-{}.xml", code, flow_id);
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("content-type", "application/xml; charset=utf-8".parse().unwrap());
     if let Ok(v) = format!("attachment; filename=\"{}\"", filename).parse() {
@@ -3220,6 +3254,8 @@ mod tests {
             status: "DISTRIBUÉ".into(),
             error_count: 0,
             cdv_status_code: None,
+            generated_cdv_xml: None,
+            generated_cdv_status_code: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,

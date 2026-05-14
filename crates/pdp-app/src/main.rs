@@ -1374,8 +1374,16 @@ async fn build_router(
                 ));
             }
 
-            // CDAR émission (CDV 200, 213 ou 221 selon les erreurs)
-            builder = builder.process(Box::new(pdp_cdar::CdarProcessor::emission(pdp_id, pdp_name)));
+            // CDAR auto : génère CDV 200 (Déposée) si le tenant est vendeur de
+            // la facture, CDV 202 (Reçue) s'il en est l'acheteur. XP Z12-014
+            // §3 (Cas d'usage) — le rôle de la PDP dépend de l'identité du
+            // tenant *pour cette facture*, pas de la route d'entrée. Traitement
+            // par lot : 1 facture = 1 exchange = 1 CDV, donc chaque facture du
+            // lot reçoit son propre CDV calé sur son seller/buyer.
+            builder = builder.process(Box::new(pdp_cdar::CdarProcessor::auto(pdp_id, pdp_name)));
+            // Matérialise le CDV XML dans {out}/cdar/{flow_id}-cdv-{code}.xml
+            // (XP Z12-012 §A.1 — la PDP doit rendre disponible le CDV au client).
+            builder = builder.process(Box::new(pdp_cdar::CdvFileWriterProcessor::new(out_path.clone())));
 
             // Destination + trace finale + événement Distributed
             builder = builder
@@ -1875,6 +1883,10 @@ fn add_reception_processors(
         builder = builder.process(Box::new(pdp_cdar::CdarProcessor::reception(
             &config.pdp.id,
             &config.pdp.name,
+        )));
+        // Matérialise le CDV de réception dans {destination.path}/cdar/
+        builder = builder.process(Box::new(pdp_cdar::CdvFileWriterProcessor::new(
+            &route_config.destination.path,
         )));
     }
 
@@ -3061,6 +3073,8 @@ mod tests {
             status: "DISTRIBUÉ".to_string(),
             error_count: 0,
             cdv_status_code: None,
+            generated_cdv_xml: None,
+            generated_cdv_status_code: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,

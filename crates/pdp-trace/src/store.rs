@@ -86,6 +86,16 @@ pub struct ExchangeDocument {
     /// Format de la conversion (`UBL`, `CII`, `Factur-X`) si `converted_xml` est présent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub converted_format: Option<String>,
+    /// XML du CDV (Compte-rendu De Vie) **généré par notre PDP** lors du dépôt :
+    /// CDV 200 Déposée, 213 Rejetée, 221 ERREUR_ROUTAGE, 202 Reçue ou 501 Irrecevable.
+    /// Distinct de `cdv_status_code` (qui ne porte que les CDV REÇUS d'acteurs
+    /// externes : 204/205/210/212…). Ce champ permet de servir le CDV via l'UI
+    /// et d'avoir l'XML auditable (XP Z12-012 §A.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_cdv_xml: Option<String>,
+    /// Code statut AFNOR du CDV généré par notre PDP (200/202/213/221/501).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_cdv_status_code: Option<u16>,
     pub attachment_count: usize,
     pub attachment_filenames: Vec<String>,
     pub events: Vec<EventEntry>,
@@ -318,6 +328,8 @@ impl TraceStore {
                     "raw_pdf_base64": { "type": "binary" },
                     "converted_xml": { "type": "text", "index": true },
                     "converted_format": { "type": "keyword" },
+                    "generated_cdv_xml": { "type": "text", "index": false },
+                    "generated_cdv_status_code": { "type": "short" },
                     "attachment_count": { "type": "integer" },
                     "attachment_filenames": { "type": "keyword" },
                     "events": {
@@ -471,6 +483,25 @@ impl TraceStore {
             // CdvReceptionProcessor, qui pose `cdv.received=true`) ou les
             // statuts simulés par la démo (POST direct via _update_by_query).
             cdv_status_code: if exchange.get_property("cdv.received").is_some() {
+                exchange
+                    .get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+            } else {
+                None
+            },
+            // CDV généré par notre PDP (200/202/213/221/501) — capté UNIQUEMENT
+            // s'il n'a pas été reçu d'un acteur externe. Le `cdv.generated`
+            // header (posé par CdarProcessor) atteste qu'on est la source.
+            generated_cdv_xml: if exchange.get_header("cdv.generated").is_some()
+                && exchange.get_property("cdv.received").is_none()
+            {
+                exchange.get_property("cdv.xml").cloned()
+            } else {
+                None
+            },
+            generated_cdv_status_code: if exchange.get_header("cdv.generated").is_some()
+                && exchange.get_property("cdv.received").is_none()
+            {
                 exchange
                     .get_property("cdv.status_code")
                     .and_then(|s| s.parse::<u16>().ok())

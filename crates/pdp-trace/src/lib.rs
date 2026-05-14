@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! # pdp-trace — Traçabilité des flux et archivage Elasticsearch
 //!
 //! Persistance des factures, PDF et événements dans Elasticsearch.
