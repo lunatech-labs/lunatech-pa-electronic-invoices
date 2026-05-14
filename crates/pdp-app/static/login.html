@@ -6,82 +6,132 @@
     <title>Connexion — Ferrite</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif&display=swap');
+        :root {
+            --bg: #FAFAF7;
+            --bg-2: #F3F2EC;
+            --ink: #0E0E0C;
+            --ink-2: #2A2A26;
+            --muted: #6B6A62;
+            --muted-2: #9B9A91;
+            --line: #E5E3DA;
+            --line-2: #D9D6CB;
+            --accent: oklch(0.62 0.16 35);
+            --accent-ink: oklch(0.42 0.14 35);
+            --bad-soft: oklch(0.95 0.05 25);
+            --bad-ink: #8A2A1E;
+            --radius: 10px;
+            --radius-sm: 6px;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        ::selection { background: var(--accent); color: #fff; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f7fa;
-            color: #1a1a2e;
+            font-family: 'Geist','Inter',-apple-system,system-ui,sans-serif;
+            font-feature-settings: 'ss01','cv11';
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+            background: var(--bg);
+            color: var(--ink);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
+            letter-spacing: -0.005em;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(800px 360px at 80% -10%, oklch(0.95 0.05 50 / .6), transparent 60%),
+                radial-gradient(600px 300px at 0% 0%, oklch(0.96 0.02 200 / .35), transparent 60%);
+            z-index: 0;
         }
         .card {
-            background: white;
-            padding: 2.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            background: #fff;
+            padding: 2.2rem 2.4rem;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            box-shadow: 0 1px 0 rgba(15,15,12,.04), 0 8px 24px -16px rgba(15,15,12,.10);
             width: 100%;
             max-width: 380px;
+            position: relative;
+            z-index: 1;
         }
         .brand {
             text-align: center;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1.6rem;
         }
-        .brand img { width: 56px; height: 56px; }
+        .brand img { width: 48px; height: 48px; border-radius: 10px; }
         .brand h1 {
-            font-size: 1.4rem;
-            margin-top: 0.5rem;
-            color: #1a1a2e;
+            font-size: 1.5rem;
+            font-weight: 500;
+            letter-spacing: -0.025em;
+            margin-top: 0.6rem;
+            color: var(--ink);
         }
         .brand p {
-            color: #666;
-            font-size: 0.9rem;
-            margin-top: 0.2rem;
+            color: var(--muted);
+            font-size: 11px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin-top: 0.4rem;
         }
-        form { display: flex; flex-direction: column; gap: 0.8rem; }
+        form { display: flex; flex-direction: column; gap: 0.9rem; }
         label {
-            font-size: 0.85rem;
-            color: #555;
+            font-size: 12.5px;
+            color: var(--ink-2);
             font-weight: 500;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
         }
         input[type="email"], input[type="password"] {
             width: 100%;
-            padding: 0.7rem 0.9rem;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 0.95rem;
+            padding: 0.65rem 0.85rem;
+            border: 1px solid var(--line-2);
+            border-radius: var(--radius-sm);
+            font-size: 13.5px;
+            font-family: inherit;
+            color: var(--ink);
+            background: #fff;
+            transition: border-color .12s ease, box-shadow .12s ease;
         }
         input:focus {
             outline: none;
-            border-color: #16213e;
-            box-shadow: 0 0 0 3px rgba(22, 33, 62, 0.1);
+            border-color: var(--ink-2);
+            box-shadow: 0 0 0 3px rgba(15,15,12,.06);
         }
         button {
-            background: #16213e;
-            color: white;
-            padding: 0.8rem;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            margin-top: 0.5rem;
-        }
-        button:hover { background: #0f1828; }
-        .err {
-            background: #ffebee;
-            color: #c62828;
+            background: var(--ink);
+            color: #FAFAF7;
             padding: 0.7rem;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            margin-bottom: 0.5rem;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 13.5px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            margin-top: 0.4rem;
+            transition: background .12s ease;
+            letter-spacing: -0.005em;
+        }
+        button:hover { background: #000; }
+        .err {
+            background: var(--bad-soft);
+            color: var(--bad-ink);
+            border: 1px solid oklch(0.85 0.08 25);
+            padding: 0.6rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-size: 12.5px;
+            margin-bottom: 0.3rem;
         }
         .footer {
             text-align: center;
-            margin-top: 1.2rem;
-            font-size: 0.8rem;
-            color: #888;
+            margin-top: 1.3rem;
+            font-size: 12px;
+            color: var(--muted);
         }
     </style>
 </head>
@@ -90,7 +140,7 @@
         <div class="brand">
             <img src="/favicon.png" alt="Ferrite">
             <h1>Ferrite</h1>
-            <p>Plateforme Agréée — connexion</p>
+            <p>Plateforme Agréée · connexion</p>
         </div>
         <!--ERR-->
         <form method="post" action="/login">

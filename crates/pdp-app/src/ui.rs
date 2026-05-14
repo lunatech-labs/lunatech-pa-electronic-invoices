@@ -27,276 +27,443 @@ use crate::server::AppState;
 // ============================================================
 
 /// Style CSS partagé par toutes les pages UI.
+///
+/// Design system aligné sur `assets/design/ferrite-landing.html` :
+/// palette cream + ink + accent rouille, typo Geist (UI) + Geist Mono (chiffres
+/// et identifiants) + Instrument Serif italique (accents éditoriaux).
 const CSS: &str = r#"
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif&display=swap');
+
+:root {
+    --bg: #FAFAF7;
+    --bg-2: #F3F2EC;
+    --ink: #0E0E0C;
+    --ink-2: #2A2A26;
+    --muted: #6B6A62;
+    --muted-2: #9B9A91;
+    --line: #E5E3DA;
+    --line-2: #D9D6CB;
+    --card: #FFFFFF;
+    --accent: oklch(0.62 0.16 35);
+    --accent-soft: oklch(0.95 0.04 50);
+    --accent-ink: oklch(0.42 0.14 35);
+    --good: oklch(0.55 0.12 150);
+    --good-soft: oklch(0.95 0.04 150);
+    --good-ink: #1E6A45;
+    --warn: oklch(0.70 0.14 75);
+    --warn-soft: oklch(0.96 0.05 75);
+    --warn-ink: #7A5A14;
+    --bad: oklch(0.58 0.18 25);
+    --bad-soft: oklch(0.95 0.05 25);
+    --bad-ink: #8A2A1E;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 0 rgba(15,15,12,.04), 0 8px 24px -16px rgba(15,15,12,.10);
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--accent); color: #fff; }
+
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #f5f7fa;
-    color: #1a1a2e;
+    font-family: 'Geist','Inter',-apple-system,system-ui,sans-serif;
+    font-feature-settings: 'ss01','cv11';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background: var(--bg);
+    color: var(--ink);
     min-height: 100vh;
     line-height: 1.5;
+    letter-spacing: -0.005em;
 }
+
+.mono, code { font-family: 'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace; }
+.serif { font-family: 'Instrument Serif',Georgia,serif; font-style: italic; font-weight: 400; }
+
 header {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    color: white;
-    padding: 1rem 2rem;
+    background: rgba(250,250,247,.85);
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    padding: 0.9rem 2rem;
     display: flex;
     align-items: center;
     gap: 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 50;
 }
 header .logo {
-    height: 48px;
-    width: 48px;
+    height: 28px;
+    width: 28px;
     flex-shrink: 0;
-    border-radius: 8px;
+    border-radius: 7px;
 }
 header .brand {
     display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    margin-right: 1.5rem;
+    align-items: baseline;
+    gap: 10px;
+    margin-right: 1.2rem;
 }
 header .brand .name {
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     line-height: 1;
+    color: var(--ink);
 }
 header .brand .tagline {
-    font-size: 0.8rem;
-    opacity: 0.6;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-left: 1px solid var(--line);
+    padding-left: 10px;
     line-height: 1;
 }
 header h1 {
-    font-size: 1.05rem;
-    font-weight: 500;
-    opacity: 0.85;
+    font-size: 0.9rem;
+    font-weight: 450;
+    color: var(--muted);
     margin: 0;
+    letter-spacing: 0;
 }
-header nav { margin-left: auto; }
+header nav { margin-left: auto; display: flex; align-items: center; gap: 1.4rem; }
 header nav a {
-    color: rgba(255,255,255,0.85);
+    color: var(--ink-2);
     text-decoration: none;
-    margin-right: 1.2rem;
-    font-size: 0.95rem;
+    font-size: 13.5px;
+    font-weight: 450;
+    transition: color .12s ease;
 }
-header nav a:hover { color: white; text-decoration: underline; }
-header nav a.active { color: white; font-weight: 600; }
-main { max-width: 1200px; margin: 2rem auto; padding: 0 1.5rem; }
+header nav a:hover { color: var(--ink); }
+header nav a.active { color: var(--ink); font-weight: 500; }
+
+main { max-width: 1200px; margin: 2.2rem auto; padding: 0 1.75rem; }
+
 .kpi-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 1rem;
-    margin-bottom: 2rem;
+    gap: 0.9rem;
+    margin-bottom: 1.6rem;
 }
 .kpi-card {
-    background: white;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.2rem 1rem;
+    position: relative;
+    overflow: hidden;
 }
-.kpi-label { color: #666; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.kpi-value { font-size: 2rem; font-weight: 700; margin-top: 0.4rem; }
-.kpi-value.success { color: #2e7d32; }
-.kpi-value.warning { color: #ed6c02; }
-.kpi-value.error { color: #d32f2f; }
-.card {
-    background: white;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    margin-bottom: 1.5rem;
-}
-.card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #16213e; }
-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 0.7rem 0.5rem; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
-th { color: #666; font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
-tr:hover { background: #f9fafb; }
-.badge {
-    display: inline-block;
-    padding: 0.2rem 0.6rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
+.kpi-label {
+    color: var(--muted);
+    font-size: 11px;
     text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
 }
-.badge-success { background: #e8f5e9; color: #2e7d32; }
-.badge-error { background: #ffebee; color: #d32f2f; }
-.badge-warning { background: #fff3e0; color: #ed6c02; }
-.badge-info { background: #e3f2fd; color: #1565c0; }
-.badge-default { background: #f0f0f0; color: #555; }
+.kpi-value {
+    font-size: 1.8rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    font-feature-settings: 'tnum';
+}
+.kpi-value.success { color: var(--good-ink); }
+.kpi-value.warning { color: var(--warn-ink); }
+.kpi-value.error { color: var(--bad-ink); }
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.4rem 1.5rem 1.3rem;
+    margin-bottom: 1.2rem;
+}
+.card h2 {
+    font-size: 1.05rem;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    margin-bottom: 1rem;
+    color: var(--ink);
+}
+
+table { width: 100%; border-collapse: collapse; }
+thead { background: #FCFBF7; }
+th, td {
+    padding: 0.7rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+}
+th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+tr:hover td { background: #FCFBF7; }
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    border: 1px solid transparent;
+    background: #fff;
+}
+.badge::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.8;
+}
+.badge-success {
+    color: var(--good-ink);
+    border-color: oklch(0.85 0.08 150);
+    background: var(--good-soft);
+}
+.badge-error {
+    color: var(--bad-ink);
+    border-color: oklch(0.85 0.08 25);
+    background: var(--bad-soft);
+}
+.badge-warning {
+    color: var(--warn-ink);
+    border-color: oklch(0.85 0.07 75);
+    background: var(--warn-soft);
+}
+.badge-info {
+    color: var(--accent-ink);
+    border-color: oklch(0.86 0.06 50);
+    background: var(--accent-soft);
+}
+.badge-default {
+    color: var(--ink-2);
+    border-color: var(--line-2);
+    background: #fff;
+}
+.badge-default::before { display: none; }
+
 .filters {
     display: flex;
-    gap: 0.8rem;
+    gap: 0.6rem;
     flex-wrap: wrap;
     margin-bottom: 1rem;
+    align-items: center;
 }
 .filters input, .filters select {
-    padding: 0.5rem 0.8rem;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    background: white;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    background: #fff;
+    font-family: inherit;
+    color: var(--ink);
+    transition: border-color .12s ease;
+}
+.filters input:focus, .filters select:focus {
+    outline: none;
+    border-color: var(--ink-2);
 }
 .filters button {
-    padding: 0.5rem 1.2rem;
-    background: #16213e;
-    color: white;
-    border: none;
-    border-radius: 6px;
+    padding: 0.45rem 1rem;
+    background: var(--ink);
+    color: #FAFAF7;
+    border: 1px solid var(--ink);
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background .12s ease;
 }
-.filters button:hover { background: #1a1a2e; }
-a { color: #1565c0; text-decoration: none; }
-a:hover { text-decoration: underline; }
-.empty {
-    text-align: center;
-    padding: 3rem;
-    color: #999;
-}
+.filters button:hover { background: #000; }
+
+a { color: var(--accent-ink); text-decoration: none; transition: color .12s ease; }
+a:hover { color: var(--accent); }
+
+.empty { text-align: center; padding: 3rem; color: var(--muted); }
+
 .timeline { position: relative; padding-left: 2rem; }
 .timeline::before {
     content: '';
     position: absolute;
     left: 0.5rem; top: 0; bottom: 0;
-    width: 2px;
-    background: #ddd;
+    width: 1px;
+    background: var(--line);
 }
 .timeline-item { position: relative; padding-bottom: 1.2rem; }
 .timeline-item::before {
     content: '';
     position: absolute;
-    left: -1.7rem; top: 0.3rem;
-    width: 12px; height: 12px;
+    left: -1.85rem; top: 0.35rem;
+    width: 10px; height: 10px;
     border-radius: 50%;
-    background: #16213e;
-    border: 2px solid white;
-    box-shadow: 0 0 0 2px #16213e;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--accent);
 }
-.timeline-item .ts { color: #888; font-size: 0.8rem; }
-.timeline-item .label { font-weight: 600; }
-.timeline-item .msg { color: #555; font-size: 0.9rem; margin-top: 0.2rem; }
-.timeline-item.timeline-error::before { background: #d32f2f; box-shadow: 0 0 0 2px #d32f2f; }
-.timeline-item.timeline-error .label { color: #d32f2f; }
-.timeline-item.timeline-error .msg { color: #b71c1c; }
-dl.kv { display: grid; grid-template-columns: 200px 1fr; gap: 0.6rem 1rem; }
-dl.kv dt { color: #666; font-weight: 500; }
-dl.kv dd { color: #1a1a2e; }
+.timeline-item .ts { color: var(--muted-2); font-size: 11.5px; font-family: 'Geist Mono',monospace; }
+.timeline-item .label { font-weight: 500; margin-top: 2px; }
+.timeline-item .msg { color: var(--muted); font-size: 13px; margin-top: 0.2rem; }
+.timeline-item.timeline-error::before { background: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.timeline-item.timeline-error .label { color: var(--bad-ink); }
+.timeline-item.timeline-error .msg { color: var(--bad-ink); }
+
+dl.kv { display: grid; grid-template-columns: 200px 1fr; gap: 0.7rem 1rem; }
+dl.kv dt { color: var(--muted); font-weight: 450; font-size: 13px; }
+dl.kv dd { color: var(--ink); font-size: 13.5px; }
+
 .banner {
-    background: #fff3e0;
-    color: #5a3a00;
-    padding: 0.8rem 1.2rem;
-    border-radius: 6px;
-    margin-bottom: 1.5rem;
+    background: var(--warn-soft);
+    color: var(--warn-ink);
+    border: 1px solid oklch(0.85 0.07 75);
+    padding: 0.7rem 1.1rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 1.2rem;
+    font-size: 13px;
 }
-.dl-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+
+.dl-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .dl-btn {
-    display: inline-block;
-    padding: 0.5rem 1rem;
-    background: #16213e;
-    color: white !important;
-    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.45rem 0.9rem;
+    background: var(--ink);
+    color: #FAFAF7 !important;
+    border-radius: var(--radius-sm);
     text-decoration: none;
-    font-size: 0.9rem;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background .12s ease;
 }
-.dl-btn:hover { background: #1a1a2e; text-decoration: none; }
+.dl-btn:hover { background: #000; text-decoration: none; }
+
 .pj-badge {
-    display: inline-block;
-    padding: 0.15rem 0.55rem;
-    border-radius: 12px;
-    background: #f0ecf9;
-    color: #534ab7;
-    font-size: 0.8rem;
-    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: #fff;
+    color: var(--ink-2);
+    border: 1px solid var(--line-2);
+    font-family: 'Geist Mono',monospace;
+    font-size: 11px;
+    font-weight: 500;
     white-space: nowrap;
 }
 .err-badge {
-    display: inline-block;
-    padding: 0.15rem 0.55rem;
-    border-radius: 12px;
-    background: #ffebee;
-    color: #d32f2f;
-    font-size: 0.8rem;
-    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--bad-soft);
+    color: var(--bad-ink);
+    border: 1px solid oklch(0.85 0.08 25);
+    font-size: 11.5px;
+    font-weight: 500;
     white-space: nowrap;
 }
-.siret-sub { color: #999; font-size: 0.75rem; margin-top: 0.1rem; }
+
+.siret-sub {
+    color: var(--muted-2);
+    font-size: 11px;
+    margin-top: 0.1rem;
+    font-family: 'Geist Mono',monospace;
+}
+
 .dir-tag {
     display: inline-block;
     width: 1.1rem;
     height: 1.1rem;
     line-height: 1.1rem;
     text-align: center;
-    border-radius: 50%;
-    font-size: 0.7rem;
-    font-weight: 700;
-    margin-right: 0.3rem;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 0.4rem;
+    font-family: 'Geist Mono',monospace;
 }
-.dir-out { background: #e3f2fd; color: #1565c0; }
-.dir-in { background: #fff3e0; color: #ed6c02; }
+.dir-out { background: var(--accent-soft); color: var(--accent-ink); }
+.dir-in  { background: var(--good-soft); color: var(--good-ink); }
+
 .tenant-info {
-    background: #f0ecf9;
-    border-left: 3px solid #534ab7;
-    padding: 0.7rem 1rem;
-    border-radius: 0 6px 6px 0;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    padding: 0.65rem 1rem;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     margin-bottom: 1rem;
-    font-size: 0.9rem;
-    color: #16213e;
+    font-size: 13px;
+    color: var(--ink-2);
 }
+
 .entreprise-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 0.8rem;
+    gap: 0.75rem;
 }
 .entreprise-card {
     display: block;
-    padding: 1.2rem;
-    background: white;
-    border: 1px solid #e3e6ea;
-    border-radius: 8px;
+    padding: 1.1rem 1.2rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
     text-decoration: none;
-    color: #1a1a2e;
-    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    color: var(--ink);
+    transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 .entreprise-card:hover {
-    border-color: #534ab7;
-    box-shadow: 0 4px 12px rgba(83,74,183,0.12);
+    border-color: var(--ink-2);
+    box-shadow: var(--shadow);
     transform: translateY(-1px);
     text-decoration: none;
 }
 .entreprise-name {
-    font-weight: 600;
-    font-size: 1.05rem;
-    margin-bottom: 0.3rem;
+    font-weight: 500;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.25rem;
 }
 .entreprise-siren {
-    color: #666;
-    font-size: 0.85rem;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-family: 'Geist Mono',monospace;
 }
+
 header nav .nav-user {
-    color: rgba(255,255,255,0.55);
-    font-size: 0.85rem;
-    margin-left: 1.2rem;
-    margin-right: 0.6rem;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-family: 'Geist Mono',monospace;
 }
-header nav form.logout-form {
-    display: inline;
-    margin-left: 0.6rem;
-}
+header nav form.logout-form { display: inline; }
 header nav form.logout-form button {
-    background: none;
-    border: 1px solid rgba(255,255,255,0.25);
-    color: rgba(255,255,255,0.85);
-    padding: 0.25rem 0.7rem;
-    border-radius: 6px;
+    background: transparent;
+    border: 1px solid var(--line-2);
+    color: var(--ink);
+    padding: 0.3rem 0.8rem;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 12.5px;
+    font-weight: 500;
     font-family: inherit;
+    transition: background .12s ease, border-color .12s ease;
 }
 header nav form.logout-form button:hover {
-    border-color: rgba(255,255,255,0.6);
-    color: white;
+    background: var(--bg-2);
+    border-color: var(--ink-2);
 }
 "#;
 
@@ -1212,13 +1379,27 @@ fn build_pagination(
 // ============================================================
 
 /// Mappe un statut pipeline interne (`FlowStatus`) sur l'étape AFNOR
-/// correspondante du cycle de vie facture (XP Z12-012). Renvoie `None` pour
-/// les étapes purement internes (PARSING, VALIDATION, TRANSFORMATION, …) qui
-/// ne doivent pas être visibles côté utilisateur.
+/// correspondante du cycle de vie facture (XP Z12-012).
+///
+/// Tous les états « in-flight » côté PDP (REÇU, PARSING/PARSÉ,
+/// VALIDATION/VALIDÉ, TRANSFORMATION/TRANSFORMÉ, DISTRIBUTION) collapse sur
+/// `Déposée` (CDV 200) : pour l'utilisateur, la facture est entre les mains
+/// de la plateforme et son étape AFNOR n'évolue qu'à `Émise` / `Mise à
+/// disposition` une fois la distribution effective.
+///
+/// Cela couvre aussi les flux ingérés par fichier (FileEndpoint), pour
+/// lesquels aucun event `Received` n'est publié sur le bus : sans ce
+/// fallback, leur timeline serait vide (cf. handler HTTP inbound qui, lui,
+/// publie un `Received` explicite).
 fn pipeline_event_to_afnor(status: &str, dir: DisplayDirection) -> Option<(&'static str, &'static str)> {
     match status.to_uppercase().as_str() {
-        "REÇU" | "RECU" | "RECEIVED" => Some(("Déposée", "badge-info")),
-        "DISTRIBUÉ" | "DISTRIBUE" | "DISTRIBUTED" | "ACQUITTÉ" | "ACQUITTE" | "ACKNOWLEDGED" => {
+        "REÇU" | "RECU" | "RECEIVED"
+        | "PARSING" | "PARSÉ" | "PARSE" | "PARSED"
+        | "VALIDATION" | "VALIDATING" | "VALIDÉ" | "VALIDE" | "VALIDATED"
+        | "TRANSFORMATION" | "TRANSFORMING" | "TRANSFORMÉ" | "TRANSFORME" | "TRANSFORMED"
+        | "DISTRIBUTION" | "DISTRIBUTING" => Some(("Déposée", "badge-info")),
+        "DISTRIBUÉ" | "DISTRIBUE" | "DISTRIBUTED" | "ATTENTE_ACK" | "WAITINGACK"
+        | "WAITING" | "ACQUITTÉ" | "ACQUITTE" | "ACKNOWLEDGED" => {
             match dir {
                 DisplayDirection::Emise => Some(("Émise", "badge-success")),
                 DisplayDirection::Recue => Some(("Mise à disposition", "badge-success")),
@@ -1226,7 +1407,6 @@ fn pipeline_event_to_afnor(status: &str, dir: DisplayDirection) -> Option<(&'sta
         }
         "REJETÉ" | "REJETE" | "REJECTED" => Some(("Rejetée", "badge-error")),
         "ANNULÉ" | "ANNULE" | "CANCELLED" => Some(("Annulée", "badge-warning")),
-        // Étapes purement internes du pipeline — ne pas afficher.
         _ => None,
     }
 }
@@ -1295,6 +1475,18 @@ fn render_timeline(
             Item::Error(e) => e.timestamp.as_str(),
         };
         ta.cmp(tb)
+    });
+
+    // 2bis. Déduplication des AfnorEvent consécutifs avec le même libellé.
+    //       Plusieurs events pipeline (REÇU + PARSÉ + VALIDÉ) collapse tous
+    //       sur "Déposée" ; on ne garde que le premier (timestamp le plus
+    //       ancien) pour éviter de répéter la même étape AFNOR.
+    items.dedup_by(|b, a| match (a, b) {
+        (
+            Item::AfnorEvent { label: la, .. },
+            Item::AfnorEvent { label: lb, .. },
+        ) => la == lb,
+        _ => false,
     });
 
     // 3. Tronque après la première erreur métier.

@@ -951,6 +951,59 @@ async fn test_timeline_truncates_after_first_error() {
 }
 
 #[tokio::test]
+async fn test_timeline_deposee_sans_event_recu() {
+    // Régression : les factures ingérées par FileEndpoint n'ont pas d'event
+    // `REÇU` publié sur le bus (seul l'inbound HTTP publie EventKind::Received).
+    // Leur trace contient uniquement des events internes (PARSÉ, VALIDÉ).
+    // La timeline doit malgré tout afficher "Déposée" — sans répétition —
+    // sinon une facture en cours de traitement apparaît avec une timeline vide.
+    let mut docs = seed();
+    let target_id = "ex-deposee-no-recu";
+    let mut d = doc(
+        target_id, "123456789", "987654321", "INV-DEPOSEE", "VALIDÉ", 0,
+        "2026-05-01", "2026-05-01T09:00:00Z",
+    );
+    d.events = vec![
+        pdp_trace::store::EventEntry {
+            id: "e1".into(), route_id: "rt".into(), status: "PARSÉ".into(),
+            message: "parsé".into(), error_detail: None,
+            timestamp: "2026-05-01T09:00:01Z".into(),
+        },
+        pdp_trace::store::EventEntry {
+            id: "e2".into(), route_id: "rt".into(), status: "VALIDÉ".into(),
+            message: "validé".into(), error_detail: None,
+            timestamp: "2026-05-01T09:00:02Z".into(),
+        },
+    ];
+    docs.push(d);
+
+    let state = build_state(Arc::new(InMemoryTraceBackend::new(docs)));
+    let (_, body) =
+        get_html(state, &format!("/ui/flows/flow-{target_id}?siren=123456789")).await;
+
+    let timeline_start = body.find(r#"class="timeline""#).expect("bloc timeline");
+    let timeline_end = body[timeline_start..].find("</div></div>").map(|p| timeline_start + p).unwrap_or(body.len());
+    let timeline = &body[timeline_start..timeline_end];
+
+    assert!(
+        timeline.contains("Déposée"),
+        "PARSÉ/VALIDÉ doivent collapse sur 'Déposée' (CDV 200) ; got=\n{timeline}"
+    );
+    // Pas de répétition : un seul item "Déposée" dans la timeline.
+    let occurrences = timeline.matches(">Déposée<").count();
+    assert_eq!(
+        occurrences, 1,
+        "Plusieurs events internes consécutifs doivent dédupliquer sur un seul 'Déposée' ; got {occurrences} occurrences\n{timeline}"
+    );
+    // Les libellés bruts du pipeline ne doivent jamais apparaître.
+    assert!(!timeline.contains(">PARSÉ<"));
+    assert!(!timeline.contains(">VALIDÉ<"));
+    // Pas d'event REÇU disponible → on doit malgré tout avoir une timeline non vide.
+    assert!(!timeline.contains("Aucune étape AFNOR"));
+    assert!(!timeline.contains("Aucun événement"));
+}
+
+#[tokio::test]
 async fn test_status_with_errors_shows_rejetee_not_raw_status() {
     // Une facture avec error_count > 0 doit afficher le badge "Rejetée" (CDV
     // 213, badge rouge) dans la liste ET le détail, même si son statut brut

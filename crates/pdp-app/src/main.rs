@@ -2619,16 +2619,50 @@ async fn cmd_demo_populate(
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
-    // 0. Reset optionnel des indices ES avant de soumettre
+    // 0. Reset optionnel des indices ES avant de soumettre.
+    //    ES 8.x impose `action.destructive_requires_name=true` par défaut :
+    //    `DELETE /pdp-*` renvoie 400. On liste d'abord les indices via
+    //    `_cat/indices?format=json` puis on supprime chacun par nom.
     if reset {
-        let url = format!("{}/pdp-*", elasticsearch_url.trim_end_matches('/'));
-        match client.delete(&url).send().await {
+        let base = elasticsearch_url.trim_end_matches('/');
+        let list_url = format!("{}/_cat/indices/pdp-*?format=json&h=index", base);
+        match client.get(&list_url).send().await {
             Ok(r) if r.status().is_success() => {
-                println!("🗑️  Indices Elasticsearch pdp-* supprimés (reset)");
+                let indices: Vec<serde_json::Value> =
+                    r.json().await.unwrap_or_default();
+                let names: Vec<String> = indices
+                    .iter()
+                    .filter_map(|v| v.get("index").and_then(|i| i.as_str()).map(String::from))
+                    .collect();
+                if names.is_empty() {
+                    println!("🗑️  Aucun index pdp-* à supprimer");
+                } else {
+                    let mut deleted = 0usize;
+                    for name in &names {
+                        let del_url = format!("{}/{}", base, name);
+                        match client.delete(&del_url).send().await {
+                            Ok(rr) if rr.status().is_success() => deleted += 1,
+                            Ok(rr) => eprintln!(
+                                "⚠️  Échec suppression {} : {}",
+                                name,
+                                rr.status()
+                            ),
+                            Err(e) => eprintln!(
+                                "⚠️  Échec suppression {} : {}",
+                                name, e
+                            ),
+                        }
+                    }
+                    println!(
+                        "🗑️  {}/{} index pdp-* supprimés (reset)",
+                        deleted,
+                        names.len()
+                    );
+                }
             }
             Ok(r) => {
                 eprintln!(
-                    "⚠️  Reset partiel ({}) — l'indexation suivante recréera les indices",
+                    "⚠️  Listing indices ES échoué ({}) — l'indexation suivante recréera les indices",
                     r.status()
                 );
             }
