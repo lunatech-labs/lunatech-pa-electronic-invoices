@@ -5,6 +5,17 @@
 .env
 *.pem
 *.key
-.claude/worktrees/
+
+# Config Claude Code (settings perso + worktrees)
+.claude/
+
+# macOS
+.DS_Store
+
+# Runtime — créés par le pipeline / la démo, pas du code versionnable
+/errors/
+/output/http-inbound/
+/tenants/
+
 # Annuaire PPF complet (10+ Go)
 *.ppf-annuaire-*
