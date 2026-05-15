@@ -57,12 +57,15 @@ impl XmlValidateProcessor {
 
     /// Détermine le format de la facture à partir de l'exchange
     fn detect_format(exchange: &Exchange) -> Option<InvoiceFormat> {
-        // D'abord vérifier le header posé par ParseProcessor
+        // D'abord vérifier le header posé par ParseProcessor.
+        // Note : la valeur est `InvoiceFormat::to_string()` qui retourne
+        // `"Factur-X"` (avec tiret) — on accepte les deux formes pour être
+        // robustes (le sérialisé peut varier selon les versions).
         if let Some(fmt) = exchange.get_header("invoice.format") {
             return match fmt.as_str() {
                 "UBL" => Some(InvoiceFormat::UBL),
                 "CII" => Some(InvoiceFormat::CII),
-                "FacturX" => Some(InvoiceFormat::FacturX),
+                "Factur-X" | "FacturX" => Some(InvoiceFormat::FacturX),
                 _ => None,
             };
         }
@@ -100,12 +103,26 @@ impl Processor for XmlValidateProcessor {
     }
 
     async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        let is_cdar = Self::is_cdar(&exchange);
+        let format = Self::detect_format(&exchange);
+
+        // Pour Factur-X, le `body` est le PDF binaire — non parsable en UTF-8.
+        // Le XML CII embarqué a déjà été extrait et validé structurellement
+        // par `ParseProcessor` (si le parsing a réussi, le XML est bien
+        // formé). Les règles métier EN16931/BR-FR sont déjà appliquées par
+        // `ValidateProcessor` sur la `InvoiceData` parsée. On peut donc
+        // sauter le validateur XML structurel ici.
+        if matches!(format, Some(InvoiceFormat::FacturX)) {
+            tracing::debug!(
+                exchange_id = %exchange.id,
+                "XmlValidateProcessor: skip (Factur-X — body PDF, XML déjà validé via parsing)"
+            );
+            return Ok(exchange);
+        }
+
         let xml = exchange.body_as_str().map_err(|e| {
             PdpError::ValidationError(format!("Le body n'est pas du XML valide UTF-8: {}", e))
         })?.to_string();
-
-        let is_cdar = Self::is_cdar(&exchange);
-        let format = Self::detect_format(&exchange);
 
         exchange.set_status(FlowStatus::Validating);
 

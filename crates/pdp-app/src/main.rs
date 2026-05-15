@@ -2863,15 +2863,29 @@ async fn cmd_demo_populate(
             .unwrap_or("facture.xml")
             .to_string();
 
-        // Extrait le seller_siren — uniquement pour les XML (UBL/CII).
-        // Pour Factur-X PDF on ne tente pas : la pipeline d'émission file-
-        // based n'est de toute façon pas conçue pour les PDF.
-        let seller_siren = if *syntax == "UBL" || *syntax == "CII" {
-            std::str::from_utf8(&bytes)
+        // Extrait le seller_siren — XML direct pour UBL/CII, parsing du
+        // PDF Factur-X (qui embarque le XML CII) pour les PDF. La pipeline
+        // file-based accepte les PDF (FileEndpoint::poll ne filtre pas sur
+        // l'extension), donc une fixture Factur-X peut être déposée dans
+        // `tenants/{seller}/in/` exactement comme un UBL.
+        let seller_siren = match *syntax {
+            "UBL" | "CII" => std::str::from_utf8(&bytes)
                 .ok()
-                .and_then(extract_seller_siren_from_xml)
-        } else {
-            None
+                .and_then(extract_seller_siren_from_xml),
+            "FacturX" => pdp_invoice::FacturXParser::new()
+                .parse(&bytes)
+                .ok()
+                .and_then(|inv| {
+                    inv.seller_siret.as_deref().map(|siret| {
+                        siret
+                            .chars()
+                            .filter(|c| c.is_ascii_digit())
+                            .take(9)
+                            .collect::<String>()
+                    })
+                })
+                .filter(|s| s.len() == 9),
+            _ => None,
         };
 
         if let Some(siren) = seller_siren.as_deref() {
