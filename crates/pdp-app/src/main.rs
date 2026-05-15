@@ -2498,6 +2498,31 @@ async fn cmd_ereporting(
 // Démo : peuplement automatique du dashboard via POST /v1/flows
 // ============================================================
 
+/// Extrait le SIREN du vendeur (BT-30, 9 chiffres) depuis le XML brut
+/// d'une facture UBL ou CII. Implémentation pragmatique par recherche
+/// textuelle — pas besoin de parser le XML pour cette détection rapide
+/// du routage local vs distant.
+///
+/// Ordre de priorité :
+/// 1. UBL : `cac:AccountingSupplierParty//cac:PartyLegalEntity/cbc:CompanyID schemeID="0002"`
+/// 2. CII : `ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID schemeID="0002"`
+/// 3. Fallback : premier `schemeID="0002"` du document (best effort)
+fn extract_seller_siren_from_xml(xml: &str) -> Option<String> {
+    // Cherche les `schemeID="0002"` dans la première moitié du XML
+    // (le seller est toujours déclaré avant le buyer dans UBL/CII).
+    let head = &xml[..xml.len().min(8192)];
+    let needle = "schemeID=\"0002\">";
+    let pos = head.find(needle)?;
+    let after = &head[pos + needle.len()..];
+    let end = after.find('<')?;
+    let raw = after[..end].trim();
+    if raw.len() == 9 && raw.chars().all(|c| c.is_ascii_digit()) {
+        Some(raw.to_string())
+    } else {
+        None
+    }
+}
+
 async fn cmd_demo(action: DemoCommands) -> Result<()> {
     match action {
         DemoCommands::Populate {
@@ -2778,10 +2803,44 @@ async fn cmd_demo_populate(
     }
     println!("📦 {} fixtures à soumettre", files.len());
 
-    // 3. Soumettre chacune via POST /v1/flows
+    // 2bis. Détecter les tenants locaux : tout sous-répertoire de `tenants/`
+    //       qui ressemble à un SIREN (9 chiffres) est un tenant émetteur
+    //       potentiel. Les fixtures dont le seller_siren matche un tenant
+    //       local sont déposées dans `tenants/{siren}/in/` plutôt que POST
+    //       /v1/flows — pour activer la pipeline ÉMISSION (CDV 200/201) +
+    //       routage intra-PDP automatique vers l'acheteur (CDV 202/203).
+    let local_tenants: std::collections::HashSet<String> = {
+        let tenants_root = std::path::PathBuf::from("tenants");
+        if tenants_root.is_dir() {
+            std::fs::read_dir(&tenants_root)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| {
+                    e.file_name()
+                        .to_str()
+                        .filter(|n| n.len() == 9 && n.chars().all(|c| c.is_ascii_digit()))
+                        .map(String::from)
+                })
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        }
+    };
+    if !local_tenants.is_empty() {
+        println!(
+            "🏢 Tenants locaux détectés : {} → fixtures émission dispatch vers /in/",
+            local_tenants.len()
+        );
+    }
+
+    // 3. Soumettre chacune via POST /v1/flows (sauf si seller local → drop /in/)
     let flows_url = format!("{}/v1/flows", server_url.trim_end_matches('/'));
     let mut ok = 0usize;
     let mut errors = 0usize;
+    let mut routed_local = 0usize;
     for (path, syntax, mime) in &files {
         let bytes = std::fs::read(path)?;
         let sha = format!("{:x}", Sha256::digest(&bytes));
@@ -2790,6 +2849,39 @@ async fn cmd_demo_populate(
             .and_then(|s| s.to_str())
             .unwrap_or("facture.xml")
             .to_string();
+
+        // Extrait le seller_siren — uniquement pour les XML (UBL/CII).
+        // Pour Factur-X PDF on ne tente pas : la pipeline d'émission file-
+        // based n'est de toute façon pas conçue pour les PDF.
+        let seller_siren = if *syntax == "UBL" || *syntax == "CII" {
+            std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(extract_seller_siren_from_xml)
+        } else {
+            None
+        };
+
+        if let Some(siren) = seller_siren.as_deref() {
+            if local_tenants.contains(siren) {
+                // Drop dans tenants/{siren}/in/ — la pipeline émission
+                // (polling 60s) prendra le relai et générera CDV 200/201,
+                // puis LocalIntraPdpRouter route en intra-PDP si l'acheteur
+                // est aussi local → CDV 202/203 automatiques.
+                let dst = std::path::PathBuf::from("tenants")
+                    .join(siren)
+                    .join("in")
+                    .join(&filename);
+                if let Err(e) = std::fs::copy(path, &dst) {
+                    errors += 1;
+                    eprintln!("  ❌ {} → copie vers {} échouée : {}", filename, dst.display(), e);
+                } else {
+                    routed_local += 1;
+                    println!("  📥 {} → tenants/{}/in/ ({})", filename, siren, syntax);
+                }
+                continue;
+            }
+        }
+
         let tracking_id = format!(
             "DEMO-{}",
             filename
@@ -2836,6 +2928,13 @@ async fn cmd_demo_populate(
                 eprintln!("  ❌ {} → erreur réseau : {}", filename, e);
             }
         }
+    }
+    if routed_local > 0 {
+        println!(
+            "📥 {} fixture(s) déposée(s) dans tenants/*/in/ — pipeline émission \
+             les traitera au prochain cycle de polling (~60s)",
+            routed_local
+        );
     }
 
     println!();
