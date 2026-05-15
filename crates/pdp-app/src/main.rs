@@ -1266,24 +1266,29 @@ async fn build_router(
                     in_path.to_str().unwrap_or("."),
                 ));
 
-            // Producer : FileEndpoint sur {siren}/out/
-            // Si PPF configuré, utilise DynamicRoutingProducer avec fallback sur out/
-            let producer: Box<dyn pdp_core::endpoint::Producer> = if let Some(ref ppf_prod) = ppf_producer {
-                let mut dynamic = pdp_client::DynamicRoutingProducer::new(
-                    &format!("{}-dynamic-dest", route_id),
-                    ppf_prod.clone(),
-                );
+            // Producer : DynamicRoutingProducer (toujours), avec ou sans PPF.
+            // Permet à `routing.destination = INTRA-PDP` (résolu par
+            // RoutingResolverProcessor quand le buyer est sur la même PDP) de
+            // déclencher l'injection dans le channel intra-PDP — même sans
+            // Chorus Pro configuré, comme dans config-ui-demo.yaml.
+            // Fallback : FileEndpoint sur {siren}/out/ pour les destinations
+            // non gérées (PPF non configuré, PDP distante sans AFNOR producer).
+            let producer: Box<dyn pdp_core::endpoint::Producer> = {
+                let mut dynamic = match ppf_producer.as_ref() {
+                    Some(ppf_prod) => pdp_client::DynamicRoutingProducer::new(
+                        &format!("{}-dynamic-dest", route_id),
+                        ppf_prod.clone(),
+                    ),
+                    None => pdp_client::DynamicRoutingProducer::new_no_ppf(
+                        &format!("{}-dynamic-dest", route_id),
+                    ),
+                };
                 for (matricule, producer) in &afnor_producers {
                     dynamic.add_afnor_producer(matricule, producer.clone());
                 }
                 dynamic = dynamic.with_intra_pdp(intra_pdp_tx.clone());
                 dynamic = dynamic.with_fallback_path(out_path.to_str().unwrap_or("."));
                 Box::new(dynamic)
-            } else {
-                Box::new(pdp_core::endpoint::FileEndpoint::output(
-                    &format!("{}-dest", route_id),
-                    out_path.to_str().unwrap_or("."),
-                ))
             };
 
             // Error handler avec alertes : {siren}/out/errors/{critical,warning,info}/
@@ -1373,6 +1378,15 @@ async fn build_router(
                     pdp_client::RoutingValidationProcessor::from_partner_directory(partner_dir),
                 ));
             }
+
+            // Détection intra-PDP locale (sans PPF) : si le buyer SIREN est un
+            // tenant local, on pose routing.destination=INTRA-PDP pour que le
+            // DynamicRoutingProducer route via le channel intra-PDP au lieu du
+            // fallback filesystem. Si le RoutingResolverProcessor PPF est déjà
+            // branché en aval, il peut surcharger cette propriété — mais il ne
+            // l'est PAS quand l'annuaire PPF distant est absent.
+            let local_sirens: Vec<String> = registry.list_sirens().iter().map(|s| s.to_string()).collect();
+            builder = builder.process(Box::new(pdp_cdar::LocalIntraPdpRouter::new(local_sirens)));
 
             // CDAR auto : génère CDV 200 (Déposée) si le tenant est vendeur de
             // la facture, CDV 202 (Reçue) s'il en est l'acheteur. XP Z12-014

@@ -35,6 +35,14 @@ impl Processor for DuplicateCheckProcessor {
     }
 
     async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        // Skip pour les exchanges intra-PDP : le SAME flow vient d'être indexé
+        // par la pipeline émission de cette PDP — il n'est pas une duplication
+        // au sens BR-FR-12/13. Le `DynamicRoutingProducer` pose
+        // `source.protocol = intra-pdp` sur le clone injecté dans le channel.
+        if exchange.get_header("source.protocol").map(|s| s.as_str()) == Some("intra-pdp") {
+            return Ok(exchange);
+        }
+
         // Pas de facture parsée => on passe (le parsing n'a pas encore eu lieu ou a échoué)
         let invoice = match &exchange.invoice {
             Some(inv) => inv,

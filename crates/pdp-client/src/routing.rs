@@ -499,7 +499,10 @@ impl Processor for RoutingValidationProcessor {
 /// en fonction de la propriete `routing.destination` definie par le RoutingResolverProcessor.
 pub struct DynamicRoutingProducer {
     name: String,
-    ppf_producer: Arc<PpfSftpProducer>,
+    /// Producer PPF (SFTP). Optionnel : si absent et la destination résolue est
+    /// PPF-SE, on tombe sur le fallback filesystem (utile pour les démos qui
+    /// activent l'intra-PDP sans configurer le PPF).
+    ppf_producer: Option<Arc<PpfSftpProducer>>,
     afnor_producers: HashMap<String, Arc<AfnorFlowProducer>>,
     /// Channel pour injection intra-PDP vers le pipeline réception
     intra_pdp_tx: Option<tokio::sync::mpsc::Sender<Exchange>>,
@@ -514,7 +517,20 @@ impl DynamicRoutingProducer {
     ) -> Self {
         Self {
             name: name.to_string(),
-            ppf_producer,
+            ppf_producer: Some(ppf_producer),
+            afnor_producers: HashMap::new(),
+            intra_pdp_tx: None,
+            fallback_path: None,
+        }
+    }
+
+    /// Constructeur "no-PPF" : route intra-PDP uniquement (les PPF-SE
+    /// retomberont sur le fallback filesystem). Utilisé dans les démos
+    /// sans Chorus Pro / SFTP configuré.
+    pub fn new_no_ppf(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            ppf_producer: None,
             afnor_producers: HashMap::new(),
             intra_pdp_tx: None,
             fallback_path: None,
@@ -552,15 +568,35 @@ impl Producer for DynamicRoutingProducer {
             .unwrap_or_else(|| "PPF-SE".to_string());
 
         if destination == "PPF-SE" {
-            tracing::info!(
-                exchange_id = %exchange.id,
-                "DynamicRoutingProducer: envoi vers PPF via SFTP"
-            );
-            return self.ppf_producer.send(exchange).await;
+            if let Some(ref ppf) = self.ppf_producer {
+                tracing::info!(
+                    exchange_id = %exchange.id,
+                    "DynamicRoutingProducer: envoi vers PPF via SFTP"
+                );
+                return ppf.send(exchange).await;
+            } else {
+                tracing::warn!(
+                    exchange_id = %exchange.id,
+                    "DynamicRoutingProducer: PPF requis mais non configuré, fallback filesystem"
+                );
+                // tombe sur le fallback en bas de la fonction
+            }
         }
 
         // INTRA-PDP
         if destination == "INTRA-PDP" {
+            // Si l'émission a échoué (CDV 213), on n'injecte pas chez l'acheteur :
+            // la facture n'a pas été transmise. Sinon, en cas de re-poll (REC-05
+            // doublon, BR-FR-12/13...), on injecterait des CDVs 202/203 fantômes
+            // côté acheteur pour une émission qui s'est soldée par un rejet.
+            if exchange.has_errors() {
+                tracing::warn!(
+                    exchange_id = %exchange.id,
+                    error_count = exchange.errors.len(),
+                    "DynamicRoutingProducer: émission en erreur, pas d'injection intra-PDP"
+                );
+                return Ok(exchange);
+            }
             if let Some(ref tx) = self.intra_pdp_tx {
                 tracing::info!(
                     exchange_id = %exchange.id,
@@ -569,7 +605,21 @@ impl Producer for DynamicRoutingProducer {
                 let mut exchange = exchange;
                 exchange.set_property("intra_pdp", "true");
                 exchange.set_header("source.protocol", "intra-pdp");
-                tx.send(exchange.clone()).await.map_err(|_| {
+                // On clone l'exchange pour le channel mais on lui donne un
+                // NOUVEAU exchange_id : sans ça, la pipeline réception
+                // overwrite l'ES doc indexé par la pipeline émission et
+                // les CDVs 200/201 sont perdus. Avec un nouvel id, les 2
+                // pipelines produisent 2 docs distincts (200/201 côté seller,
+                // 202/203 côté buyer), reliés par le même `flow_id`.
+                let mut clone_for_rx = exchange.clone();
+                clone_for_rx.id = uuid::Uuid::new_v4();
+                // Reset des erreurs et du statut : la pipeline réception
+                // doit démarrer "propre". Sans ça, une erreur non bloquante
+                // côté émission (par ex. timeout Annuaire) ferait basculer
+                // la réception en CDV 213 (Rejetée) au lieu de 202/203.
+                clone_for_rx.errors.clear();
+                clone_for_rx.status = pdp_core::model::FlowStatus::Received;
+                tx.send(clone_for_rx).await.map_err(|_| {
                     PdpError::RoutingError("Channel intra-PDP fermé".into())
                 })?;
                 return Ok(exchange);

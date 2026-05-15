@@ -442,6 +442,7 @@ impl Processor for CdarProcessor {
         exchange.set_property("cdv.status_code", &cdv.status_code().unwrap_or(0).to_string());
         exchange.set_property("cdv.type_code", cdv.type_code.code());
         exchange.set_header("cdv.generated", "true");
+        exchange.set_property("cdv.generated_at", &chrono::Utc::now().to_rfc3339());
 
         Ok(exchange)
     }
@@ -668,6 +669,7 @@ impl Processor for IrrecevabiliteProcessor {
         exchange.set_property("cdv.type_code", cdv.type_code.code());
         exchange.set_property("cdv.reason_code", reason_code.code());
         exchange.set_header("cdv.generated", "true");
+        exchange.set_property("cdv.generated_at", &chrono::Utc::now().to_rfc3339());
         exchange.set_status(FlowStatus::Rejected);
 
         tracing::warn!(
@@ -734,6 +736,71 @@ fn map_reception_to_irrecevabilite(rule_ids: &str, filename: &str) -> (StatusRea
         StatusReasonCode::IrrSyntax,
         format!("Fichier irrecevable : '{}' ({})", filename, rule_ids),
     )
+}
+
+// ============================================================
+// LocalIntraPdpRouter — détection intra-PDP basée sur une liste de SIRENs
+// ============================================================
+
+/// Processor léger qui pose `routing.destination = INTRA-PDP` si le SIREN
+/// de l'acheteur est dans la liste des tenants locaux. Sinon : ne touche
+/// pas à la propriété (laisse le `RoutingResolverProcessor` PPF décider).
+///
+/// Utile pour les déploiements sans Chorus Pro configuré (config-ui-demo.yaml)
+/// : permet quand même de déclencher le routage intra-PDP automatiquement
+/// quand vendeur ET acheteur sont des tenants de notre PDP, sans dépendre de
+/// l'annuaire PPF distant.
+pub struct LocalIntraPdpRouter {
+    /// SIRENs des tenants locaux (à comparer au buyer SIRET/SIREN extrait).
+    local_sirens: std::collections::HashSet<String>,
+}
+
+impl LocalIntraPdpRouter {
+    pub fn new<I, S>(sirens: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self {
+            local_sirens: sirens.into_iter().map(|s| s.as_ref().to_string()).collect(),
+        }
+    }
+
+    fn siren_from_siret(siret: &str) -> Option<String> {
+        let digits: String = siret.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digits.len() >= 9 { Some(digits[..9].to_string()) } else { None }
+    }
+}
+
+#[async_trait]
+impl Processor for LocalIntraPdpRouter {
+    fn name(&self) -> &str {
+        "LocalIntraPdpRouter"
+    }
+
+    async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        let Some(invoice) = exchange.invoice.as_ref() else {
+            return Ok(exchange);
+        };
+        let buyer_siren = invoice
+            .buyer_siret
+            .as_deref()
+            .and_then(Self::siren_from_siret);
+        let Some(buyer_siren) = buyer_siren else {
+            return Ok(exchange);
+        };
+        if self.local_sirens.contains(&buyer_siren) {
+            tracing::info!(
+                exchange_id = %exchange.id,
+                buyer_siren = %buyer_siren,
+                "LocalIntraPdpRouter : buyer est un tenant local → routing.destination = INTRA-PDP"
+            );
+            exchange.set_property("routing.destination", "INTRA-PDP");
+            exchange.set_property("routing.pdp_matricule", "LOCAL");
+            exchange.set_property("routing.pdp_name", "PDP locale (intra-PDP)");
+        }
+        Ok(exchange)
+    }
 }
 
 // ============================================================
@@ -840,6 +907,7 @@ impl Processor for CdvDispositionProcessor {
         exchange.set_property("cdv.disposition.xml", &xml);
         exchange.set_property("cdv.disposition.status_code", &next_code.to_string());
         exchange.set_header("cdv.disposition.generated", "true");
+        exchange.set_property("cdv.disposition.generated_at", &chrono::Utc::now().to_rfc3339());
         Ok(exchange)
     }
 }

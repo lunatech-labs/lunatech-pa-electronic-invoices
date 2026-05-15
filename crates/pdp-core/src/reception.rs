@@ -190,6 +190,14 @@ impl Processor for ReceptionProcessor {
     }
 
     async fn process(&self, mut exchange: Exchange) -> PdpResult<Exchange> {
+        // Skip pour les exchanges intra-PDP : ils proviennent d'un clone
+        // déjà passé par toute la pipeline émission (reception-check,
+        // parsing, dedup...). Pas la peine de tout refaire, et REC-05
+        // dedup-by-filename ferait un faux positif.
+        if exchange.get_header("source.protocol").map(|s| s.as_str()) == Some("intra-pdp") {
+            return Ok(exchange);
+        }
+
         let filename = exchange.source_filename.clone().unwrap_or_default();
 
         // Calcule l'ensemble des noms vus encore valides (dans la fenêtre)

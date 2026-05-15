@@ -57,6 +57,42 @@ pub trait TraceBackend: Send + Sync {
         direction: Option<&str>,
     ) -> PdpResult<i64>;
 
+    /// Variante de [`list_exchanges`] avec déduplication par `invoice_number`.
+    /// Quand `dedup_by_invoice=true`, retourne un seul exchange par numéro
+    /// de facture (le plus récent). Implémentation par défaut : délègue à
+    /// `list_exchanges` (sans dedup).
+    async fn list_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        page: usize,
+        page_size: usize,
+        direction: Option<&str>,
+        _dedup_by_invoice: bool,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        self.list_exchanges(siren, status, from_date, to_date, page, page_size, direction)
+            .await
+    }
+
+    /// Variante de [`count_exchanges`] avec comptage par factures uniques.
+    /// Quand `dedup_by_invoice=true`, retourne la cardinalité distincte
+    /// d'`invoice_number` au lieu du nombre brut d'exchanges. Implémentation
+    /// par défaut : délègue à `count_exchanges` (pas de dedup).
+    async fn count_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        direction: Option<&str>,
+        _dedup_by_invoice: bool,
+    ) -> PdpResult<i64> {
+        self.count_exchanges(siren, status, from_date, to_date, direction)
+            .await
+    }
+
     /// Document complet (avec XML/PDF/événements) par ID. Si `siren` est `None`,
     /// le document est cherché à travers tous les tenants.
     async fn get_exchange(
@@ -125,6 +161,38 @@ impl TraceBackend for crate::store::TraceStore {
     ) -> PdpResult<i64> {
         crate::store::TraceStore::count_exchanges(
             self, siren, status, from_date, to_date, direction,
+        )
+        .await
+    }
+
+    async fn list_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        page: usize,
+        page_size: usize,
+        direction: Option<&str>,
+        dedup_by_invoice: bool,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        crate::store::TraceStore::list_exchanges_with_dedup(
+            self, siren, status, from_date, to_date, page, page_size, direction, dedup_by_invoice,
+        )
+        .await
+    }
+
+    async fn count_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        direction: Option<&str>,
+        dedup_by_invoice: bool,
+    ) -> PdpResult<i64> {
+        crate::store::TraceStore::count_exchanges_with_dedup(
+            self, siren, status, from_date, to_date, direction, dedup_by_invoice,
         )
         .await
     }

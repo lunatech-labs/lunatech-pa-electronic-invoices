@@ -1451,13 +1451,16 @@ async fn sidebar_counts_for(
 ) -> SidebarCounts {
     let Some(s) = siren else { return SidebarCounts::default() };
     let Some(store) = state.trace_store.as_ref() else { return SidebarCounts::default() };
+    // Compte par factures uniques (invoice_number distincts) — sinon la
+    // pastille gonfle artificiellement avec les ré-soumissions BR-FR-12/13
+    // et ne correspond plus au nombre de lignes visibles dans la liste.
     SidebarCounts {
         emises: store
-            .count_exchanges(s, None, None, None, Some("emises"))
+            .count_exchanges_with_dedup(s, None, None, None, Some("emises"), true)
             .await
             .ok(),
         recues: store
-            .count_exchanges(s, None, None, None, Some("recues"))
+            .count_exchanges_with_dedup(s, None, None, None, Some("recues"), true)
             .await
             .ok(),
     }
@@ -1846,8 +1849,13 @@ async fn export_flows_csv(
     let status = non_empty(&q.status);
     let from = non_empty(&q.from);
     let to = non_empty(&q.to);
+    // Dedup par invoice_number par défaut, sauf `?show_duplicates=true` :
+    // on aligne le contenu du CSV avec ce que l'utilisateur voit à l'écran.
+    let dedup_by_invoice = q.show_duplicates.as_deref() != Some("true");
     let exchanges = match store
-        .list_exchanges(siren, status, from, to, 0, 5000, Some(direction.nav_key()))
+        .list_exchanges_with_dedup(
+            siren, status, from, to, 0, 5000, Some(direction.nav_key()), dedup_by_invoice,
+        )
         .await
     {
         Ok(v) => v,
@@ -1953,40 +1961,23 @@ async fn render_flows_list(
             let page = q.page.unwrap_or(0);
             let page_size = clamp_page_size(q.page_size);
             let dir_param = Some(direction.nav_key());
+            // Déduplication par invoice_number (par défaut activée).
+            // Plusieurs soumissions de la même facture créent plusieurs
+            // exchanges (BR-FR-12/13 marque les ré-soumissions avec
+            // error_count>0 mais le doc reste indexé). Quand la dedup est
+            // active, on demande à ES de collapser sur `invoice_number` et
+            // on compte les invoice_numbers distincts — ce qui aligne le
+            // total affiché et le contenu paginé. Avec
+            // `?show_duplicates=true`, on bascule sur la vue brute.
+            let dedup_by_invoice = q.show_duplicates.as_deref() != Some("true");
             let total = store
-                .count_exchanges(s, status, from, to, dir_param)
+                .count_exchanges_with_dedup(s, status, from, to, dir_param, dedup_by_invoice)
                 .await
                 .unwrap_or(0);
-            let mut exchanges = store
-                .list_exchanges(s, status, from, to, page, page_size, dir_param)
+            let exchanges = store
+                .list_exchanges_with_dedup(s, status, from, to, page, page_size, dir_param, dedup_by_invoice)
                 .await
                 .unwrap_or_default();
-
-            // Déduplication par invoice_number (par défaut activée).
-            // Plusieurs soumissions de la même facture créent plusieurs exchanges
-            // (la dedup BR-FR-12/13 marque les ré-soumissions avec error_count>0
-            // mais le doc reste indexé). On affiche le plus récent par numéro,
-            // sauf si ?show_duplicates=true.
-            let show_duplicates = q.show_duplicates.as_deref() == Some("true");
-            if !show_duplicates {
-                use std::collections::HashMap;
-                let mut latest_by_invoice: HashMap<String, pdp_trace::store::ExchangeSummary> =
-                    HashMap::new();
-                let mut without_invoice = Vec::new();
-                for ex in exchanges.into_iter() {
-                    match ex.invoice_number.clone() {
-                        Some(inv) => {
-                            // Garde le plus récent par created_at (déjà trié desc par ES)
-                            latest_by_invoice.entry(inv).or_insert(ex);
-                        }
-                        None => without_invoice.push(ex),
-                    }
-                }
-                let mut deduped: Vec<_> = latest_by_invoice.into_values().collect();
-                deduped.extend(without_invoice);
-                deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                exchanges = deduped;
-            }
 
             let tenant_name = resolve_tenant_name(&state, s).await;
             let list_title = format!(
@@ -2411,7 +2402,9 @@ fn render_timeline(
     errors: &[pdp_trace::store::ErrorEntry],
     cdv_status_code: Option<u16>,
     generated_cdv_status_code: Option<u16>,
+    generated_cdv_at: Option<&str>,
     disposition_cdv_status_code: Option<u16>,
+    disposition_cdv_at: Option<&str>,
     dir: DisplayDirection,
 ) -> String {
     if events.is_empty()
@@ -2438,6 +2431,7 @@ fn render_timeline(
         GeneratedCdv {
             code: u16,
             slot: &'static str, // "generated" ou "disposition" — pour le download link
+            ts: Option<&'a str>, // timestamp RFC3339 quand le CDV a été émis
         },
         Error(&'a pdp_trace::store::ErrorEntry),
     }
@@ -2461,10 +2455,10 @@ fn render_timeline(
     // 1bis. CDVs officiels persistés par la PDP (200/201/202/203).
     //       Ils s'ajoutent aux events pipeline pour donner la vue complète.
     if let Some(code) = generated_cdv_status_code {
-        items.push(Item::GeneratedCdv { code, slot: "generated" });
+        items.push(Item::GeneratedCdv { code, slot: "generated", ts: generated_cdv_at });
     }
     if let Some(code) = disposition_cdv_status_code {
-        items.push(Item::GeneratedCdv { code, slot: "disposition" });
+        items.push(Item::GeneratedCdv { code, slot: "disposition", ts: disposition_cdv_at });
     }
 
     // 2. Tri : par ordre conceptuel du cycle de vie.
@@ -2511,7 +2505,7 @@ fn render_timeline(
                 label = label,
                 route = html_escape(route),
             ),
-            Item::GeneratedCdv { code, slot } => {
+            Item::GeneratedCdv { code, slot, ts } => {
                 let label = match code {
                     200 => "Déposée",
                     201 => "Émise",
@@ -2520,13 +2514,23 @@ fn render_timeline(
                     _ => "CDV",
                 };
                 let badge = afnor_badge_for_code(*code);
+                // Header avec date si dispo, sinon juste le code (rétro-
+                // compatible avec les anciens docs ES sans timestamp).
+                let ts_header = match ts {
+                    Some(t) => format!(
+                        "{ts} · CDV {code} — généré par la PDP",
+                        ts = html_escape(t),
+                        code = code,
+                    ),
+                    None => format!("CDV {code} — généré par la PDP", code = code),
+                };
                 format!(
                     r#"<div class="timeline-item">
-    <div class="ts">CDV {code} — généré par la PDP</div>
+    <div class="ts">{ts_header}</div>
     <div class="label"><span class="badge {badge}">{label}</span></div>
     <div class="msg">XML CDV émis et persisté <span class="cdv-link" data-slot="{slot}"></span></div>
 </div>"#,
-                    code = code,
+                    ts_header = ts_header,
                     badge = badge,
                     label = label,
                     slot = slot,
@@ -2869,7 +2873,9 @@ fn render_flow_detail(
             &doc.errors,
             sum.cdv_status_code,
             doc.generated_cdv_status_code,
+            doc.generated_cdv_at.as_deref(),
             doc.disposition_cdv_status_code,
+            doc.disposition_cdv_at.as_deref(),
             dir,
         ),
     };
@@ -3354,8 +3360,10 @@ mod tests {
             cdv_status_code: None,
             generated_cdv_xml: None,
             generated_cdv_status_code: None,
+            generated_cdv_at: None,
             disposition_cdv_xml: None,
             disposition_cdv_status_code: None,
+            disposition_cdv_at: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,

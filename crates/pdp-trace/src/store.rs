@@ -96,6 +96,12 @@ pub struct ExchangeDocument {
     /// Code statut AFNOR du CDV généré par notre PDP (200/202/213/221/501).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_cdv_status_code: Option<u16>,
+    /// Horodatage RFC3339 du moment où le CDV "generated" a été produit
+    /// (capté par CdarProcessor / IrrecevabiliteProcessor via la propriété
+    /// `cdv.generated_at`). Affiché dans la timeline pour montrer quand
+    /// la PDP a émis le CDV 200/202/213/221/501.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_cdv_at: Option<String>,
     /// XML du CDV 203 (Mise à disposition) — émis APRÈS un 202 Reçue par
     /// `CdvDispositionProcessor`, quand la facture a été écrite vers la
     /// destination buyer. Slot séparé pour préserver le 202 d'origine
@@ -105,6 +111,10 @@ pub struct ExchangeDocument {
     /// Code statut du CDV de mise à disposition (toujours 203 si présent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disposition_cdv_status_code: Option<u16>,
+    /// Horodatage RFC3339 du CDV 203 Mise à disposition (capté par
+    /// `CdvDispositionProcessor` via la propriété `cdv.disposition.generated_at`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition_cdv_at: Option<String>,
     pub attachment_count: usize,
     pub attachment_filenames: Vec<String>,
     pub events: Vec<EventEntry>,
@@ -287,8 +297,21 @@ impl TraceStore {
 
     /// Détermine l'index cible pour un exchange (basé sur le SIREN vendeur)
     fn index_for_exchange(&self, exchange: &Exchange) -> String {
-        exchange.invoice.as_ref()
-            .and_then(|i| i.seller_siret.as_deref())
+        // Pour les exchanges intra-PDP côté réception, on indexe sous le
+        // buyer (pas le seller) — la pipeline réception archive la "copie
+        // reçue" du flow, qui appartient au tenant acheteur. Cela évite que
+        // le snapshot reception écrase celui de l'émission (sous seller),
+        // et permet à la liste "Factures reçues" du buyer de pointer
+        // directement sur pdp-{buyer_siren}.
+        let is_intra_reception = exchange
+            .get_header("source.protocol")
+            .map(|s| s.as_str()) == Some("intra-pdp");
+        let primary_siret = if is_intra_reception {
+            exchange.invoice.as_ref().and_then(|i| i.buyer_siret.as_deref())
+        } else {
+            exchange.invoice.as_ref().and_then(|i| i.seller_siret.as_deref())
+        };
+        primary_siret
             .and_then(Self::siren_from_siret)
             .map(|s| self.index_name(&s))
             .unwrap_or_else(|| self.default_index())
@@ -339,8 +362,10 @@ impl TraceStore {
                     "converted_format": { "type": "keyword" },
                     "generated_cdv_xml": { "type": "text", "index": false },
                     "generated_cdv_status_code": { "type": "short" },
+                    "generated_cdv_at": { "type": "date" },
                     "disposition_cdv_xml": { "type": "text", "index": false },
                     "disposition_cdv_status_code": { "type": "short" },
+                    "disposition_cdv_at": { "type": "date" },
                     "attachment_count": { "type": "integer" },
                     "attachment_filenames": { "type": "keyword" },
                     "events": {
@@ -519,6 +544,13 @@ impl TraceStore {
             } else {
                 None
             },
+            generated_cdv_at: if exchange.get_header("cdv.generated").is_some()
+                && exchange.get_property("cdv.received").is_none()
+            {
+                exchange.get_property("cdv.generated_at").cloned()
+            } else {
+                None
+            },
             // CDV 203 Mise à disposition — capté quand
             // `CdvDispositionProcessor` a posé `cdv.disposition.generated`.
             disposition_cdv_xml: if exchange.get_header("cdv.disposition.generated").is_some() {
@@ -530,6 +562,11 @@ impl TraceStore {
                 exchange
                     .get_property("cdv.disposition.status_code")
                     .and_then(|s| s.parse::<u16>().ok())
+            } else {
+                None
+            },
+            disposition_cdv_at: if exchange.get_header("cdv.disposition.generated").is_some() {
+                exchange.get_property("cdv.disposition.generated_at").cloned()
             } else {
                 None
             },
@@ -1122,6 +1159,11 @@ impl TraceStore {
     /// Compte le nombre total d'exchanges d'un tenant, avec les mêmes filtres
     /// que `list_exchanges` mais sans pagination. Utilisé par l'UI pour
     /// afficher le total et le nombre de pages.
+    ///
+    /// Si `dedup_by_invoice` est `true`, retourne le **nombre de factures
+    /// uniques** (cardinalité sur `invoice_number`). Une facture re-soumise
+    /// crée plusieurs exchanges (BR-FR-12/13), mais ne doit compter que pour
+    /// une seule entrée d'UI. Sinon, retourne le total brut d'exchanges.
     pub async fn count_exchanges(
         &self,
         siren: &str,
@@ -1130,10 +1172,59 @@ impl TraceStore {
         to_date: Option<&str>,
         direction: Option<&str>,
     ) -> PdpResult<i64> {
+        self.count_exchanges_with_dedup(siren, status, from_date, to_date, direction, false)
+            .await
+    }
+
+    /// Variante avec contrôle explicite de la déduplication par
+    /// `invoice_number`. Voir [`count_exchanges`].
+    pub async fn count_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        direction: Option<&str>,
+        dedup_by_invoice: bool,
+    ) -> PdpResult<i64> {
         let index = self.index_pattern();
         let query =
             self.build_tenant_filter_query(siren, status, from_date, to_date, direction);
-        self.count_query(&index, query).await
+
+        if !dedup_by_invoice {
+            return self.count_query(&index, query).await;
+        }
+
+        // Cardinalité sur invoice_number : compte des numéros distincts.
+        // `precision_threshold` à 40000 garantit un compte exact jusqu'à 40k
+        // factures uniques par tenant (largement suffisant pour les volumes
+        // de la démo et la plupart des PDPs).
+        let body = serde_json::json!({
+            "query": query,
+            "size": 0,
+            "aggs": {
+                "unique_invoices": {
+                    "cardinality": {
+                        "field": "invoice_number",
+                        "precision_threshold": 40000
+                    }
+                }
+            }
+        });
+        let resp = self.client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Count cardinality échoué: {}", e)))?;
+        if !resp.status().is_success() {
+            return Ok(0);
+        }
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+        Ok(body["aggregations"]["unique_invoices"]["value"]
+            .as_i64()
+            .unwrap_or(0))
     }
 
     /// Liste paginée d'exchanges pour un tenant, avec filtres optionnels.
@@ -1154,12 +1245,39 @@ impl TraceStore {
         page_size: usize,
         direction: Option<&str>,
     ) -> PdpResult<Vec<ExchangeSummary>> {
+        self.list_exchanges_with_dedup(
+            siren, status, from_date, to_date, page, page_size, direction, false,
+        )
+        .await
+    }
+
+    /// Variante avec déduplication par `invoice_number` (collapse ES).
+    ///
+    /// Quand `dedup_by_invoice=true`, ES regroupe les documents par
+    /// `invoice_number` et ne renvoie que le plus récent de chaque groupe.
+    /// La pagination opère alors sur les factures uniques, pas sur les
+    /// exchanges bruts — ce qui aligne le total (cardinalité) avec le
+    /// contenu effectivement affiché.
+    ///
+    /// Sans dedup, on pagine sur les exchanges bruts (toutes soumissions
+    /// incluses) — utile pour `?show_duplicates=true`.
+    pub async fn list_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        page: usize,
+        page_size: usize,
+        direction: Option<&str>,
+        dedup_by_invoice: bool,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
         let index = self.index_pattern();
         let query =
             self.build_tenant_filter_query(siren, status, from_date, to_date, direction);
 
         let from = page * page_size;
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "query": query,
             "from": from,
             "size": page_size,
@@ -1167,6 +1285,14 @@ impl TraceStore {
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
                         "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code"]
         });
+
+        if dedup_by_invoice {
+            // ES `collapse` : un seul hit par invoice_number (le plus récent
+            // grâce au sort created_at desc). Les exchanges sans
+            // invoice_number (rare, mais possible si parsing échoué) sont
+            // retournés tels quels — ils n'ont pas de groupe à collapser.
+            body["collapse"] = serde_json::json!({ "field": "invoice_number" });
+        }
 
         let resp = self.client
             .post(&format!("{}/{}/_search", self.base_url, index))
