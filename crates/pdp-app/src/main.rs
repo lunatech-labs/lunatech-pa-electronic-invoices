@@ -2928,6 +2928,12 @@ async fn inject_demo_cdv_statuses(
                 else if (r < 0.98) code = 208;
                 else code = 213;
                 ctx._source.cdv_status_code = code;
+                // Horodatage simulé : reception + un délai aléatoire de
+                // 0 à 14 jours, pour que la timeline démo affiche une
+                // date crédible pour ce CDV downstream.
+                long base = ZonedDateTime.parse(ctx._source.created_at).toInstant().toEpochMilli();
+                long offset = (long)(Math.random() * 14 * 24 * 3600 * 1000L);
+                ctx._source.cdv_received_at = Instant.ofEpochMilli(base + offset).toString();
             ",
             "lang": "painless"
         }

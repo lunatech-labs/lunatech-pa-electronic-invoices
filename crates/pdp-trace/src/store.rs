@@ -72,6 +72,12 @@ pub struct ExchangeDocument {
     /// Présent uniquement après réception d'un CDV traitement (TypeCode 23).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cdv_status_code: Option<u16>,
+    /// Horodatage RFC3339 du moment où la PDP a reçu/enregistré le
+    /// `cdv_status_code`. Renseigné par `CdvReceptionProcessor` (CDV reçus
+    /// d'acteurs externes) ou par le seed démo (statuts simulés via
+    /// `_update_by_query`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdv_received_at: Option<String>,
     /// XML brut de la facture (stocké tel quel, searchable).
     /// Contient toujours le document **original** tel que reçu, indépendamment
     /// d'une éventuelle transformation effectuée par la PDP.
@@ -363,6 +369,7 @@ impl TraceStore {
                     "generated_cdv_xml": { "type": "text", "index": false },
                     "generated_cdv_status_code": { "type": "short" },
                     "generated_cdv_at": { "type": "date" },
+                    "cdv_received_at": { "type": "date" },
                     "disposition_cdv_xml": { "type": "text", "index": false },
                     "disposition_cdv_status_code": { "type": "short" },
                     "disposition_cdv_at": { "type": "date" },
@@ -522,6 +529,16 @@ impl TraceStore {
                 exchange
                     .get_property("cdv.status_code")
                     .and_then(|s| s.parse::<u16>().ok())
+            } else {
+                None
+            },
+            cdv_received_at: if exchange.get_property("cdv.received").is_some() {
+                // Préfère la valeur posée par CdvReceptionProcessor, sinon
+                // tombe sur le moment d'indexation actuel.
+                exchange
+                    .get_property("cdv.received_at")
+                    .cloned()
+                    .or_else(|| Some(chrono::Utc::now().to_rfc3339()))
             } else {
                 None
             },

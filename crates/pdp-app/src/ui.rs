@@ -2401,6 +2401,7 @@ fn render_timeline(
     events: &[pdp_trace::store::EventEntry],
     errors: &[pdp_trace::store::ErrorEntry],
     cdv_status_code: Option<u16>,
+    cdv_received_at: Option<&str>,
     generated_cdv_status_code: Option<u16>,
     generated_cdv_at: Option<&str>,
     disposition_cdv_status_code: Option<u16>,
@@ -2554,13 +2555,21 @@ fn render_timeline(
             // Le label "officiel" passe par afnor_status pour bénéficier des
             // règles direction-aware (202 → "Émise" côté émetteur, etc.).
             let (label, badge) = afnor_status("", 0, Some(code), dir);
+            let ts_header = match cdv_received_at {
+                Some(t) => format!(
+                    "{ts} · CDV — code AFNOR {code}",
+                    ts = html_escape(t),
+                    code = code,
+                ),
+                None => format!("CDV — code AFNOR {code}", code = code),
+            };
             html_items.push(format!(
                 r#"<div class="timeline-item">
-    <div class="ts">CDV — code AFNOR {code}</div>
+    <div class="ts">{ts_header}</div>
     <div class="label"><span class="badge {badge}">{label}</span></div>
     <div class="msg">Statut métier porté par le CDV reçu</div>
 </div>"#,
-                code = code,
+                ts_header = ts_header,
                 badge = badge,
                 label = html_escape(&label),
             ));
@@ -2872,6 +2881,7 @@ fn render_flow_detail(
             &doc.events,
             &doc.errors,
             sum.cdv_status_code,
+            doc.cdv_received_at.as_deref(),
             doc.generated_cdv_status_code,
             doc.generated_cdv_at.as_deref(),
             doc.disposition_cdv_status_code,
@@ -3358,6 +3368,7 @@ mod tests {
             status: "DISTRIBUÉ".into(),
             error_count: 0,
             cdv_status_code: None,
+            cdv_received_at: None,
             generated_cdv_xml: None,
             generated_cdv_status_code: None,
             generated_cdv_at: None,
