@@ -2410,9 +2410,16 @@ fn render_timeline(
     events: &[pdp_trace::store::EventEntry],
     errors: &[pdp_trace::store::ErrorEntry],
     cdv_status_code: Option<u16>,
+    generated_cdv_status_code: Option<u16>,
+    disposition_cdv_status_code: Option<u16>,
     dir: DisplayDirection,
 ) -> String {
-    if events.is_empty() && errors.is_empty() && cdv_status_code.is_none() {
+    if events.is_empty()
+        && errors.is_empty()
+        && cdv_status_code.is_none()
+        && generated_cdv_status_code.is_none()
+        && disposition_cdv_status_code.is_none()
+    {
         return r#"<p style="color:#888">Aucun événement enregistré.</p>"#.to_string();
     }
 
@@ -2423,6 +2430,14 @@ fn render_timeline(
             route: &'a str,
             label: &'static str,
             badge: &'static str,
+        },
+        /// CDV officiellement émis par notre PDP (200/201/202/203), capté
+        /// depuis `ExchangeDocument.generated_cdv_*` ou `disposition_cdv_*`.
+        /// Plus crédible que les events pipeline (qui sont des étapes
+        /// internes), c'est le CDV XML réellement persisté.
+        GeneratedCdv {
+            code: u16,
+            slot: &'static str, // "generated" ou "disposition" — pour le download link
         },
         Error(&'a pdp_trace::store::ErrorEntry),
     }
@@ -2443,23 +2458,28 @@ fn render_timeline(
         items.push(Item::Error(er));
     }
 
-    // 2. Tri chronologique.
-    items.sort_by(|a, b| {
-        let ta = match a {
-            Item::AfnorEvent { ts, .. } => *ts,
-            Item::Error(e) => e.timestamp.as_str(),
-        };
-        let tb = match b {
-            Item::AfnorEvent { ts, .. } => *ts,
-            Item::Error(e) => e.timestamp.as_str(),
-        };
-        ta.cmp(tb)
+    // 1bis. CDVs officiels persistés par la PDP (200/201/202/203).
+    //       Ils s'ajoutent aux events pipeline pour donner la vue complète.
+    if let Some(code) = generated_cdv_status_code {
+        items.push(Item::GeneratedCdv { code, slot: "generated" });
+    }
+    if let Some(code) = disposition_cdv_status_code {
+        items.push(Item::GeneratedCdv { code, slot: "disposition" });
+    }
+
+    // 2. Tri : par ordre conceptuel du cycle de vie.
+    //    AfnorEvent : timestamp (chronologique)
+    //    GeneratedCdv : par code (200 < 201 < 202 < 203)
+    //    On considère le code comme un "rang" pour comparer avec les events
+    //    pipeline (200/201 ~ avant 202/203). En pratique : events d'abord
+    //    (issus de REÇU/DISTRIBUÉ), CDVs ensuite par ordre numérique.
+    items.sort_by_key(|it| match it {
+        Item::AfnorEvent { ts, .. } => (0u8, ts.to_string()),
+        Item::Error(e) => (0u8, e.timestamp.clone()),
+        Item::GeneratedCdv { code, .. } => (1u8, format!("{:03}", code)),
     });
 
     // 2bis. Déduplication des AfnorEvent consécutifs avec le même libellé.
-    //       Plusieurs events pipeline (REÇU + PARSÉ + VALIDÉ) collapse tous
-    //       sur "Déposée" ; on ne garde que le premier (timestamp le plus
-    //       ancien) pour éviter de répéter la même étape AFNOR.
     items.dedup_by(|b, a| match (a, b) {
         (
             Item::AfnorEvent { label: la, .. },
@@ -2491,6 +2511,27 @@ fn render_timeline(
                 label = label,
                 route = html_escape(route),
             ),
+            Item::GeneratedCdv { code, slot } => {
+                let label = match code {
+                    200 => "Déposée",
+                    201 => "Émise",
+                    202 => "Reçue",
+                    203 => "Mise à disposition",
+                    _ => "CDV",
+                };
+                let badge = afnor_badge_for_code(*code);
+                format!(
+                    r#"<div class="timeline-item">
+    <div class="ts">CDV {code} — généré par la PDP</div>
+    <div class="label"><span class="badge {badge}">{label}</span></div>
+    <div class="msg">XML CDV émis et persisté <span class="cdv-link" data-slot="{slot}"></span></div>
+</div>"#,
+                    code = code,
+                    badge = badge,
+                    label = label,
+                    slot = slot,
+                )
+            }
             Item::Error(er) => format!(
                 r#"<div class="timeline-item timeline-error">
     <div class="ts">{ts}</div>
@@ -2823,7 +2864,14 @@ fn render_flow_detail(
     let dir = DisplayDirection::from_summary(siren, sum);
     let timeline = match full {
         None => String::new(),
-        Some(doc) => render_timeline(&doc.events, &doc.errors, sum.cdv_status_code, dir),
+        Some(doc) => render_timeline(
+            &doc.events,
+            &doc.errors,
+            sum.cdv_status_code,
+            doc.generated_cdv_status_code,
+            doc.disposition_cdv_status_code,
+            dir,
+        ),
     };
 
     let errors = match full {
@@ -2898,9 +2946,14 @@ fn render_flow_detail(
                 ));
             }
             if let Some(code) = doc.disposition_cdv_status_code {
+                let suffix = match code {
+                    201 => "émise",
+                    203 => "mise à disposition",
+                    _ => "généré",
+                };
                 links.push(format!(
-                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv-disposition?siren={s}">⬇️ CDV {code} (mise à disposition)</a>"#,
-                    f = html_escape(flow_id), s = html_escape(siren), code = code,
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv-disposition?siren={s}">⬇️ CDV {code} ({suffix})</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren), code = code, suffix = suffix,
                 ));
             }
             if links.is_empty() {
