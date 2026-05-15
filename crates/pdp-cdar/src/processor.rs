@@ -823,7 +823,7 @@ impl Processor for LocalIntraPdpRouter {
 /// PDP ou PPF en émission) — on peut donc attester qu'elle est "Émise" /
 /// "Mise à disposition".
 ///
-/// Le CDV est écrit dans `{base_dir}/cdar/{flow_id}-cdv-{code}.xml` et
+/// Le CDV est écrit dans `{base_dir}/cdv/{flow_id}-cdv-{code}.xml` et
 /// stocké dans les propriétés `cdv.disposition.xml` +
 /// `cdv.disposition.status_code` (slot séparé de `cdv.xml` pour préserver
 /// le 200/202 d'origine — les deux CDVs coexistent dans le snapshot ES).
@@ -885,8 +885,8 @@ impl Processor for CdvDispositionProcessor {
             "Génération CDV {}", label
         );
 
-        // Écrire sur disque sous {base_dir}/cdar/{flow_id}-cdv-{code:03}.xml
-        let dir = self.base_dir.join("cdar");
+        // Écrire sur disque sous {base_dir}/cdv/{flow_id}-cdv-{code:03}.xml
+        let dir = self.base_dir.join("cdv");
         if let Err(e) = std::fs::create_dir_all(&dir) {
             tracing::warn!(error = %e, dir = %dir.display(), "Échec création répertoire CDV transmission");
         } else {
@@ -922,7 +922,7 @@ impl Processor for CdvDispositionProcessor {
 /// client de la PDP — ce qui contredit XP Z12-012 §A.1 (la PDP doit
 /// rendre disponible l'accusé de dépôt à son client).
 ///
-/// Le fichier est écrit sous `{base_dir}/cdar/{flow_id}-cdv-{code}.xml`,
+/// Le fichier est écrit sous `{base_dir}/cdv/{flow_id}-cdv-{code}.xml`,
 /// avec `code` ∈ {200, 202, 213, 221, 501}. Si la propriété `cdv.xml`
 /// n'est pas présente (CDV non généré), le processor passe sans rien faire.
 pub struct CdvFileWriterProcessor {
@@ -951,7 +951,7 @@ impl Processor for CdvFileWriterProcessor {
             .get_property("cdv.status_code")
             .and_then(|s| s.parse::<u16>().ok())
             .unwrap_or(0);
-        let dir = self.base_dir.join("cdar");
+        let dir = self.base_dir.join("cdv");
         if let Err(e) = std::fs::create_dir_all(&dir) {
             tracing::warn!(error = %e, dir = %dir.display(), "Échec création répertoire CDV");
             return Ok(exchange);
@@ -975,12 +975,12 @@ impl Processor for CdvFileWriterProcessor {
 /// Stratégie de résolution du tenant cible pour [`TenantCdvWriterProcessor`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CdvTenantRole {
-    /// Écrit le CDV dans le `out/cdar/` du **vendeur**. Cas typique :
+    /// Écrit le CDV dans le `out/cdv/` du **vendeur**. Cas typique :
     /// la pipeline intra-PDP réception produit un CDV 202/203 que le
     /// vendeur veut voir comme accusé (« ma facture a été reçue par
     /// l'acheteur »).
     Seller,
-    /// Écrit dans le `out/cdar/` de l'**acheteur**. Utile pour donner à
+    /// Écrit dans le `out/cdv/` de l'**acheteur**. Utile pour donner à
     /// l'acheteur une copie locale des CDV qu'il a émis.
     Buyer,
 }
@@ -988,7 +988,7 @@ pub enum CdvTenantRole {
 /// Variante de [`CdvFileWriterProcessor`] qui résout dynamiquement le
 /// répertoire de destination en fonction du tenant cible.
 ///
-/// `{tenants_dir}/{siren}/out/cdar/{flow_id}-cdv-{code}.xml`
+/// `{tenants_dir}/{siren}/out/cdv/{flow_id}-cdv-{code}.xml`
 ///
 /// Si le tenant n'est pas un répertoire local, tombe sur `fallback_dir`
 /// (compatible avec les flux non-intra-PDP).
@@ -1035,7 +1035,7 @@ impl Processor for TenantCdvWriterProcessor {
     async fn process(&self, exchange: Exchange) -> PdpResult<Exchange> {
         let target_dir = match self.resolve_siren(&exchange) {
             Some(siren) if !siren.is_empty() => {
-                let path = self.tenants_dir.join(&siren).join("out").join("cdar");
+                let path = self.tenants_dir.join(&siren).join("out").join("cdv");
                 let parent_ok = path
                     .parent()
                     .and_then(|p| p.parent())
@@ -1044,10 +1044,10 @@ impl Processor for TenantCdvWriterProcessor {
                 if parent_ok {
                     path
                 } else {
-                    self.fallback_dir.join("cdar")
+                    self.fallback_dir.join("cdv")
                 }
             }
-            _ => self.fallback_dir.join("cdar"),
+            _ => self.fallback_dir.join("cdv"),
         };
 
         // Écrit le CDV "generated" (200/202/213/221/501) si présent

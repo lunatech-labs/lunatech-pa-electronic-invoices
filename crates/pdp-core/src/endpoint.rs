@@ -384,8 +384,10 @@ pub enum TenantRole {
 }
 
 /// Producer qui écrit le `body` de l'exchange dans
-/// `{tenants_dir}/{siren}/out/{filename}`, où `siren` est résolu depuis
-/// l'invoice de l'exchange (vendeur ou acheteur selon [`TenantRole`]).
+/// `{tenants_dir}/{siren}/out/facture/{filename}`, où `siren` est résolu
+/// depuis l'invoice de l'exchange (vendeur ou acheteur selon [`TenantRole`]).
+/// Le sous-répertoire `facture/` sépare les factures (Flux 2) des CDV
+/// (qui vont dans `out/cdv/`) pour que l'utilisateur s'y retrouve.
 ///
 /// Si le tenant cible n'existe pas (pas de sous-répertoire), ou si la facture
 /// n'est pas parsée, on retombe sur `fallback_dir` — comportement non bloquant
@@ -438,8 +440,9 @@ impl Producer for TenantOutputProducer {
     async fn send(&self, exchange: Exchange) -> PdpResult<Exchange> {
         let dir = match self.resolve_siren(&exchange) {
             Some(siren) if !siren.is_empty() => {
-                let tenant_out = self.tenants_dir.join(&siren).join("out");
-                if tenant_out.is_dir() || tenant_out.parent().map(|p| p.is_dir()).unwrap_or(false) {
+                let tenant_out = self.tenants_dir.join(&siren).join("out").join("facture");
+                let tenant_root = self.tenants_dir.join(&siren).join("out");
+                if tenant_out.is_dir() || tenant_root.parent().map(|p| p.is_dir()).unwrap_or(false) {
                     tenant_out
                 } else {
                     tracing::debug!(
