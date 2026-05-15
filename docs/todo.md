@@ -60,6 +60,27 @@ Voir [§4](#4-codes-irr-pièces-jointes-cdv-501) — bloqué par : pas encore de
 - Voir [§14](#14-réécriture-oxalis-access-point-peppol-en-rust) — Peppol AS4 en Rust
 - Voir [§15](#15-factur-x-basic-wl--structuré) — Factur-X BASIC WL
 
+### Routage inter-PDP : Annuaire + PEPPOL — à refaire
+Le `DynamicRoutingProducer` actuel a une cascade simplifiée
+(intra-PDP → PPF-SE → PDP-{matricule} → fallback filesystem) qui ne
+correspond pas au vrai modèle PPF :
+- **Le tee PPF n'est pas une destination alternative** : la PDP doit
+  TOUJOURS envoyer Flux 1 (facture transformée) + CDV 200 (Déposée)
+  au PPF, en parallèle de la livraison à l'acheteur. ✅ Tee
+  obligatoire implémenté en `0330697` mais à étendre au CDV 200.
+- **Détermination de la PDP destinataire** : consulter l'Annuaire PPF
+  d'abord (matricule de la PDP de l'acheteur via SIRET/SIREN), puis
+  PEPPOL SMP lookup en fallback (si l'acheteur n'est pas dans
+  l'Annuaire FR — typiquement pour l'international). Le code actuel
+  ne consulte que l'Annuaire et utilise un `AfnorFlowProducer` HTTP
+  abstrait — il faudrait :
+  - Brancher un vrai SMP PEPPOL lookup (DNS-based)
+  - Implémenter le transport AS4 (cf. §14 Oxalis-rust)
+  - Décommissionner la destination « PPF-SE » dans le routage buyer
+    (elle n'existe que pour le tee parallèle, pas comme destination)
+- Renommer `AfnorFlowProducer` → `PeppolAs4Producer` (AFNOR XP Z12-013
+  définit les métadonnées et le format, le transport est PEPPOL AS4).
+
 ---
 
 ## Livré entre 2026-04-26 et 2026-05-02

@@ -567,28 +567,79 @@ impl Producer for DynamicRoutingProducer {
             .cloned()
             .unwrap_or_else(|| "PPF-SE".to_string());
 
-        if destination == "PPF-SE" {
+        // ────────────────────────────────────────────────────────────────
+        // Tee PPF systématique (Flux 1 facture + CDV 200 Déposée)
+        // ────────────────────────────────────────────────────────────────
+        // AFNOR XP Z12-012 : la PDP émettrice doit TOUJOURS déclarer au PPF
+        // - la facture transformée (Flux 1, FFE0111A UBL ou FFE0112A CII)
+        // - le CDAR avec statut Déposée (CDV 200, Flux 6 FFE0654A)
+        // pour archivage central, e-reporting et traçabilité réglementaire.
+        // Ce n'est pas une destination alternative, c'est une obligation en
+        // parallèle de la livraison à l'acheteur.
+        //
+        // Conditions du tee :
+        // - PPF configuré (`ppf_producer` présent)
+        // - Exchange sans erreurs (sinon on déclarerait au PPF une facture
+        //   que la PDP elle-même a rejetée — incohérent)
+        //
+        // En cas d'échec PPF, on log un warning et on continue : un PPF
+        // down ne doit pas bloquer la livraison à l'acheteur. La file
+        // d'attente PPF sera retentée par un mécanisme out-of-band.
+        if !exchange.has_errors() {
             if let Some(ref ppf) = self.ppf_producer {
-                tracing::info!(
-                    exchange_id = %exchange.id,
-                    "DynamicRoutingProducer: envoi vers PPF via SFTP"
-                );
-                return ppf.send(exchange).await;
-            } else {
-                tracing::warn!(
-                    exchange_id = %exchange.id,
-                    "DynamicRoutingProducer: PPF requis mais non configuré, fallback filesystem"
-                );
-                // tombe sur le fallback en bas de la fonction
+                // (a) Flux 1 — facture transformée
+                if let Err(e) = ppf.send(exchange.clone()).await {
+                    tracing::warn!(
+                        exchange_id = %exchange.id,
+                        error = %e,
+                        "Tee PPF Flux 1 échoué (livraison buyer continue)"
+                    );
+                } else {
+                    tracing::info!(
+                        exchange_id = %exchange.id,
+                        "Tee PPF Flux 1 OK (facture transformée déclarée)"
+                    );
+                }
+                // (b) CDV 200 Déposée — si CdarProcessor l'a généré
+                //     (cdv.xml + cdv.status_code = "200")
+                let cdv_status = exchange
+                    .get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok());
+                if cdv_status == Some(200) {
+                    if let Some(cdv_xml) = exchange.get_property("cdv.xml") {
+                        let mut cdv_exchange = Exchange::new(cdv_xml.as_bytes().to_vec());
+                        cdv_exchange.flow_id = exchange.flow_id;
+                        cdv_exchange.source_filename = Some(format!(
+                            "{}-cdv-200.xml",
+                            exchange.flow_id
+                        ));
+                        // Code interface Flux 6 statuts obligatoires
+                        cdv_exchange.set_property("ppf.code_interface", "FFE0654A");
+                        if let Err(e) = ppf.send(cdv_exchange).await {
+                            tracing::warn!(
+                                exchange_id = %exchange.id,
+                                error = %e,
+                                "Tee PPF CDV 200 échoué"
+                            );
+                        } else {
+                            tracing::info!(
+                                exchange_id = %exchange.id,
+                                "Tee PPF CDV 200 Déposée OK (Flux 6 FFE0654A)"
+                            );
+                        }
+                    }
+                }
             }
         }
 
-        // INTRA-PDP
+        // ────────────────────────────────────────────────────────────────
+        // Livraison à la PDP destinataire de l'acheteur
+        // ────────────────────────────────────────────────────────────────
+
+        // INTRA-PDP : raccourci quand l'acheteur est sur la même PDP que le
+        // vendeur. On évite un round-trip PEPPOL en injectant directement
+        // l'exchange dans la pipeline réception locale.
         if destination == "INTRA-PDP" {
-            // Si l'émission a échoué (CDV 213), on n'injecte pas chez l'acheteur :
-            // la facture n'a pas été transmise. Sinon, en cas de re-poll (REC-05
-            // doublon, BR-FR-12/13...), on injecterait des CDVs 202/203 fantômes
-            // côté acheteur pour une émission qui s'est soldée par un rejet.
             if exchange.has_errors() {
                 tracing::warn!(
                     exchange_id = %exchange.id,
@@ -596,26 +647,6 @@ impl Producer for DynamicRoutingProducer {
                     "DynamicRoutingProducer: émission en erreur, pas d'injection intra-PDP"
                 );
                 return Ok(exchange);
-            }
-            // PPF tee : selon AFNOR XP Z12-012, la PDP doit déclarer la
-            // facture (Flux 1) au PPF même quand l'échange est intra-PDP
-            // (e-reporting / archivage central). Si le PPF SFTP est
-            // configuré, on y envoie une copie en best-effort — un échec
-            // PPF ne bloque pas l'injection intra-PDP (sinon les CDVs
-            // 202/203 ne seraient jamais générés côté acheteur).
-            if let Some(ref ppf) = self.ppf_producer {
-                if let Err(e) = ppf.send(exchange.clone()).await {
-                    tracing::warn!(
-                        exchange_id = %exchange.id,
-                        error = %e,
-                        "DynamicRoutingProducer: tee PPF échoué (intra-PDP continue)"
-                    );
-                } else {
-                    tracing::info!(
-                        exchange_id = %exchange.id,
-                        "DynamicRoutingProducer: facture déclarée au PPF en parallèle (intra-PDP)"
-                    );
-                }
             }
             if let Some(ref tx) = self.intra_pdp_tx {
                 tracing::info!(
@@ -651,21 +682,24 @@ impl Producer for DynamicRoutingProducer {
             }
         }
 
-        // PDP-{matricule}
+        // PDP-{matricule} : livraison vers une autre PDP via PEPPOL AS4
+        // (le `AfnorFlowProducer` actuel est un stub HTTP — voir TODO
+        // "Routage inter-PDP : Annuaire + PEPPOL — à refaire" dans
+        // docs/todo.md).
         if destination.starts_with("PDP-") {
             let matricule = &destination[4..];
             if let Some(producer) = self.afnor_producers.get(matricule) {
                 tracing::info!(
                     exchange_id = %exchange.id,
                     pdp_matricule = %matricule,
-                    "DynamicRoutingProducer: envoi vers PDP via AFNOR Flow Service"
+                    "DynamicRoutingProducer: livraison vers PDP destinataire"
                 );
                 return producer.send(exchange).await;
             } else {
                 tracing::warn!(
                     exchange_id = %exchange.id,
                     pdp_matricule = %matricule,
-                    "Aucun producer AFNOR pour cette PDP, fallback"
+                    "Aucun producer configuré pour cette PDP, fallback filesystem"
                 );
             }
         }
