@@ -79,6 +79,6 @@ pub use model::{
 };
 pub use generator::CdarGenerator;
 pub use parser::CdarParser;
-pub use processor::{CdarProcessor, CdarMode, CdvDispositionProcessor, CdvFileWriterProcessor, CdvReceptionProcessor, DocumentTypeRouter, IrrecevabiliteProcessor, LocalIntraPdpRouter};
+pub use processor::{CdarProcessor, CdarMode, CdvDispositionProcessor, CdvFileWriterProcessor, CdvReceptionProcessor, CdvTenantRole, DocumentTypeRouter, IrrecevabiliteProcessor, LocalIntraPdpRouter, TenantCdvWriterProcessor};
 pub use cdv_return::CdvReturnProcessor;
 pub use ppf_relay::CdvPpfRelayProcessor;

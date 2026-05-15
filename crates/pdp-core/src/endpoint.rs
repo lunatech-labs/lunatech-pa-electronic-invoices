@@ -370,6 +370,107 @@ impl Producer for FileEndpoint {
     }
 }
 
+/// Stratégie de résolution du tenant cible pour [`TenantOutputProducer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TenantRole {
+    /// Écrit dans le `out/` du **vendeur** (utile pour les CDV retour
+    /// 202/203 émis par la pipeline intra-PDP réception : le vendeur veut
+    /// voir les accusés de l'acheteur dans son propre répertoire).
+    Seller,
+    /// Écrit dans le `out/` de l'**acheteur** (utile pour la facture
+    /// elle-même quand elle est routée en intra-PDP vers le destinataire
+    /// local).
+    Buyer,
+}
+
+/// Producer qui écrit le `body` de l'exchange dans
+/// `{tenants_dir}/{siren}/out/{filename}`, où `siren` est résolu depuis
+/// l'invoice de l'exchange (vendeur ou acheteur selon [`TenantRole`]).
+///
+/// Si le tenant cible n'existe pas (pas de sous-répertoire), ou si la facture
+/// n'est pas parsée, on retombe sur `fallback_dir` — comportement non bloquant
+/// pour rester compatible avec les flux qui ne correspondent à aucun tenant
+/// local.
+pub struct TenantOutputProducer {
+    name: String,
+    tenants_dir: std::path::PathBuf,
+    role: TenantRole,
+    fallback_dir: std::path::PathBuf,
+}
+
+impl TenantOutputProducer {
+    pub fn new(
+        name: &str,
+        tenants_dir: impl Into<std::path::PathBuf>,
+        role: TenantRole,
+        fallback_dir: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            tenants_dir: tenants_dir.into(),
+            role,
+            fallback_dir: fallback_dir.into(),
+        }
+    }
+
+    fn resolve_siren(&self, exchange: &Exchange) -> Option<String> {
+        let invoice = exchange.invoice.as_ref()?;
+        let siret = match self.role {
+            TenantRole::Seller => invoice.seller_siret.as_deref(),
+            TenantRole::Buyer => invoice.buyer_siret.as_deref(),
+        }?;
+        // Le SIREN est le préfixe 9 chiffres du SIRET.
+        siret
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .take(9)
+            .collect::<String>()
+            .into()
+    }
+}
+
+#[async_trait]
+impl Producer for TenantOutputProducer {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn send(&self, exchange: Exchange) -> PdpResult<Exchange> {
+        let dir = match self.resolve_siren(&exchange) {
+            Some(siren) if !siren.is_empty() => {
+                let tenant_out = self.tenants_dir.join(&siren).join("out");
+                if tenant_out.is_dir() || tenant_out.parent().map(|p| p.is_dir()).unwrap_or(false) {
+                    tenant_out
+                } else {
+                    tracing::debug!(
+                        siren = %siren,
+                        "Tenant inconnu pour intra-PDP, fallback vers {}",
+                        self.fallback_dir.display()
+                    );
+                    self.fallback_dir.clone()
+                }
+            }
+            _ => self.fallback_dir.clone(),
+        };
+        if !dir.exists() {
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| crate::error::PdpError::IoError(e))?;
+        }
+        let id_string = exchange.id.to_string();
+        let filename = exchange.source_filename.as_deref().unwrap_or(&id_string);
+        let file_path = dir.join(filename);
+        std::fs::write(&file_path, &exchange.body)
+            .map_err(|e| crate::error::PdpError::IoError(e))?;
+        tracing::info!(
+            filename = %filename,
+            path = %file_path.display(),
+            role = ?self.role,
+            "Fichier écrit dans le répertoire tenant"
+        );
+        Ok(exchange)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

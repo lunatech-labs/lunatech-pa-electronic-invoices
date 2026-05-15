@@ -61,7 +61,7 @@ pub mod model;
 
 pub use exchange::Exchange;
 pub use processor::{Processor, TenantTagProcessor};
-pub use endpoint::{Endpoint, EndpointType};
+pub use endpoint::{Endpoint, EndpointType, TenantOutputProducer, TenantRole};
 pub use channel::ChannelConsumer;
 pub use route::{Route, RouteBuilder};
 pub use router::Router;

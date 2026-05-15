@@ -597,6 +597,26 @@ impl Producer for DynamicRoutingProducer {
                 );
                 return Ok(exchange);
             }
+            // PPF tee : selon AFNOR XP Z12-012, la PDP doit déclarer la
+            // facture (Flux 1) au PPF même quand l'échange est intra-PDP
+            // (e-reporting / archivage central). Si le PPF SFTP est
+            // configuré, on y envoie une copie en best-effort — un échec
+            // PPF ne bloque pas l'injection intra-PDP (sinon les CDVs
+            // 202/203 ne seraient jamais générés côté acheteur).
+            if let Some(ref ppf) = self.ppf_producer {
+                if let Err(e) = ppf.send(exchange.clone()).await {
+                    tracing::warn!(
+                        exchange_id = %exchange.id,
+                        error = %e,
+                        "DynamicRoutingProducer: tee PPF échoué (intra-PDP continue)"
+                    );
+                } else {
+                    tracing::info!(
+                        exchange_id = %exchange.id,
+                        "DynamicRoutingProducer: facture déclarée au PPF en parallèle (intra-PDP)"
+                    );
+                }
+            }
             if let Some(ref tx) = self.intra_pdp_tx {
                 tracing::info!(
                     exchange_id = %exchange.id,

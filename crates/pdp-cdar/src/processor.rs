@@ -972,6 +972,135 @@ impl Processor for CdvFileWriterProcessor {
     }
 }
 
+/// Stratégie de résolution du tenant cible pour [`TenantCdvWriterProcessor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CdvTenantRole {
+    /// Écrit le CDV dans le `out/cdar/` du **vendeur**. Cas typique :
+    /// la pipeline intra-PDP réception produit un CDV 202/203 que le
+    /// vendeur veut voir comme accusé (« ma facture a été reçue par
+    /// l'acheteur »).
+    Seller,
+    /// Écrit dans le `out/cdar/` de l'**acheteur**. Utile pour donner à
+    /// l'acheteur une copie locale des CDV qu'il a émis.
+    Buyer,
+}
+
+/// Variante de [`CdvFileWriterProcessor`] qui résout dynamiquement le
+/// répertoire de destination en fonction du tenant cible.
+///
+/// `{tenants_dir}/{siren}/out/cdar/{flow_id}-cdv-{code}.xml`
+///
+/// Si le tenant n'est pas un répertoire local, tombe sur `fallback_dir`
+/// (compatible avec les flux non-intra-PDP).
+pub struct TenantCdvWriterProcessor {
+    tenants_dir: std::path::PathBuf,
+    role: CdvTenantRole,
+    fallback_dir: std::path::PathBuf,
+}
+
+impl TenantCdvWriterProcessor {
+    pub fn new(
+        tenants_dir: impl Into<std::path::PathBuf>,
+        role: CdvTenantRole,
+        fallback_dir: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            tenants_dir: tenants_dir.into(),
+            role,
+            fallback_dir: fallback_dir.into(),
+        }
+    }
+
+    fn resolve_siren(&self, exchange: &Exchange) -> Option<String> {
+        let invoice = exchange.invoice.as_ref()?;
+        let siret = match self.role {
+            CdvTenantRole::Seller => invoice.seller_siret.as_deref(),
+            CdvTenantRole::Buyer => invoice.buyer_siret.as_deref(),
+        }?;
+        siret
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .take(9)
+            .collect::<String>()
+            .into()
+    }
+}
+
+#[async_trait]
+impl Processor for TenantCdvWriterProcessor {
+    fn name(&self) -> &str {
+        "TenantCdvWriterProcessor"
+    }
+
+    async fn process(&self, exchange: Exchange) -> PdpResult<Exchange> {
+        let target_dir = match self.resolve_siren(&exchange) {
+            Some(siren) if !siren.is_empty() => {
+                let path = self.tenants_dir.join(&siren).join("out").join("cdar");
+                let parent_ok = path
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.is_dir())
+                    .unwrap_or(false);
+                if parent_ok {
+                    path
+                } else {
+                    self.fallback_dir.join("cdar")
+                }
+            }
+            _ => self.fallback_dir.join("cdar"),
+        };
+
+        // Écrit le CDV "generated" (200/202/213/221/501) si présent
+        if let Some(xml) = exchange.get_property("cdv.xml") {
+            let code = exchange
+                .get_property("cdv.status_code")
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(0);
+            if let Err(e) = std::fs::create_dir_all(&target_dir) {
+                tracing::warn!(error = %e, dir = %target_dir.display(), "Échec création répertoire CDV tenant");
+                return Ok(exchange);
+            }
+            let filename = format!("{}-cdv-{:03}.xml", exchange.flow_id, code);
+            let path = target_dir.join(&filename);
+            if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+                tracing::warn!(error = %e, path = %path.display(), "Échec écriture CDV tenant");
+            } else {
+                tracing::info!(
+                    flow_id = %exchange.flow_id,
+                    cdv_code = %code,
+                    path = %path.display(),
+                    role = ?self.role,
+                    "CDV écrit dans le répertoire tenant"
+                );
+            }
+        }
+
+        // Écrit également le CDV "disposition" (203) si présent — ce processor
+        // s'exécute après CdvDispositionProcessor donc les deux peuvent
+        // coexister sur le même exchange.
+        if let Some(xml) = exchange.get_property("cdv.disposition.xml") {
+            let code = exchange
+                .get_property("cdv.disposition.status_code")
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(0);
+            let filename = format!("{}-cdv-{:03}.xml", exchange.flow_id, code);
+            let path = target_dir.join(&filename);
+            if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+                tracing::warn!(error = %e, path = %path.display(), "Échec écriture CDV disposition tenant");
+            } else {
+                tracing::info!(
+                    flow_id = %exchange.flow_id,
+                    cdv_code = %code,
+                    path = %path.display(),
+                    role = ?self.role,
+                    "CDV disposition écrit dans le répertoire tenant"
+                );
+            }
+        }
+        Ok(exchange)
+    }
+}
+
 /// Classifie une erreur de pipeline en code motif CDV officiel
 fn classify_error_reason(step: &str, message: &str) -> StatusReasonCode {
     let msg_lower = message.to_lowercase();

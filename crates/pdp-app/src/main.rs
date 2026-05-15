@@ -1520,9 +1520,14 @@ async fn build_router(
             .map(|r| r.destination.path.clone())
             .unwrap_or_else(|| "output/intra-pdp".to_string());
 
+        // Destination dynamique : la facture est écrite dans `tenants/{buyer_siren}/out/`
+        // (l'acheteur récupère la facture là où il s'y attend). Si l'acheteur n'est
+        // pas un tenant local, on retombe sur `default_output` (output/intra-pdp/).
         let intra_producer: Box<dyn pdp_core::endpoint::Producer> =
-            Box::new(pdp_core::endpoint::FileEndpoint::output(
-                "intra-pdp-dest",
+            Box::new(pdp_core::TenantOutputProducer::new(
+                "intra-pdp-dest-buyer",
+                "tenants",
+                pdp_core::TenantRole::Buyer,
                 &default_output,
             ));
 
@@ -1559,6 +1564,14 @@ async fn build_router(
             .process(Box::new(pdp_cdar::CdvDispositionProcessor::new(
                 &config.pdp.id,
                 &config.pdp.name,
+                &default_output,
+            )))
+            // Route les CDV 202/203 vers le `out/cdar/` du VENDEUR (accusés
+            // retour). Le seller voit ainsi le cycle complet 200→201→202→203
+            // dans son propre répertoire, sans avoir à interroger l'UI.
+            .process(Box::new(pdp_cdar::TenantCdvWriterProcessor::new(
+                "tenants",
+                pdp_cdar::CdvTenantRole::Seller,
                 &default_output,
             )))
             .process(Box::new(pdp_trace::ExchangeSnapshotProcessor::distributed(store.clone())));
