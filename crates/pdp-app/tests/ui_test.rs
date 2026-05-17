@@ -92,9 +92,13 @@ impl InMemoryTraceBackend {
             attachment_count: d.attachment_count,
             cdv_status_code: d.cdv_status_code,
             emission_cdv_status_code: d.emission_cdv_status_code,
+            emission_cdv_at: d.emission_cdv_at.clone(),
             emission_disposition_cdv_status_code: d.emission_disposition_cdv_status_code,
+            emission_disposition_cdv_at: d.emission_disposition_cdv_at.clone(),
             reception_cdv_status_code: d.reception_cdv_status_code,
+            reception_cdv_at: d.reception_cdv_at.clone(),
             reception_disposition_cdv_status_code: d.reception_disposition_cdv_status_code,
+            reception_disposition_cdv_at: d.reception_disposition_cdv_at.clone(),
         }
     }
 }
@@ -441,6 +445,8 @@ fn doc(
         converted_format: None,
         attachment_count: 0,
         attachment_filenames: Vec::new(),
+        attachments_text: None,
+        raw_pdf_text: None,
         events: vec![EventEntry {
             id: "evt-1".to_string(),
             route_id: "route-test".to_string(),

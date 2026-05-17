@@ -3271,6 +3271,8 @@ mod tests {
             converted_format: None,
             attachment_count: 0,
             attachment_filenames: vec![],
+            attachments_text: None,
+            raw_pdf_text: None,
             events: vec![],
             errors: vec![],
             validation_warnings: vec![],

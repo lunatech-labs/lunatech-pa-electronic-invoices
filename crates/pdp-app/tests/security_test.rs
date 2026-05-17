@@ -147,9 +147,13 @@ fn to_summary(d: &ExchangeDocument) -> ExchangeSummary {
         attachment_count: d.attachment_count,
         cdv_status_code: d.cdv_status_code,
         emission_cdv_status_code: d.emission_cdv_status_code,
+        emission_cdv_at: d.emission_cdv_at.clone(),
         emission_disposition_cdv_status_code: d.emission_disposition_cdv_status_code,
+        emission_disposition_cdv_at: d.emission_disposition_cdv_at.clone(),
         reception_cdv_status_code: d.reception_cdv_status_code,
+        reception_cdv_at: d.reception_cdv_at.clone(),
         reception_disposition_cdv_status_code: d.reception_disposition_cdv_status_code,
+        reception_disposition_cdv_at: d.reception_disposition_cdv_at.clone(),
     }
 }
 
@@ -205,6 +209,8 @@ fn doc_for(seller_siren: &str, buyer_siren: &str, invoice: &str) -> ExchangeDocu
         converted_format: None,
         attachment_count: 0,
         attachment_filenames: Vec::new(),
+        attachments_text: None,
+        raw_pdf_text: None,
         events: vec![EventEntry {
             id: "e".into(),
             route_id: "rt".into(),

@@ -161,6 +161,16 @@ pub struct ExchangeDocument {
     pub reception_disposition_cdv_at: Option<String>,
     pub attachment_count: usize,
     pub attachment_filenames: Vec<String>,
+    /// Texte extrait des PJ PDF (BG-24 `embedded_content`). Concaténé avec
+    /// `\n--- {filename} ---\n` entre chaque PJ. `None` si aucune PJ PDF ou
+    /// extraction non disponible. Champ ES indexé pour `search_full_text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments_text: Option<String>,
+    /// Texte extrait du PDF principal (Factur-X — couche visuelle). Permet
+    /// de matcher du texte présent dans le rendu PDF mais absent du XML
+    /// (rare, mais possible pour les annexes graphiques embarquées).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_pdf_text: Option<String>,
     pub events: Vec<EventEntry>,
     pub errors: Vec<ErrorEntry>,
     pub validation_warnings: Vec<WarningEntry>,
@@ -263,12 +273,20 @@ pub struct ExchangeSummary {
     #[serde(default)]
     pub emission_cdv_status_code: Option<u16>,
     #[serde(default)]
+    pub emission_cdv_at: Option<String>,
+    #[serde(default)]
     pub emission_disposition_cdv_status_code: Option<u16>,
+    #[serde(default)]
+    pub emission_disposition_cdv_at: Option<String>,
     /// CDVs réception (202, 203) — renseignés côté buyer (intra-PDP).
     #[serde(default)]
     pub reception_cdv_status_code: Option<u16>,
     #[serde(default)]
+    pub reception_cdv_at: Option<String>,
+    #[serde(default)]
     pub reception_disposition_cdv_status_code: Option<u16>,
+    #[serde(default)]
+    pub reception_disposition_cdv_at: Option<String>,
 }
 
 impl TraceStore {
@@ -339,6 +357,16 @@ impl TraceStore {
     /// Wildcard couvrant tous les index de ce store (`{prefix}-*`).
     fn index_pattern(&self) -> String {
         format!("{}-*", self.index_prefix)
+    }
+
+    /// Extrait le texte d'un PDF (PJ ou PDF principal Factur-X) pour
+    /// l'indexation full-text. Catch_unwind protège des panics rares de
+    /// `pdf-extract` sur des PDFs malformés — un PDF illisible ne doit
+    /// jamais bloquer l'indexation de la facture.
+    fn extract_pdf_text(bytes: &[u8]) -> Result<String, String> {
+        std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(bytes))
+            .map_err(|_| "panic dans pdf-extract".to_string())
+            .and_then(|res| res.map_err(|e| format!("{}", e)))
     }
 
     /// Extrait le SIREN depuis un SIRET (9 premiers chiffres)
@@ -437,6 +465,8 @@ impl TraceStore {
                     "reception_disposition_cdv_at": { "type": "date" },
                     "attachment_count": { "type": "integer" },
                     "attachment_filenames": { "type": "keyword" },
+                    "attachments_text": { "type": "text", "index": true },
+                    "raw_pdf_text": { "type": "text", "index": true },
                     "events": {
                         "type": "nested",
                         "properties": {
@@ -533,6 +563,63 @@ impl TraceStore {
                     .collect()
             })
             .unwrap_or_default();
+
+        // Texte extrait des PJ PDF (BG-24 embedded_content). On ne tente
+        // l'extraction que sur les fichiers dont le mime ou l'extension
+        // ressemble à un PDF — sinon pdf-extract panique sur certains
+        // formats. Header marker "--- {filename} ---" pour séparer les PJ.
+        let attachments_text: Option<String> = invoice.and_then(|i| {
+            let mut chunks: Vec<String> = Vec::new();
+            for a in &i.attachments {
+                let Some(content) = a.embedded_content.as_deref() else {
+                    continue;
+                };
+                let is_pdf = a
+                    .mime_code
+                    .as_deref()
+                    .map(|m| m.eq_ignore_ascii_case("application/pdf"))
+                    .unwrap_or(false)
+                    || a.filename
+                        .as_deref()
+                        .map(|f| f.to_lowercase().ends_with(".pdf"))
+                        .unwrap_or(false)
+                    || content.starts_with(b"%PDF");
+                if !is_pdf {
+                    continue;
+                }
+                match Self::extract_pdf_text(content) {
+                    Ok(text) if !text.trim().is_empty() => {
+                        let fname = a.filename.clone().unwrap_or_default();
+                        chunks.push(format!("--- {} ---\n{}", fname, text));
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(
+                        filename = ?a.filename,
+                        error = %e,
+                        "Extraction texte PJ PDF échouée (PJ ignorée pour la recherche full-text)"
+                    ),
+                }
+            }
+            if chunks.is_empty() {
+                None
+            } else {
+                Some(chunks.join("\n\n"))
+            }
+        });
+
+        // Texte extrait du PDF principal (Factur-X). raw_pdf_base64 est
+        // déjà décodé depuis raw_pdf_b64 plus haut. On préfère extraire
+        // depuis invoice.raw_pdf (binaire) si dispo plutôt que re-décoder.
+        let raw_pdf_text: Option<String> = invoice
+            .and_then(|i| i.raw_pdf.as_deref())
+            .and_then(|bytes| match Self::extract_pdf_text(bytes) {
+                Ok(t) if !t.trim().is_empty() => Some(t),
+                Ok(_) => None,
+                Err(e) => {
+                    tracing::warn!(error = %e, "Extraction texte PDF principal échouée");
+                    None
+                }
+            });
 
         let errors: Vec<ErrorEntry> = exchange.errors.iter().map(|e| ErrorEntry {
             step: e.step.clone(),
@@ -929,6 +1016,8 @@ impl TraceStore {
             converted_format,
             attachment_count: attachment_filenames.len(),
             attachment_filenames,
+            attachments_text,
+            raw_pdf_text,
             events: Vec::new(),
             errors,
             validation_warnings,
@@ -1350,6 +1439,72 @@ impl TraceStore {
     }
 
     /// Recherche full-text dans les XML (tous les index ou un SIREN spécifique)
+    /// Recherche full-text "Google-like" multi-champs : XML, n° facture,
+    /// noms d'entreprises, fichier source, noms d'attachements. Pertinence
+    /// gérée par ES (BM25 sur les champs analysés). Limité à 50 résultats.
+    ///
+    /// La recherche dans le contenu BINAIRE des PDFs attachements n'est pas
+    /// faite ici (phase 2 : extraire le texte à l'ingestion + stocker en
+    /// champ ES `attachments_text`). Le nom du fichier joint matche déjà,
+    /// ce qui couvre 80 % des cas pratiques (utilisateur cherche "BL-2024").
+    pub async fn search_full_text(
+        &self,
+        query: &str,
+        siren: Option<&str>,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        let index = siren
+            .map(|s| self.index_name(s))
+            .unwrap_or_else(|| self.index_pattern());
+
+        // Scope tenant : si `siren` fourni, on est déjà dans son index. Si
+        // None, on est en wildcard pdp-* — on ajoute un filtre `should
+        // seller_siren OR buyer_siren` quand le caller passe un siren via
+        // l'index_name (cas habituel UI). En global, on ne filtre pas.
+        let search_body = serde_json::json!({
+            "query": {
+                "multi_match": {
+                    "query": query,
+                    "type": "best_fields",
+                    "fields": [
+                        "raw_xml",
+                        "attachments_text",
+                        "raw_pdf_text",
+                        "invoice_number^3",
+                        "seller_name^2",
+                        "buyer_name^2",
+                        "source_filename",
+                        "attachment_filenames"
+                    ],
+                    "operator": "and"
+                }
+            },
+            "sort": ["_score", { "created_at": "desc" }],
+            "size": 50,
+            "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
+                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code",
+                        "emission_cdv_status_code", "emission_cdv_at",
+                        "emission_disposition_cdv_status_code", "emission_disposition_cdv_at",
+                        "reception_cdv_status_code", "reception_cdv_at",
+                        "reception_disposition_cdv_status_code", "reception_disposition_cdv_at"]
+        });
+
+        let resp = self
+            .client
+            .post(&format!("{}/{}/_search", self.base_url, index))
+            .json(&search_body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Recherche full-text échouée: {}", e)))?;
+        if !resp.status().is_success() {
+            return Ok(Vec::new());
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+        Ok(Self::parse_summaries(&body))
+    }
+
     pub async fn search_xml(&self, query: &str, siren: Option<&str>) -> PdpResult<Vec<ExchangeSummary>> {
         let index = siren
             .map(|s| self.index_name(s))
@@ -1363,8 +1518,10 @@ impl TraceStore {
             "size": 50,
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
                         "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code",
-                        "emission_cdv_status_code", "emission_disposition_cdv_status_code",
-                        "reception_cdv_status_code", "reception_disposition_cdv_status_code"]
+                        "emission_cdv_status_code", "emission_cdv_at",
+                        "emission_disposition_cdv_status_code", "emission_disposition_cdv_at",
+                        "reception_cdv_status_code", "reception_cdv_at",
+                        "reception_disposition_cdv_status_code", "reception_disposition_cdv_at"]
         });
 
         let resp = self.client
@@ -1393,8 +1550,10 @@ impl TraceStore {
             "size": 5,
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
                         "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code",
-                        "emission_cdv_status_code", "emission_disposition_cdv_status_code",
-                        "reception_cdv_status_code", "reception_disposition_cdv_status_code"]
+                        "emission_cdv_status_code", "emission_cdv_at",
+                        "emission_disposition_cdv_status_code", "emission_disposition_cdv_at",
+                        "reception_cdv_status_code", "reception_cdv_at",
+                        "reception_disposition_cdv_status_code", "reception_disposition_cdv_at"]
         });
 
         let resp = self.client
@@ -1762,8 +1921,10 @@ impl TraceStore {
             "sort": [{ "created_at": "desc" }],
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
                         "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code",
-                        "emission_cdv_status_code", "emission_disposition_cdv_status_code",
-                        "reception_cdv_status_code", "reception_disposition_cdv_status_code"]
+                        "emission_cdv_status_code", "emission_cdv_at",
+                        "emission_disposition_cdv_status_code", "emission_disposition_cdv_at",
+                        "reception_cdv_status_code", "reception_cdv_at",
+                        "reception_disposition_cdv_status_code", "reception_disposition_cdv_at"]
         });
 
         if dedup_by_invoice {
@@ -2229,9 +2390,13 @@ impl TraceStore {
                         attachment_count: source["attachment_count"].as_u64().unwrap_or(0) as usize,
                         cdv_status_code: source["cdv_status_code"].as_u64().map(|v| v as u16),
                         emission_cdv_status_code: source["emission_cdv_status_code"].as_u64().map(|v| v as u16),
+                        emission_cdv_at: source["emission_cdv_at"].as_str().map(|s| s.to_string()),
                         emission_disposition_cdv_status_code: source["emission_disposition_cdv_status_code"].as_u64().map(|v| v as u16),
+                        emission_disposition_cdv_at: source["emission_disposition_cdv_at"].as_str().map(|s| s.to_string()),
                         reception_cdv_status_code: source["reception_cdv_status_code"].as_u64().map(|v| v as u16),
+                        reception_cdv_at: source["reception_cdv_at"].as_str().map(|s| s.to_string()),
                         reception_disposition_cdv_status_code: source["reception_disposition_cdv_status_code"].as_u64().map(|v| v as u16),
+                        reception_disposition_cdv_at: source["reception_disposition_cdv_at"].as_str().map(|s| s.to_string()),
                     });
                 }
             }

@@ -305,6 +305,8 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         .route("/ui", get(crate::ui::handle_dashboard))
         .route("/ui/emises", get(crate::ui::handle_flows_emises))
         .route("/ui/recues", get(crate::ui::handle_flows_recues))
+        .route("/ui/cdv", get(crate::ui::handle_cdv_list))
+        .route("/ui/search", get(crate::ui::handle_search))
         .route("/ui/emises/export.csv", get(crate::ui::handle_export_emises_csv))
         .route("/ui/recues/export.csv", get(crate::ui::handle_export_recues_csv))
         .route("/ui/e-reporting", get(crate::ui::handle_e_reporting))

@@ -19,3 +19,4 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 base64 = { workspace = true }
 reqwest = { workspace = true }
+pdf-extract = { workspace = true }

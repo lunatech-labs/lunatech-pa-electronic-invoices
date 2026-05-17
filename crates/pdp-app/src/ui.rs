@@ -759,6 +759,72 @@ dl.kv dd { color: var(--ink); font-size: 13.5px; }
     font-weight: 500;
     white-space: nowrap;
 }
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 14px 0;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--cream);
+    color: var(--ink-2);
+    border: 1px solid var(--line-2);
+    font-family: 'Geist Mono',monospace;
+    font-size: 12px;
+    text-decoration: none;
+}
+.chip:hover { background: #fff; }
+.chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+/* Tableau CDV groupé par facture : chaque tbody.cdv-group = 1 facture.
+   La ligne header ouvre le groupe (numéro + contrepartie), les lignes
+   suivantes sont les CDVs dans l'ordre du cycle. */
+.cdv-table tbody.cdv-group { border-top: 2px solid var(--line-2); }
+.cdv-table tbody.cdv-group:first-of-type { border-top: none; }
+.cdv-table tr.cdv-group-header td {
+    background: var(--cream);
+    padding: 8px 10px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--line-2);
+}
+.cdv-table td.cdv-indent { padding-left: 24px; }
+.search-card {
+    display: flex;
+    gap: 8px;
+    margin: 14px 0 18px 0;
+    padding: 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    background: #fff;
+}
+.search-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+}
+.search-input:focus { outline: 2px solid var(--ink); outline-offset: -1px; }
+.btn-search {
+    padding: 10px 18px;
+    background: var(--ink);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.btn-search:hover { background: #000; }
+.muted {
+    color: var(--ink-3, #888);
+    font-size: 0.85em;
+}
+
 .err-badge {
     display: inline-flex;
     align-items: center;
@@ -1040,12 +1106,13 @@ pub(crate) fn page_shell_with_counts(
     // muette (mock) car ces ressources n'ont pas de compteur centralisé.
     let ops_items = {
         let cdv_q = match siren {
-            Some(s) => format!("/ui/emises?siren={}&status=DISTRIBU%C3%89", s),
-            None => "/ui/emises".to_string(),
+            Some(s) => format!("/ui/cdv?siren={}", s),
+            None => "/ui/cdv".to_string(),
         };
+        let cdv_active = if active == "cdv" { " active" } else { "" };
         let ereporting_active = if active == "e-reporting" { " active" } else { "" };
         format!(
-            r#"<a href="{cdv}" class="item">{ic_cdv}<span>Cycle de vie (CDV)</span></a>
+            r#"<a href="{cdv}" class="item{cdv_active}">{ic_cdv}<span>Cycle de vie (CDV)</span></a>
         <a href="/ui/e-reporting{ereporting_q}" class="item{ereporting_active}">{ic_report}<span>E-reporting</span></a>
         <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/events.md" class="item" target="_blank" rel="noopener">{ic_webhook}<span>Webhooks</span></a>
         <a href="https://github.com/lunatech-labs/lunatech-ferrite-pa-electronic-invoices/blob/main/docs/peppol.md" class="item" target="_blank" rel="noopener">{ic_peppol}<span>PEPPOL AS4</span></a>"#,
@@ -1067,6 +1134,7 @@ pub(crate) fn page_shell_with_counts(
             "dashboard" => Some("Tableau de bord"),
             "emises" => Some("Factures émises"),
             "recues" => Some("Factures reçues"),
+            "cdv" => Some("Cycle de vie (CDV)"),
             "e-reporting" => Some("E-reporting"),
             "admin" => Some("Administration"),
             _ => None,
@@ -1400,6 +1468,11 @@ pub async fn handle_dashboard(
     <h1>Flux <span class="serif">en circulation</span></h1>
     <div class="actions"><span class="pj-badge">{tenant_label}</span><span class="pj-badge">SIREN {siren}</span></div>
 </div>
+<form class="search-card" action="/ui/search" method="get">
+    <input type="hidden" name="siren" value="{siren}" />
+    <input class="search-input" type="search" name="q" placeholder="Rechercher dans les factures (n° facture, vendeur, acheteur, contenu XML, nom de PJ)..." autocomplete="off" />
+    <button type="submit" class="btn-search">Rechercher</button>
+</form>
 <div class="kpi-grid">
     <div class="kpi-card">
         <div class="kpi-label">Total flux</div>
@@ -1740,6 +1813,468 @@ pub async fn handle_flows_recues(
     q: Query<FlowsListQuery>,
 ) -> axum::response::Response {
     render_flows_list(state, ctx, q, FlowDirection::Recues).await
+}
+
+/// Query params pour la recherche full-text.
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    pub siren: Option<String>,
+    pub q: Option<String>,
+}
+
+/// `GET /ui/search?q=foo&siren=X` — recherche full-text dans les factures.
+///
+/// Champs indexés (cf. `TraceStore::search_full_text`) :
+/// - `raw_xml` : contenu complet UBL/CII de la facture
+/// - `invoice_number` (boost ×3) : match exact ou préfixe sur le numéro
+/// - `seller_name`, `buyer_name` (boost ×2)
+/// - `source_filename`, `attachment_filenames`
+///
+/// Pertinence ES (BM25) + tri secondaire par `created_at` desc. Top 50.
+/// Le contenu binaire des PDFs attachements n'est pas encore indexé
+/// (phase 2 : extraction texte à l'ingestion).
+pub async fn handle_search(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    Query(q): Query<SearchQuery>,
+) -> axum::response::Response {
+    let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    let siren = owned_siren.as_deref();
+    let query_str = q.q.as_deref().unwrap_or("").trim();
+    let body = match (siren, &state.trace_store) {
+        (None, _) => siren_picker(&state, &ctx, "/ui/search"),
+        (_, None) => "TraceStore non configuré (Elasticsearch)".to_string(),
+        (Some(s), Some(store)) => {
+            let results: Vec<pdp_trace::store::ExchangeSummary> = if query_str.is_empty() {
+                Vec::new()
+            } else {
+                store
+                    .search_full_text(query_str, Some(s))
+                    .await
+                    .unwrap_or_default()
+            };
+            let rows: String = results
+                .iter()
+                .map(|r| {
+                    let counterparty = if r.seller_siren.as_deref() == Some(s) {
+                        format!(
+                            "{} <span class=\"muted\">({})</span>",
+                            html_escape(r.buyer_name.as_deref().unwrap_or("—")),
+                            html_escape(r.buyer_siren.as_deref().unwrap_or("—")),
+                        )
+                    } else {
+                        format!(
+                            "{} <span class=\"muted\">({})</span>",
+                            html_escape(r.seller_name.as_deref().unwrap_or("—")),
+                            html_escape(r.seller_siren.as_deref().unwrap_or("—")),
+                        )
+                    };
+                    let dir = DisplayDirection::from_summary(s, r);
+                    let (status, badge) = afnor_status(
+                        &r.status,
+                        r.error_count,
+                        r.cdv_status_code,
+                        r.emission_cdv_status_code,
+                        r.emission_disposition_cdv_status_code,
+                        r.reception_cdv_status_code,
+                        r.reception_disposition_cdv_status_code,
+                        dir,
+                    );
+                    let date_short = &r.created_at[..r.created_at.len().min(10)];
+                    let side = if r.seller_siren.as_deref() == Some(s) {
+                        "émission"
+                    } else {
+                        "réception"
+                    };
+                    format!(
+                        r#"<tr>
+    <td class="num"><a href="/ui/flows/{flow_id}?siren={siren}">{inv}</a></td>
+    <td>{counterparty}</td>
+    <td><span class="muted">{side}</span></td>
+    <td><span class="badge {badge}">{status}</span></td>
+    <td class="num">{date}</td>
+</tr>"#,
+                        flow_id = html_escape(&r.flow_id),
+                        siren = html_escape(s),
+                        inv = html_escape(r.invoice_number.as_deref().unwrap_or("—")),
+                        counterparty = counterparty,
+                        side = side,
+                        badge = badge,
+                        status = html_escape(&status),
+                        date = html_escape(date_short),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let table = if query_str.is_empty() {
+                r#"<p class="muted-p">Saisis un terme de recherche dans le champ ci-dessus.</p>"#.to_string()
+            } else if results.is_empty() {
+                format!(
+                    r#"<p class="muted-p">Aucune facture ne correspond à <strong>{}</strong>.</p>"#,
+                    html_escape(query_str),
+                )
+            } else {
+                format!(
+                    r#"<table class="data-table"><thead><tr>
+    <th>N° facture</th><th>Contrepartie</th><th>Côté</th><th>Statut</th><th>Date</th>
+</tr></thead><tbody>
+{rows}
+</tbody></table>"#,
+                    rows = rows,
+                )
+            };
+            format!(
+                r#"<div class="app-title">
+    <h1>Recherche <span class="serif">de factures</span></h1>
+    <div class="actions"><span class="pj-badge">{n} résultat{plural}</span></div>
+</div>
+<form class="search-card" action="/ui/search" method="get">
+    <input type="hidden" name="siren" value="{siren}" />
+    <input class="search-input" type="search" name="q" value="{q}" placeholder="Rechercher dans les factures (n° facture, vendeur, acheteur, contenu XML, nom de PJ)..." autocomplete="off" autofocus />
+    <button type="submit" class="btn-search">Rechercher</button>
+</form>
+<div class="card">
+    <p class="muted-p">Recherche multi-champs (n° facture, vendeur, acheteur, nom de fichier, noms d'attachements, contenu XML). Top 50 par pertinence. Le contenu binaire des PDFs attachements n'est pas encore indexé.</p>
+    {table}
+</div>"#,
+                n = results.len(),
+                plural = if results.len() == 1 { "" } else { "s" },
+                siren = html_escape(s),
+                q = html_escape(query_str),
+                table = table,
+            )
+        }
+    };
+    let counts = sidebar_counts_for(&state, siren).await;
+    html_response(&page_shell_with_counts(
+        "Recherche",
+        "search",
+        siren,
+        &ctx,
+        &counts,
+        &body,
+    ))
+    .into_response()
+}
+
+/// Query params pour la liste des cycles de vie (CDV).
+#[derive(Deserialize)]
+pub struct CdvListQuery {
+    pub siren: Option<String>,
+    /// Filtre par code CDV (`200`, `201`, `202`, `203`, `213`, ...).
+    pub code: Option<String>,
+    pub page: Option<usize>,
+}
+
+/// `GET /ui/cdv` — liste plate des cycles de vie (CDV) émis pour le tenant.
+///
+/// Une ligne par CDV (pas par facture) : une facture peut apparaître
+/// jusqu'à 4 fois (200 / 201 / 202 / 203). Chaque ligne pointe vers la
+/// fiche détail de la facture concernée.
+///
+/// Source : on lit les docs ES du tenant et on émet 0..4 lignes par doc
+/// selon les champs `emission_cdv_*`, `emission_disposition_cdv_*`,
+/// `reception_cdv_*`, `reception_disposition_cdv_*` renseignés.
+pub async fn handle_cdv_list(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(ctx): axum::Extension<std::sync::Arc<crate::security::SecurityContext>>,
+    Query(q): Query<CdvListQuery>,
+) -> axum::response::Response {
+    let owned_siren = match crate::security::authorize_optional_siren(&ctx, q.siren.as_deref()) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    if let Some(r) = auto_redirect_single_tenant(&ctx, owned_siren.as_deref(), "/ui/cdv") {
+        return r;
+    }
+    let siren = owned_siren.as_deref();
+    let body = match (siren, &state.trace_store) {
+        (None, _) => siren_picker(&state, &ctx, "/ui/cdv"),
+        (_, None) => "TraceStore non configuré (Elasticsearch)".to_string(),
+        (Some(s), Some(store)) => {
+            // On récupère TOUS les docs du tenant (sans dedup invoice_number,
+            // sinon on perdrait des CDVs sur des re-soumissions). Limite à
+            // 2000 pour rester pageable côté Rust.
+            let docs = store
+                .list_exchanges(s, None, None, None, 0, 2000, None)
+                .await
+                .unwrap_or_default();
+
+            // Émet 1 ligne par CDV renseigné sur le doc. Le libellé AFNOR
+            // est résolu via `InvoiceStatusCode::from_code` pour supporter
+            // tous les codes XP Z12-012 (pas seulement 200/201/202/203).
+            struct CdvRow {
+                ts: String,
+                code: u16,
+                label: String,
+                badge: &'static str,
+                invoice_number: String,
+                flow_id: String,
+                counterparty_name: String,
+                counterparty_siren: String,
+                side: &'static str,
+            }
+            let mut rows: Vec<CdvRow> = Vec::new();
+            for d in &docs {
+                let push = |rows: &mut Vec<CdvRow>, code: u16, ts: Option<&str>, side: &'static str| {
+                    let label = pdp_cdar::model::InvoiceStatusCode::from_code(code)
+                        .map(|s| s.label().replace('_', " "))
+                        .unwrap_or_else(|| format!("Code {}", code));
+                    let badge = afnor_badge_for_code(code);
+                    // Contrepartie : émission → acheteur, réception → vendeur.
+                    let (cp_name, cp_siren) = if side == "emission" {
+                        (
+                            d.buyer_name.clone().unwrap_or_default(),
+                            d.buyer_siren.clone().unwrap_or_default(),
+                        )
+                    } else {
+                        (
+                            d.seller_name.clone().unwrap_or_default(),
+                            d.seller_siren.clone().unwrap_or_default(),
+                        )
+                    };
+                    rows.push(CdvRow {
+                        ts: ts.unwrap_or(&d.created_at).to_string(),
+                        code,
+                        label,
+                        badge,
+                        invoice_number: d.invoice_number.clone().unwrap_or_default(),
+                        flow_id: d.flow_id.clone(),
+                        counterparty_name: cp_name,
+                        counterparty_siren: cp_siren,
+                        side,
+                    });
+                };
+                if let Some(c) = d.emission_cdv_status_code {
+                    push(&mut rows, c, d.emission_cdv_at.as_deref(), "emission");
+                }
+                if let Some(c) = d.emission_disposition_cdv_status_code {
+                    push(&mut rows, c, d.emission_disposition_cdv_at.as_deref(), "emission");
+                }
+                if let Some(c) = d.reception_cdv_status_code {
+                    push(&mut rows, c, d.reception_cdv_at.as_deref(), "reception");
+                }
+                if let Some(c) = d.reception_disposition_cdv_status_code {
+                    push(&mut rows, c, d.reception_disposition_cdv_at.as_deref(), "reception");
+                }
+            }
+
+            // Filtre par code si demandé. Si la query `?code=X` ne match pas
+            // les CDVs d'une facture, la facture disparaît complètement de
+            // la liste (cohérent avec la sémantique "1 chip = 1 code AFNOR").
+            if let Some(ref code_str) = q.code {
+                if let Ok(c) = code_str.parse::<u16>() {
+                    rows.retain(|r| r.code == c);
+                }
+            }
+
+            // Codes présents dans les données — pour générer les chips de
+            // filtre dynamiquement (vs hardcoder 5 codes qui ne couvrent
+            // pas le futur 204/210/220/...).
+            let codes_present: std::collections::BTreeSet<u16> =
+                rows.iter().map(|r| r.code).collect();
+
+            // Groupement par invoice_number, puis tri du dictionnaire de
+            // groupes par date max desc (le groupe avec l'activité la plus
+            // récente en haut). Au sein d'un groupe, tri par code ascendant
+            // (ordre du cycle de vie : 200 → 201 → 202 → 203).
+            use std::collections::BTreeMap;
+            let mut groups: BTreeMap<String, Vec<CdvRow>> = BTreeMap::new();
+            for row in rows {
+                groups
+                    .entry(row.invoice_number.clone())
+                    .or_default()
+                    .push(row);
+            }
+            // Trier chaque groupe (par code asc, à code égal par ts asc)
+            // et calculer la date max du groupe pour ordonner les groupes.
+            let mut group_list: Vec<(String, Vec<CdvRow>, String)> = groups
+                .into_iter()
+                .map(|(inv, mut g)| {
+                    g.sort_by(|a, b| a.code.cmp(&b.code).then(a.ts.cmp(&b.ts)));
+                    let max_ts = g.iter().map(|r| r.ts.clone()).max().unwrap_or_default();
+                    (inv, g, max_ts)
+                })
+                .collect();
+            // Tri des groupes par date max desc (le plus récent en haut).
+            group_list.sort_by(|a, b| b.2.cmp(&a.2));
+
+            let total_cdvs: usize = group_list.iter().map(|(_, g, _)| g.len()).sum();
+            let total_factures = group_list.len();
+
+            // Pagination par groupe (= par facture). 25 factures par page :
+            // ça garde des groupes entiers ensemble et donne ~50–100 lignes.
+            let groups_per_page = 25usize;
+            let page = q.page.unwrap_or(0);
+            let from = page * groups_per_page;
+            let to = (from + groups_per_page).min(total_factures);
+            let page_groups = if from < total_factures {
+                &group_list[from..to]
+            } else {
+                &[]
+            };
+
+            // Chips de filtre : "Tous" + un chip par code présent dans les
+            // données du tenant (élargit automatiquement à 204/210/220/...
+            // au fur et à mesure que ces codes apparaissent).
+            let code_chips = {
+                let base = format!("/ui/cdv?siren={}", html_escape(s));
+                let active_all = if q.code.is_none() { " active" } else { "" };
+                let mut chips = format!(
+                    r#"<a class="chip{a}" href="{base}">Tous</a>"#,
+                    a = active_all, base = base,
+                );
+                for code in &codes_present {
+                    let active = if q.code.as_deref() == Some(&code.to_string()) {
+                        " active"
+                    } else {
+                        ""
+                    };
+                    chips.push_str(&format!(
+                        r#" <a class="chip{a}" href="{base}&code={c}">CDV {c}</a>"#,
+                        a = active, base = base, c = code,
+                    ));
+                }
+                chips
+            };
+
+            // Pagination links.
+            let nav = {
+                let prev = if page > 0 {
+                    format!(
+                        r#"<a href="/ui/cdv?siren={s}&page={p}{code}">← Précédent</a>"#,
+                        s = html_escape(s),
+                        p = page - 1,
+                        code = q.code.as_deref().map(|c| format!("&code={}", c)).unwrap_or_default(),
+                    )
+                } else {
+                    String::new()
+                };
+                let next = if to < total_factures {
+                    format!(
+                        r#"<a href="/ui/cdv?siren={s}&page={p}{code}">Suivant →</a>"#,
+                        s = html_escape(s),
+                        p = page + 1,
+                        code = q.code.as_deref().map(|c| format!("&code={}", c)).unwrap_or_default(),
+                    )
+                } else {
+                    String::new()
+                };
+                if total_factures <= groups_per_page {
+                    String::new()
+                } else {
+                    format!(
+                        r#"<div class="pagination"><span>{prev}</span> <span><strong>{from}–{to}</strong> sur <strong>{total}</strong> factures · page {pp}/{pt}</span> <span>{next}</span></div>"#,
+                        from = (from + 1).min(total_factures),
+                        to = to,
+                        total = total_factures,
+                        pp = page + 1,
+                        pt = total_factures.div_ceil(groups_per_page),
+                        prev = prev,
+                        next = next,
+                    )
+                }
+            };
+
+            // Rendu groupé : pour chaque facture, une ligne "header" qui
+            // ouvre le groupe (numéro + contrepartie), puis 1 ligne par CDV.
+            // Le header utilise `tbody.cdv-group` pour pouvoir styler la
+            // bordure haute et grouper visuellement les lignes.
+            let body_html: String = page_groups
+                .iter()
+                .map(|(inv, rows_g, _max_ts)| {
+                    let first = &rows_g[0];
+                    let cdv_rows: String = rows_g
+                        .iter()
+                        .map(|r| {
+                            let date_short = &r.ts[..r.ts.len().min(19)];
+                            format!(
+                                r#"    <tr>
+        <td class="num cdv-indent">{ts}</td>
+        <td><span class="badge {badge}">{code}</span></td>
+        <td>{label}</td>
+        <td><span class="muted">{side}</span></td>
+    </tr>"#,
+                                ts = html_escape(date_short),
+                                badge = r.badge,
+                                code = r.code,
+                                label = html_escape(&r.label),
+                                side = if r.side == "emission" {
+                                    "émission"
+                                } else {
+                                    "réception"
+                                },
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!(
+                        r#"<tbody class="cdv-group">
+    <tr class="cdv-group-header">
+        <td colspan="4">
+            <a href="/ui/flows/{flow_id}?siren={siren}"><strong>{inv}</strong></a>
+            <span class="muted">· {cp_name} ({cp_siren}) · {n} CDV</span>
+        </td>
+    </tr>
+{cdvs}
+</tbody>"#,
+                        flow_id = html_escape(&first.flow_id),
+                        siren = html_escape(s),
+                        inv = html_escape(inv),
+                        cp_name = html_escape(&first.counterparty_name),
+                        cp_siren = html_escape(&first.counterparty_siren),
+                        n = rows_g.len(),
+                        cdvs = cdv_rows,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let table = if page_groups.is_empty() {
+                r#"<p class="muted-p">Aucun CDV à afficher pour ce tenant.</p>"#.to_string()
+            } else {
+                format!(
+                    r#"<table class="data-table cdv-table"><thead><tr>
+    <th>Date</th><th>Code</th><th>Libellé AFNOR</th><th>Côté</th>
+</tr></thead>
+{body}
+</table>"#,
+                    body = body_html,
+                )
+            };
+
+            format!(
+                r#"<div class="app-title">
+    <h1>Cycle de vie <span class="serif">(CDV)</span></h1>
+    <div class="actions"><span class="pj-badge">{tf} factures · {tc} CDV</span></div>
+</div>
+<div class="card">
+    <p class="muted-p">Comptes-rendus de cycle de vie XP Z12-012 émis par la PDP, groupés par facture. Chaque facture affiche ses CDVs dans l'ordre du cycle (200 Déposée → 201 Émise → 202 Reçue → 203 Mise à disposition → …). Les codes supportés s'étendront avec les jalons à venir (204, 210, 212, 220, …).</p>
+    <div class="chip-row">{chips}</div>
+    {table}
+    {nav}
+</div>"#,
+                tf = total_factures,
+                tc = total_cdvs,
+                chips = code_chips,
+                table = table,
+                nav = nav,
+            )
+        }
+    };
+    let counts = sidebar_counts_for(&state, siren).await;
+    html_response(&page_shell_with_counts(
+        "Cycle de vie",
+        "cdv",
+        siren,
+        &ctx,
+        &counts,
+        &body,
+    ))
+    .into_response()
 }
 
 /// `GET /ui/emises/export.csv` — export CSV des factures émises (mêmes
@@ -3554,6 +4089,8 @@ mod tests {
             converted_format: None,
             attachment_count: filenames.len(),
             attachment_filenames: filenames,
+            attachments_text: None,
+            raw_pdf_text: None,
             events: vec![],
             errors: vec![],
             validation_warnings: vec![],

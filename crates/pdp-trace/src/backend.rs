@@ -131,6 +131,18 @@ pub trait TraceBackend: Send + Sync {
     /// `/v1/flows` quand on demande `?status=error`).
     async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>>;
 
+    /// Recherche full-text multi-champs (XML, n° facture, vendeur, acheteur,
+    /// nom de fichier, noms d'attachements). Top 50 par pertinence.
+    /// Impl par défaut : Vec vide (les backends qui ne savent pas chercher
+    /// retournent rien). Surchargé par `TraceStore`.
+    async fn search_full_text(
+        &self,
+        _query: &str,
+        _siren: Option<&str>,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        Ok(Vec::new())
+    }
+
     /// Compteur quotidien des flux d'un tenant sur les `days` derniers jours
     /// (seller OR buyer). Utilisé par les sparklines du dashboard.
     /// Retour aligné à droite : index `days - 1` = aujourd'hui.
@@ -241,6 +253,14 @@ impl TraceBackend for crate::store::TraceStore {
 
     async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>> {
         crate::store::TraceStore::get_error_flows(self).await
+    }
+
+    async fn search_full_text(
+        &self,
+        query: &str,
+        siren: Option<&str>,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        crate::store::TraceStore::search_full_text(self, query, siren).await
     }
 
     async fn daily_counts_for_siren(&self, siren: &str, days: u32) -> PdpResult<Vec<i64>> {

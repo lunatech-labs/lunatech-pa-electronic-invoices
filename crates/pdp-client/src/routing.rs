@@ -670,6 +670,16 @@ impl Producer for DynamicRoutingProducer {
                 // la réception en CDV 213 (Rejetée) au lieu de 202/203.
                 clone_for_rx.errors.clear();
                 clone_for_rx.status = pdp_core::model::FlowStatus::Received;
+                // Reset des properties CDV émission : sans ça, le clone
+                // arriverait dans la pipeline réception avec cdv.status_code
+                // = "200" déjà posé, ce qui ferait écrire `emission_cdv_*`
+                // sur le doc côté buyer dès le 1er snapshot ES — alors que
+                // ces champs appartiennent au cycle émission (côté seller).
+                // On garde uniquement le header `source.protocol` qui sert
+                // de marqueur de la pipeline réception.
+                clone_for_rx
+                    .properties
+                    .retain(|k, _| !k.starts_with("cdv."));
                 tx.send(clone_for_rx).await.map_err(|_| {
                     PdpError::RoutingError("Channel intra-PDP fermé".into())
                 })?;
