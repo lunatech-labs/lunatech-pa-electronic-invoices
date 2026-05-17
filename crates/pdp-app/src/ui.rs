@@ -1237,24 +1237,47 @@ fn afnor_badge_for_code(code: u16) -> &'static str {
 /// Référence : XP Z12-012 Annexe A V1.2 (codes 200-501),
 /// `specs/codelists/Statuts_facture_G2B_B2G.xlsx`,
 /// docs/cdar.md §"Statuts de cycle de vie".
+/// Choisit le statut AFNOR le plus avancé du cycle à partir des 4 CDVs
+/// émission/réception (200/201/202/203). Sans cette préférence, une facture
+/// pour laquelle 201 a été émis afficherait encore « Déposée » (FlowStatus
+/// VALIDÉ) au lieu d'« Émise » — incohérent avec la timeline qui montre 201.
+///
+/// Ordre de préférence côté émission : 201 > 200 (sinon fallback FlowStatus).
+/// Côté réception : 203 > 202 (sinon fallback FlowStatus).
+#[allow(clippy::too_many_arguments)]
 fn afnor_status(
     raw_status: &str,
     error_count: i32,
     cdv_status_code: Option<u16>,
+    emission_cdv: Option<u16>,
+    emission_disposition_cdv: Option<u16>,
+    reception_cdv: Option<u16>,
+    reception_disposition_cdv: Option<u16>,
     dir: DisplayDirection,
 ) -> (String, &'static str) {
+    // 0. CDV "avancé" : prend le code le plus avancé du cycle selon la
+    //    direction (201 > 200 côté émission, 203 > 202 côté réception).
+    //    Les rejets/erreurs courent toujours en 1re position via
+    //    error_count > 0 plus bas.
+    let best_cdv: Option<u16> = match dir {
+        DisplayDirection::Emise => emission_disposition_cdv.or(emission_cdv).or(cdv_status_code),
+        DisplayDirection::Recue => reception_disposition_cdv.or(reception_cdv).or(cdv_status_code),
+    };
+
     // 1. CDV reçu : libellé AFNOR exact, désambigüisé selon la direction.
     //    Côté émission, le vendeur ne doit jamais voir « Reçue » sur sa propre
     //    facture (ce serait illogique) : les codes 201/202/203 — qui décrivent
     //    le passage de la facture chez la PDP destinataire — collapse sur
     //    « Émise ». Côté réception, on garde « Reçue de la plateforme » pour
     //    distinguer du 203 Mise à disposition.
-    if let Some(code) = cdv_status_code {
+    if let Some(code) = best_cdv {
         let label = match (code, dir) {
+            (200, DisplayDirection::Emise) => Some("Déposée".to_string()),
             (201, DisplayDirection::Emise) => Some("Émise".to_string()),
             (202, DisplayDirection::Emise) => Some("Émise".to_string()),
             (203, DisplayDirection::Emise) => Some("Émise".to_string()),
-            (202, DisplayDirection::Recue) => Some("Reçue de la plateforme".to_string()),
+            (202, DisplayDirection::Recue) => Some("Reçue".to_string()),
+            (203, DisplayDirection::Recue) => Some("Mise à disposition".to_string()),
             _ => pdp_cdar::model::InvoiceStatusCode::from_code(code)
                 .map(|s| s.label().replace('_', " ")),
         };
@@ -1868,7 +1891,16 @@ async fn export_flows_csv(
     csv.push_str("N° facture;Vendeur;SIREN vendeur;Acheteur;SIREN acheteur;Statut AFNOR;Code CDV;Erreurs;Pièces jointes;Reçue le;Flow ID\n");
     let dir = DisplayDirection::from_route(direction);
     for e in &exchanges {
-        let (afnor_label, _) = afnor_status(&e.status, e.error_count, e.cdv_status_code, dir);
+        let (afnor_label, _) = afnor_status(
+            &e.status,
+            e.error_count,
+            e.cdv_status_code,
+            e.emission_cdv_status_code,
+            e.emission_disposition_cdv_status_code,
+            e.reception_cdv_status_code,
+            e.reception_disposition_cdv_status_code,
+            dir,
+        );
         let row = format!(
             "{inv};{vn};{vs};{bn};{bs};{st};{cdv};{err};{pj};{date};{fid}\n",
             inv = csv_escape(e.invoice_number.as_deref().unwrap_or("")),
@@ -2208,6 +2240,10 @@ async fn render_flows_list(
                                     &e.status,
                                     e.error_count,
                                     e.cdv_status_code,
+                                    e.emission_cdv_status_code,
+                                    e.emission_disposition_cdv_status_code,
+                                    e.reception_cdv_status_code,
+                                    e.reception_disposition_cdv_status_code,
                                     DisplayDirection::from_route(direction),
                                 );
                                 b
@@ -2217,6 +2253,10 @@ async fn render_flows_list(
                                     &e.status,
                                     e.error_count,
                                     e.cdv_status_code,
+                                    e.emission_cdv_status_code,
+                                    e.emission_disposition_cdv_status_code,
+                                    e.reception_cdv_status_code,
+                                    e.reception_disposition_cdv_status_code,
                                     DisplayDirection::from_route(direction),
                                 );
                                 html_escape(&s)
@@ -2397,22 +2437,29 @@ fn pipeline_event_to_afnor(status: &str, dir: DisplayDirection) -> Option<(&'sta
 /// La timeline est tronquée après la première erreur : les statuts ultérieurs
 /// (DISTRIBUÉ alors qu'une erreur annuaire-validation est survenue) ne
 /// reflètent pas l'issue métier réelle.
+#[allow(clippy::too_many_arguments)]
 fn render_timeline(
     events: &[pdp_trace::store::EventEntry],
     errors: &[pdp_trace::store::ErrorEntry],
     cdv_status_code: Option<u16>,
     cdv_received_at: Option<&str>,
-    generated_cdv_status_code: Option<u16>,
-    generated_cdv_at: Option<&str>,
-    disposition_cdv_status_code: Option<u16>,
-    disposition_cdv_at: Option<&str>,
+    emission_cdv_status_code: Option<u16>,
+    emission_cdv_at: Option<&str>,
+    emission_disposition_cdv_status_code: Option<u16>,
+    emission_disposition_cdv_at: Option<&str>,
+    reception_cdv_status_code: Option<u16>,
+    reception_cdv_at: Option<&str>,
+    reception_disposition_cdv_status_code: Option<u16>,
+    reception_disposition_cdv_at: Option<&str>,
     dir: DisplayDirection,
 ) -> String {
     if events.is_empty()
         && errors.is_empty()
         && cdv_status_code.is_none()
-        && generated_cdv_status_code.is_none()
-        && disposition_cdv_status_code.is_none()
+        && emission_cdv_status_code.is_none()
+        && emission_disposition_cdv_status_code.is_none()
+        && reception_cdv_status_code.is_none()
+        && reception_disposition_cdv_status_code.is_none()
     {
         return r#"<p style="color:#888">Aucun événement enregistré.</p>"#.to_string();
     }
@@ -2425,21 +2472,38 @@ fn render_timeline(
             label: &'static str,
             badge: &'static str,
         },
-        /// CDV officiellement émis par notre PDP (200/201/202/203), capté
-        /// depuis `ExchangeDocument.generated_cdv_*` ou `disposition_cdv_*`.
-        /// Plus crédible que les events pipeline (qui sont des étapes
-        /// internes), c'est le CDV XML réellement persisté.
+        /// CDV officiellement émis par une PDP (200/201/202/203), capté
+        /// depuis `ExchangeDocument.{emission,reception}_*_cdv_*`. Le mirror
+        /// write fait que le doc d'un tenant contient les CDVs des 2 côtés,
+        /// donc la timeline montre toujours le cycle complet.
         GeneratedCdv {
             code: u16,
-            slot: &'static str, // "generated" ou "disposition" — pour le download link
-            ts: Option<&'a str>, // timestamp RFC3339 quand le CDV a été émis
+            /// "emission" (200/201) ou "reception" (202/203) — détermine la
+            /// route de téléchargement et le libellé "côté PDP émettrice /
+            /// réceptrice".
+            slot: &'static str,
+            ts: Option<&'a str>,
         },
         Error(&'a pdp_trace::store::ErrorEntry),
     }
 
     // 1. Convertir chaque event pipeline en étape AFNOR (filtre les internes).
+    //    On filtre aussi par route_id : un doc côté émission ne doit pas
+    //    afficher d'events de la route `intra-pdp-reception` (qui appartiennent
+    //    au pipeline réception du buyer). Ces events arrivent parfois dans le
+    //    mauvais doc parce que `record_event` matche par flow_id et que la
+    //    paire émission/réception intra-PDP partage le même flow_id.
+    let route_matches_dir = |route: &str| -> bool {
+        match dir {
+            DisplayDirection::Emise => !route.starts_with("intra-pdp"),
+            DisplayDirection::Recue => route.starts_with("intra-pdp") || route == "http-inbound",
+        }
+    };
     let mut items: Vec<Item> = Vec::new();
     for ev in events {
+        if !route_matches_dir(&ev.route_id) {
+            continue;
+        }
         if let Some((label, badge)) = pipeline_event_to_afnor(&ev.status, dir) {
             items.push(Item::AfnorEvent {
                 ts: &ev.timestamp,
@@ -2454,13 +2518,44 @@ fn render_timeline(
     }
 
     // 1bis. CDVs officiels persistés par la PDP (200/201/202/203).
-    //       Ils s'ajoutent aux events pipeline pour donner la vue complète.
-    if let Some(code) = generated_cdv_status_code {
-        items.push(Item::GeneratedCdv { code, slot: "generated", ts: generated_cdv_at });
+    //       Chaque tenant ne voit que ses propres CDVs (vendeur=200/201,
+    //       acheteur=202/203) — un doc ne renseigne qu'un seul couple.
+    if let Some(code) = emission_cdv_status_code {
+        items.push(Item::GeneratedCdv { code, slot: "emission", ts: emission_cdv_at });
     }
-    if let Some(code) = disposition_cdv_status_code {
-        items.push(Item::GeneratedCdv { code, slot: "disposition", ts: disposition_cdv_at });
+    if let Some(code) = emission_disposition_cdv_status_code {
+        items.push(Item::GeneratedCdv { code, slot: "emission_disposition", ts: emission_disposition_cdv_at });
     }
+    if let Some(code) = reception_cdv_status_code {
+        items.push(Item::GeneratedCdv { code, slot: "reception", ts: reception_cdv_at });
+    }
+    if let Some(code) = reception_disposition_cdv_status_code {
+        items.push(Item::GeneratedCdv { code, slot: "reception_disposition", ts: reception_disposition_cdv_at });
+    }
+
+    // 1ter. Dédup AfnorEvent ↔ GeneratedCdv : un CDV officiel (200=Déposée,
+    //       201=Émise, 202=Reçue, 203=Mise à disposition) représente
+    //       précisément le même jalon qu'un event pipeline VALIDÉ/DISTRIBUÉ
+    //       remappé. On garde le CDV (plus précis, avec lien de
+    //       téléchargement) et on supprime l'AfnorEvent redondant.
+    let cdv_labels_present: std::collections::HashSet<&'static str> = items
+        .iter()
+        .filter_map(|it| match it {
+            Item::GeneratedCdv { code, .. } => Some(match code {
+                200 => "Déposée",
+                201 => "Émise",
+                202 => "Reçue",
+                203 => "Mise à disposition",
+                _ => "",
+            }),
+            _ => None,
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+    items.retain(|it| match it {
+        Item::AfnorEvent { label, .. } => !cdv_labels_present.contains(label),
+        _ => true,
+    });
 
     // 2. Tri : par ordre conceptuel du cycle de vie.
     //    AfnorEvent : timestamp (chronologique)
@@ -2554,7 +2649,7 @@ fn render_timeline(
         if !already_ended_in_error {
             // Le label "officiel" passe par afnor_status pour bénéficier des
             // règles direction-aware (202 → "Émise" côté émetteur, etc.).
-            let (label, badge) = afnor_status("", 0, Some(code), dir);
+            let (label, badge) = afnor_status("", 0, Some(code), None, None, None, None, dir);
             let ts_header = match cdv_received_at {
                 Some(t) => format!(
                     "{ts} · CDV — code AFNOR {code}",
@@ -2743,22 +2838,34 @@ pub async fn handle_flow_detail(
         (None, _) => siren_picker(&state, &ctx, "/ui"),
         (_, None) => "TraceStore non configuré (Elasticsearch)".to_string(),
         (Some(s), Some(store)) => {
-            // Recherche par flow_id (les exchange_id sont aussi possibles)
+            // Privilégie l'index `pdp-{siren}` : sur un flow intra-PDP qui a
+            // 2 docs (un côté seller, un côté buyer) partageant le même
+            // flow_id, on doit renvoyer celui qui appartient au tenant
+            // courant — sinon l'UI affiche les CDVs de l'autre côté.
+            let exchange = store
+                .get_exchange_by_flow_id(&flow_id, s)
+                .await
+                .ok()
+                .flatten();
+            // Pour le summary (méta affichée au-dessus de la timeline), on
+            // continue à passer par list_exchanges + find ; mais on prend
+            // celui dont l'exchange_id matche le doc choisi quand possible,
+            // pour rester cohérent avec la timeline.
             let summaries = store
                 .list_exchanges(s, None, None, None, 0, 200, None)
                 .await
                 .unwrap_or_default();
-            let summary = summaries.iter().find(|sum| sum.flow_id == flow_id || sum.exchange_id == flow_id);
+            let summary = exchange
+                .as_ref()
+                .and_then(|e| summaries.iter().find(|sum| sum.exchange_id == e.exchange_id))
+                .or_else(|| summaries.iter().find(|sum| sum.flow_id == flow_id || sum.exchange_id == flow_id));
 
             match summary {
                 None => format!(
                     r#"<div class="card"><h2>Flux introuvable</h2><p>Aucun flux <code>{}</code> dans pdp-{}.</p><p><a href="/ui/emises?siren={s}">← Émises</a> · <a href="/ui/recues?siren={s}">Reçues</a></p></div>"#,
                     html_escape(&flow_id), html_escape(s), s = html_escape(s),
                 ),
-                Some(sum) => {
-                    let exchange = store.get_exchange(&sum.exchange_id, Some(s)).await.ok().flatten();
-                    render_flow_detail(s, &flow_id, sum, exchange.as_ref())
-                }
+                Some(sum) => render_flow_detail(s, &flow_id, sum, exchange.as_ref()),
             }
         }
     };
@@ -2858,6 +2965,10 @@ fn render_flow_detail(
                 &sum.status,
                 sum.error_count,
                 sum.cdv_status_code,
+                sum.emission_cdv_status_code,
+                sum.emission_disposition_cdv_status_code,
+                sum.reception_cdv_status_code,
+                sum.reception_disposition_cdv_status_code,
                 DisplayDirection::from_summary(siren, sum),
             );
             b
@@ -2867,6 +2978,10 @@ fn render_flow_detail(
                 &sum.status,
                 sum.error_count,
                 sum.cdv_status_code,
+                sum.emission_cdv_status_code,
+                sum.emission_disposition_cdv_status_code,
+                sum.reception_cdv_status_code,
+                sum.reception_disposition_cdv_status_code,
                 DisplayDirection::from_summary(siren, sum),
             );
             html_escape(&s)
@@ -2882,10 +2997,14 @@ fn render_flow_detail(
             &doc.errors,
             sum.cdv_status_code,
             doc.cdv_received_at.as_deref(),
-            doc.generated_cdv_status_code,
-            doc.generated_cdv_at.as_deref(),
-            doc.disposition_cdv_status_code,
-            doc.disposition_cdv_at.as_deref(),
+            doc.emission_cdv_status_code,
+            doc.emission_cdv_at.as_deref(),
+            doc.emission_disposition_cdv_status_code,
+            doc.emission_disposition_cdv_at.as_deref(),
+            doc.reception_cdv_status_code,
+            doc.reception_cdv_at.as_deref(),
+            doc.reception_disposition_cdv_status_code,
+            doc.reception_disposition_cdv_at.as_deref(),
             dir,
         ),
     };
@@ -2955,21 +3074,32 @@ fn render_flow_detail(
                     f = html_escape(flow_id), s = html_escape(siren),
                 ));
             }
-            if let Some(code) = doc.generated_cdv_status_code {
+            // 4 boutons CDV : couvre l'ensemble du cycle (200/201/202/203)
+            // grâce au mirror write — peu importe le rôle du tenant pour
+            // cette facture, le doc contient les 4 CDVs s'ils ont été
+            // produits par les 2 PDPs (en intra-PDP, par les 2 pipelines).
+            if let Some(code) = doc.emission_cdv_status_code {
                 links.push(format!(
-                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv?siren={s}">⬇️ CDV {code} (généré)</a>"#,
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv?siren={s}&slot=emission">⬇️ CDV {code} (déposée)</a>"#,
                     f = html_escape(flow_id), s = html_escape(siren), code = code,
                 ));
             }
-            if let Some(code) = doc.disposition_cdv_status_code {
-                let suffix = match code {
-                    201 => "émise",
-                    203 => "mise à disposition",
-                    _ => "généré",
-                };
+            if let Some(code) = doc.emission_disposition_cdv_status_code {
                 links.push(format!(
-                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv-disposition?siren={s}">⬇️ CDV {code} ({suffix})</a>"#,
-                    f = html_escape(flow_id), s = html_escape(siren), code = code, suffix = suffix,
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv?siren={s}&slot=emission_disposition">⬇️ CDV {code} (émise)</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren), code = code,
+                ));
+            }
+            if let Some(code) = doc.reception_cdv_status_code {
+                links.push(format!(
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv?siren={s}&slot=reception">⬇️ CDV {code} (reçue)</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren), code = code,
+                ));
+            }
+            if let Some(code) = doc.reception_disposition_cdv_status_code {
+                links.push(format!(
+                    r#"<a class="dl-btn" href="/ui/flows/{f}/download/cdv?siren={s}&slot=reception_disposition">⬇️ CDV {code} (mise à disposition)</a>"#,
+                    f = html_escape(flow_id), s = html_escape(siren), code = code,
                 ));
             }
             if links.is_empty() {
@@ -3025,7 +3155,19 @@ async fn lookup_doc(
     flow_id: &str,
 ) -> Option<pdp_trace::store::ExchangeDocument> {
     let store = state.trace_store.as_ref()?;
-    // Le flow_id peut être un flow_id ou un exchange_id
+    // Privilégie l'index `pdp-{siren}` : sur un flow intra-PDP qui a 2 docs
+    // (un dans pdp-{seller}, un dans pdp-{buyer}), on doit afficher celui
+    // qui appartient au tenant courant — sinon l'UI montre les CDVs de
+    // l'autre côté (emission_* à la place de reception_*, etc.).
+    if let Some(doc) = store
+        .get_exchange_by_flow_id(flow_id, siren)
+        .await
+        .ok()
+        .flatten()
+    {
+        return Some(doc);
+    }
+    // Fallback : peut-être que `flow_id` est en fait un exchange_id.
     let summaries = store.list_exchanges(siren, None, None, None, 0, 200, None).await.ok()?;
     let summary = summaries
         .iter()
@@ -3058,25 +3200,44 @@ pub async fn handle_download_xml(
     (StatusCode::OK, headers, xml).into_response()
 }
 
-/// GET /ui/flows/{flowId}/download/cdv
-/// Télécharge le CDV (Compte-rendu De Vie) XML généré par notre PDP lors
-/// du dépôt de la facture (CDV 200/202/213/221/501). Stocké dans ES via
-/// `ExchangeDocument.generated_cdv_xml`.
+/// GET /ui/flows/{flowId}/download/cdv?slot={emission|emission_disposition|reception|reception_disposition}
+///
+/// Télécharge le CDV (Compte-rendu De Vie) XML généré par une PDP. Le
+/// paramètre `slot` choisit lequel des 4 CDVs du cycle de vie :
+/// - `emission` (200 Déposée — produit par la PDP émettrice)
+/// - `emission_disposition` (201 Émise)
+/// - `reception` (202 Reçue — produit par la PDP réceptrice)
+/// - `reception_disposition` (203 Mise à disposition)
+///
+/// Backward compatible : sans `slot`, on retombe sur le legacy
+/// `generated_cdv_xml` (aliasé sur l'émission depuis l'ajout des champs
+/// préfixés).
 pub async fn handle_download_cdv(
     State(state): State<Arc<AppState>>,
     crate::security::AuthorizedSiren(siren): crate::security::AuthorizedSiren,
     Path(flow_id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let siren = siren.as_str();
     let doc = match lookup_doc(&state, siren, &flow_id).await {
         Some(d) => d,
         None => return (StatusCode::NOT_FOUND, "Flux introuvable").into_response(),
     };
-    let xml = match doc.generated_cdv_xml {
-        Some(x) => x,
-        None => return (StatusCode::NOT_FOUND, "Aucun CDV généré pour ce flux").into_response(),
+    let slot = params.get("slot").map(|s| s.as_str()).unwrap_or("emission");
+    let (xml_opt, code_opt) = match slot {
+        "emission" => (doc.emission_cdv_xml.clone().or(doc.generated_cdv_xml.clone()),
+                       doc.emission_cdv_status_code.or(doc.generated_cdv_status_code)),
+        "emission_disposition" => (doc.emission_disposition_cdv_xml.clone().or(doc.disposition_cdv_xml.clone()),
+                                   doc.emission_disposition_cdv_status_code.or(doc.disposition_cdv_status_code)),
+        "reception" => (doc.reception_cdv_xml.clone(), doc.reception_cdv_status_code),
+        "reception_disposition" => (doc.reception_disposition_cdv_xml.clone(), doc.reception_disposition_cdv_status_code),
+        _ => return (StatusCode::BAD_REQUEST, "slot inconnu (attendu : emission|emission_disposition|reception|reception_disposition)").into_response(),
     };
-    let code = doc.generated_cdv_status_code.unwrap_or(0);
+    let xml = match xml_opt {
+        Some(x) => x,
+        None => return (StatusCode::NOT_FOUND, format!("Aucun CDV pour slot={}", slot)).into_response(),
+    };
+    let code = code_opt.unwrap_or(0);
     let filename = format!("cdv-{:03}-{}.xml", code, flow_id);
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("content-type", "application/xml; charset=utf-8".parse().unwrap());
@@ -3375,6 +3536,18 @@ mod tests {
             disposition_cdv_xml: None,
             disposition_cdv_status_code: None,
             disposition_cdv_at: None,
+            emission_cdv_xml: None,
+            emission_cdv_status_code: None,
+            emission_cdv_at: None,
+            emission_disposition_cdv_xml: None,
+            emission_disposition_cdv_status_code: None,
+            emission_disposition_cdv_at: None,
+            reception_cdv_xml: None,
+            reception_cdv_status_code: None,
+            reception_cdv_at: None,
+            reception_disposition_cdv_xml: None,
+            reception_disposition_cdv_status_code: None,
+            reception_disposition_cdv_at: None,
             raw_xml,
             raw_pdf_base64: None,
             converted_xml: None,
@@ -3494,28 +3667,27 @@ mod tests {
             (501, "Irrecevable", "badge-error"),
         ];
         for (code, expected_label, expected_badge) in cases_emise {
-            let (label, badge) = afnor_status("ACQUITTÉ", 0, Some(code), DisplayDirection::Emise);
+            let (label, badge) = afnor_status("ACQUITTÉ", 0, Some(code), None, None, None, None, DisplayDirection::Emise);
             assert_eq!(label, expected_label, "emise code {code}: label");
             assert_eq!(badge, expected_badge, "emise code {code}: badge");
         }
 
-        // Côté réception, 202 reste « Reçue de la plateforme » (distinction
-        // avec 203 Mise à disposition).
-        let (label, _) = afnor_status("ACQUITTÉ", 0, Some(202), DisplayDirection::Recue);
-        assert_eq!(label, "Reçue de la plateforme");
+        // Côté réception, 202 → « Reçue », 203 → « Mise à disposition ».
+        let (label, _) = afnor_status("ACQUITTÉ", 0, Some(202), None, None, None, None, DisplayDirection::Recue);
+        assert_eq!(label, "Reçue");
     }
 
     #[test]
     fn test_afnor_status_falls_back_to_flow_status_without_cdv() {
         // Sans CDV, on dérive depuis FlowStatus + direction.
-        let (label, badge) = afnor_status("DISTRIBUÉ", 0, None, DisplayDirection::Emise);
+        let (label, badge) = afnor_status("DISTRIBUÉ", 0, None, None, None, None, None, DisplayDirection::Emise);
         assert_eq!(label, "Émise");
         assert_eq!(badge, "badge-success");
 
-        let (label, _) = afnor_status("DISTRIBUÉ", 0, None, DisplayDirection::Recue);
+        let (label, _) = afnor_status("DISTRIBUÉ", 0, None, None, None, None, None, DisplayDirection::Recue);
         assert_eq!(label, "Mise à disposition");
 
-        let (label, badge) = afnor_status("VALIDÉ", 1, None, DisplayDirection::Emise);
+        let (label, badge) = afnor_status("VALIDÉ", 1, None, None, None, None, None, DisplayDirection::Emise);
         assert_eq!(label, "Rejetée");
         assert_eq!(badge, "badge-error");
     }

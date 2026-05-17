@@ -121,6 +121,44 @@ pub struct ExchangeDocument {
     /// `CdvDispositionProcessor` via la propriété `cdv.disposition.generated_at`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disposition_cdv_at: Option<String>,
+
+    // ============================================================
+    // CDVs côté ÉMISSION (toujours 200 / 201 — vue vendeur). Renseignés
+    // uniquement quand le pipeline qui écrit le doc est en mode émission
+    // (header `source.protocol` ≠ `intra-pdp`). En cas de mirror write
+    // initié par le pipeline de réception, ces champs restent intacts
+    // grâce à `skip_serializing_if = "Option::is_none"`.
+    // ============================================================
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission_cdv_xml: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission_cdv_status_code: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission_cdv_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission_disposition_cdv_xml: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission_disposition_cdv_status_code: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission_disposition_cdv_at: Option<String>,
+
+    // ============================================================
+    // CDVs côté RÉCEPTION (toujours 202 / 203 — vue acheteur). Renseignés
+    // uniquement quand le pipeline en cours est intra-pdp (header
+    // `source.protocol == intra-pdp`).
+    // ============================================================
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reception_cdv_xml: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reception_cdv_status_code: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reception_cdv_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reception_disposition_cdv_xml: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reception_disposition_cdv_status_code: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reception_disposition_cdv_at: Option<String>,
     pub attachment_count: usize,
     pub attachment_filenames: Vec<String>,
     pub events: Vec<EventEntry>,
@@ -219,6 +257,18 @@ pub struct ExchangeSummary {
     /// `status` mappé vers AFNOR via `FlowStatus`).
     #[serde(default)]
     pub cdv_status_code: Option<u16>,
+    /// CDVs émission (200, 201) — renseignés côté seller. Affichés dans
+    /// la liste pour montrer le statut le plus avancé du cycle (201 si
+    /// disponible, sinon 200) plutôt qu'une dérivation depuis FlowStatus.
+    #[serde(default)]
+    pub emission_cdv_status_code: Option<u16>,
+    #[serde(default)]
+    pub emission_disposition_cdv_status_code: Option<u16>,
+    /// CDVs réception (202, 203) — renseignés côté buyer (intra-PDP).
+    #[serde(default)]
+    pub reception_cdv_status_code: Option<u16>,
+    #[serde(default)]
+    pub reception_disposition_cdv_status_code: Option<u16>,
 }
 
 impl TraceStore {
@@ -373,6 +423,18 @@ impl TraceStore {
                     "disposition_cdv_xml": { "type": "text", "index": false },
                     "disposition_cdv_status_code": { "type": "short" },
                     "disposition_cdv_at": { "type": "date" },
+                    "emission_cdv_xml": { "type": "text", "index": false },
+                    "emission_cdv_status_code": { "type": "short" },
+                    "emission_cdv_at": { "type": "date" },
+                    "emission_disposition_cdv_xml": { "type": "text", "index": false },
+                    "emission_disposition_cdv_status_code": { "type": "short" },
+                    "emission_disposition_cdv_at": { "type": "date" },
+                    "reception_cdv_xml": { "type": "text", "index": false },
+                    "reception_cdv_status_code": { "type": "short" },
+                    "reception_cdv_at": { "type": "date" },
+                    "reception_disposition_cdv_xml": { "type": "text", "index": false },
+                    "reception_disposition_cdv_status_code": { "type": "short" },
+                    "reception_disposition_cdv_at": { "type": "date" },
                     "attachment_count": { "type": "integer" },
                     "attachment_filenames": { "type": "keyword" },
                     "events": {
@@ -542,51 +604,325 @@ impl TraceStore {
             } else {
                 None
             },
-            // CDV généré par notre PDP (200/202/213/221/501) — capté UNIQUEMENT
-            // s'il n'a pas été reçu d'un acteur externe. Le `cdv.generated`
-            // header (posé par CdarProcessor) atteste qu'on est la source.
-            generated_cdv_xml: if exchange.get_header("cdv.generated").is_some()
-                && exchange.get_property("cdv.received").is_none()
-            {
-                exchange.get_property("cdv.xml").cloned()
-            } else {
-                None
-            },
-            generated_cdv_status_code: if exchange.get_header("cdv.generated").is_some()
-                && exchange.get_property("cdv.received").is_none()
-            {
-                exchange
-                    .get_property("cdv.status_code")
+            // CDV généré par notre PDP. Les champs "legacy" `generated_*` et
+            // `disposition_*` sont aliasés sur le couple émission (200/201)
+            // **uniquement**. Pourquoi : les mirror writes feraient overlap
+            // avec les CDVs réception (202/203) sinon — chaque côté ré-
+            // écrirait `generated_cdv_xml`, ce qui détruirait l'XML du
+            // 200 stocké côté seller. En gateant à `is_reception == false`,
+            // le mirror du buyer écrit `None` (skippé par
+            // `skip_serializing_if`) → préserve l'émission. Les CDVs
+            // 202/203 sont uniquement dans `reception_cdv_*`.
+            generated_cdv_xml: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
                     .and_then(|s| s.parse::<u16>().ok())
-            } else {
-                None
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.xml").cloned()
+                } else {
+                    None
+                }
             },
-            generated_cdv_at: if exchange.get_header("cdv.generated").is_some()
-                && exchange.get_property("cdv.received").is_none()
-            {
-                exchange.get_property("cdv.generated_at").cloned()
-            } else {
-                None
-            },
-            // CDV 203 Mise à disposition — capté quand
-            // `CdvDispositionProcessor` a posé `cdv.disposition.generated`.
-            disposition_cdv_xml: if exchange.get_header("cdv.disposition.generated").is_some() {
-                exchange.get_property("cdv.disposition.xml").cloned()
-            } else {
-                None
-            },
-            disposition_cdv_status_code: if exchange.get_header("cdv.disposition.generated").is_some() {
-                exchange
-                    .get_property("cdv.disposition.status_code")
+            generated_cdv_status_code: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
                     .and_then(|s| s.parse::<u16>().ok())
-            } else {
-                None
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.status_code")
+                        .and_then(|s| s.parse::<u16>().ok())
+                } else {
+                    None
+                }
             },
-            disposition_cdv_at: if exchange.get_header("cdv.disposition.generated").is_some() {
-                exchange.get_property("cdv.disposition.generated_at").cloned()
-            } else {
-                None
+            generated_cdv_at: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.generated_at").cloned()
+                } else {
+                    None
+                }
             },
+            // CDV "disposition" legacy — alias d'`emission_disposition_*`.
+            // Gaté à l'émission pour la même raison que ci-dessus.
+            disposition_cdv_xml: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.xml").cloned()
+                } else {
+                    None
+                }
+            },
+            disposition_cdv_status_code: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.status_code")
+                        .and_then(|s| s.parse::<u16>().ok())
+                } else {
+                    None
+                }
+            },
+            disposition_cdv_at: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.generated_at").cloned()
+                } else {
+                    None
+                }
+            },
+
+            // Détection du côté : un exchange intra-pdp (clone réception)
+            // porte le header `source.protocol = intra-pdp`. Sinon, on est
+            // côté émission (tenant {seller}/in/, HTTP POST, etc.).
+            emission_cdv_xml: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.xml").cloned()
+                } else {
+                    None
+                }
+            },
+            emission_cdv_status_code: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.status_code")
+                        .and_then(|s| s.parse::<u16>().ok())
+                } else {
+                    None
+                }
+            },
+            emission_cdv_at: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.generated_at").cloned()
+                } else {
+                    None
+                }
+            },
+            emission_disposition_cdv_xml: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.xml").cloned()
+                } else {
+                    None
+                }
+            },
+            emission_disposition_cdv_status_code: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.status_code")
+                        .and_then(|s| s.parse::<u16>().ok())
+                } else {
+                    None
+                }
+            },
+            emission_disposition_cdv_at: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if !is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.generated_at").cloned()
+                } else {
+                    None
+                }
+            },
+            reception_cdv_xml: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.xml").cloned()
+                } else {
+                    None
+                }
+            },
+            reception_cdv_status_code: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.status_code")
+                        .and_then(|s| s.parse::<u16>().ok())
+                } else {
+                    None
+                }
+            },
+            reception_cdv_at: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if is_reception
+                    && exchange.get_header("cdv.generated").is_some()
+                    && exchange.get_property("cdv.received").is_none()
+                {
+                    exchange.get_property("cdv.generated_at").cloned()
+                } else {
+                    None
+                }
+            },
+            reception_disposition_cdv_xml: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.xml").cloned()
+                } else {
+                    None
+                }
+            },
+            reception_disposition_cdv_status_code: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.status_code")
+                        .and_then(|s| s.parse::<u16>().ok())
+                } else {
+                    None
+                }
+            },
+            reception_disposition_cdv_at: {
+                // Route par CODE CDV (pas par header source.protocol) : un
+                // CDV 200/213 → côté émission, 202 → côté réception. Sans
+                // ça, les flows http-inbound (réception via HTTP) seraient
+                // mal classés dans emission_cdv_* au lieu de reception_cdv_*.
+                let is_reception = exchange.get_property("cdv.status_code")
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .map(|c| matches!(c, 202 | 203))
+                    .unwrap_or(false);
+                if is_reception && exchange.get_header("cdv.disposition.generated").is_some() {
+                    exchange.get_property("cdv.disposition.generated_at").cloned()
+                } else {
+                    None
+                }
+            },
+
             raw_xml,
             raw_pdf_base64,
             converted_xml,
@@ -707,11 +1043,8 @@ impl TraceStore {
 
         // `doc` (mises à jour) — on retire SEULEMENT `events`, géré par
         // `record_event` via append scripted. `errors` et
-        // `validation_warnings` sont alimentés par les processors (via
-        // `Exchange::add_error` et la property `validation.xml.issues`)
-        // et doivent donc être mis à jour à chaque `record_exchange`,
-        // sinon une erreur ajoutée après le premier upsert (ex.
-        // AnnuaireValidationProcessor en aval) ne serait jamais reflétée.
+        // `validation_warnings` sont alimentés par les processors et doivent
+        // donc être mis à jour à chaque `record_exchange`.
         let mut update_doc = serde_json::to_value(&doc)
             .map_err(|e| PdpError::TraceError(format!("Sérialisation doc échouée: {}", e)))?;
         if let Some(obj) = update_doc.as_object_mut() {
@@ -958,6 +1291,47 @@ impl TraceStore {
     }
 
     /// Compte les documents matchant une query
+    /// Cardinalité distincte de `invoice_number` parmi les docs matchant la
+    /// query — équivalent à un `COUNT(DISTINCT invoice_number) WHERE …`.
+    /// Utilisé par les compteurs UI qui doivent refléter les factures
+    /// uniques, pas les docs bruts (re-soumissions BR-FR-12/13 = 2+ docs
+    /// pour la même facture).
+    async fn count_unique_invoices(
+        &self,
+        index_pattern: &str,
+        query: serde_json::Value,
+    ) -> PdpResult<i64> {
+        let body = serde_json::json!({
+            "query": query,
+            "size": 0,
+            "aggs": {
+                "unique_invoices": {
+                    "cardinality": {
+                        "field": "invoice_number",
+                        "precision_threshold": 40000
+                    }
+                }
+            }
+        });
+        let resp = self
+            .client
+            .post(&format!("{}/{}/_search", self.base_url, index_pattern))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Cardinality échouée: {}", e)))?;
+        if !resp.status().is_success() {
+            return Ok(0);
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Parse cardinality échouée: {}", e)))?;
+        Ok(body["aggregations"]["unique_invoices"]["value"]
+            .as_i64()
+            .unwrap_or(0))
+    }
+
     async fn count_query(&self, index_pattern: &str, query: serde_json::Value) -> PdpResult<i64> {
         let resp = self.client
             .post(&format!("{}/{}/_count", self.base_url, index_pattern))
@@ -988,7 +1362,9 @@ impl TraceStore {
             "sort": [{ "created_at": "desc" }],
             "size": 50,
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
-                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code"]
+                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code",
+                        "emission_cdv_status_code", "emission_disposition_cdv_status_code",
+                        "reception_cdv_status_code", "reception_disposition_cdv_status_code"]
         });
 
         let resp = self.client
@@ -1016,7 +1392,9 @@ impl TraceStore {
             "sort": [{ "created_at": "desc" }],
             "size": 5,
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
-                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code"]
+                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code",
+                        "emission_cdv_status_code", "emission_disposition_cdv_status_code",
+                        "reception_cdv_status_code", "reception_disposition_cdv_status_code"]
         });
 
         let resp = self.client
@@ -1046,6 +1424,89 @@ impl TraceStore {
     /// requête se fait sur tous les index sans filtre. Les handlers HTTP
     /// publics ne doivent **jamais** passer `None` — uniquement les CLI
     /// admin et les tests.
+    /// Récupère un exchange par `flow_id` en privilégiant l'index du tenant
+    /// passé en argument (`pdp-{siren}`). Utile pour les flows intra-PDP où
+    /// le même flow_id apparaît dans 2 index (seller + buyer) : sans cette
+    /// préférence, on tomberait sur le mauvais doc et l'UI afficherait les
+    /// CDVs de l'autre côté (ex. emission_cdv_* à la place de reception_cdv_*
+    /// pour un tenant acheteur).
+    ///
+    /// Tente d'abord `pdp-{siren}`. Si pas trouvé (ex. tenant non hébergé,
+    /// flow émis depuis une PDP externe), fallback sur la recherche globale
+    /// `pdp-*` avec filtre `seller_siren OR buyer_siren = siren`.
+    pub async fn get_exchange_by_flow_id(
+        &self,
+        flow_id: &str,
+        siren: &str,
+    ) -> PdpResult<Option<ExchangeDocument>> {
+        let tenant_index = self.index_name(siren);
+        let search_body = serde_json::json!({
+            "query": { "term": { "flow_id": flow_id } },
+            "size": 1,
+        });
+        let resp = self
+            .client
+            .post(&format!("{}/{}/_search", self.base_url, tenant_index))
+            .json(&search_body)
+            .send()
+            .await;
+        if let Ok(r) = resp {
+            if r.status().is_success() {
+                if let Ok(body) = r.json::<serde_json::Value>().await {
+                    if let Some(source) = body["hits"]["hits"]
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .and_then(|h| h.get("_source"))
+                    {
+                        if let Ok(doc) = serde_json::from_value::<ExchangeDocument>(source.clone())
+                        {
+                            return Ok(Some(doc));
+                        }
+                    }
+                }
+            }
+        }
+        // Fallback : recherche cross-index avec filtre tenant.
+        let body = serde_json::json!({
+            "query": {
+                "bool": {
+                    "must": [
+                        { "term": { "flow_id": flow_id } },
+                        { "bool": {
+                            "should": [
+                                { "term": { "seller_siren": siren } },
+                                { "term": { "buyer_siren": siren } }
+                            ],
+                            "minimum_should_match": 1
+                        }}
+                    ]
+                }
+            },
+            "size": 1
+        });
+        let resp = self
+            .client
+            .post(&format!("{}/{}/_search", self.base_url, self.index_pattern()))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Recherche exchange échouée: {}", e)))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| PdpError::TraceError(format!("Parse réponse ES échouée: {}", e)))?;
+        if let Some(source) = body["hits"]["hits"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|h| h.get("_source"))
+        {
+            if let Ok(doc) = serde_json::from_value::<ExchangeDocument>(source.clone()) {
+                return Ok(Some(doc));
+            }
+        }
+        Ok(None)
+    }
+
     pub async fn get_exchange(&self, exchange_id: &str, siren: Option<&str>) -> PdpResult<Option<ExchangeDocument>> {
         let index = self.index_pattern();
 
@@ -1300,7 +1761,9 @@ impl TraceStore {
             "size": page_size,
             "sort": [{ "created_at": "desc" }],
             "_source": ["exchange_id", "flow_id", "source_filename", "invoice_number", "attachment_count", "seller_siret", "buyer_siret", "seller_siren", "buyer_siren",
-                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code"]
+                        "seller_name", "buyer_name", "status", "error_count", "created_at", "cdv_status_code",
+                        "emission_cdv_status_code", "emission_disposition_cdv_status_code",
+                        "reception_cdv_status_code", "reception_disposition_cdv_status_code"]
         });
 
         if dedup_by_invoice {
@@ -1412,38 +1875,31 @@ impl TraceStore {
                 }
             })
         };
-        let total = self
-            .count_query(&index, tenant_match(serde_json::json!({ "match_all": {} })))
-            .await?;
+        // Cardinalité distincte sur `invoice_number` : aligne le total sur les
+        // compteurs émises/reçues de la sidebar (factures uniques, pas docs
+        // bruts). Sans dedup, une re-soumission BR-FR-12/13 gonflerait
+        // artificiellement le total côté KPI alors que les listes n'affichent
+        // qu'une ligne par numéro de facture.
+        let total = self.count_unique_invoices(&index, tenant_match(serde_json::json!({ "match_all": {} }))).await?;
         // "Erreurs" = error_count > 0 OU status terminal d'échec
-        let errors = self
-            .count_query(
-                &index,
-                tenant_match(serde_json::json!({
-                    "bool": {
-                        "should": [
-                            { "range": { "error_count": { "gt": 0 } } },
-                            { "terms": { "status": TERMINAL_FAIL_STATUSES } }
-                        ],
-                        "minimum_should_match": 1
-                    }
-                })),
-            )
-            .await?;
+        let errors = self.count_unique_invoices(&index, tenant_match(serde_json::json!({
+            "bool": {
+                "should": [
+                    { "range": { "error_count": { "gt": 0 } } },
+                    { "terms": { "status": TERMINAL_FAIL_STATUSES } }
+                ],
+                "minimum_should_match": 1
+            }
+        }))).await?;
         // "Distribués" (au sens UI/filtre OK) = error_count = 0 ET status terminal OK
-        let distributed = self
-            .count_query(
-                &index,
-                tenant_match(serde_json::json!({
-                    "bool": {
-                        "must": [
-                            { "term": { "error_count": 0 } },
-                            { "terms": { "status": TERMINAL_OK_STATUSES } }
-                        ]
-                    }
-                })),
-            )
-            .await?;
+        let distributed = self.count_unique_invoices(&index, tenant_match(serde_json::json!({
+            "bool": {
+                "must": [
+                    { "term": { "error_count": 0 } },
+                    { "terms": { "status": TERMINAL_OK_STATUSES } }
+                ]
+            }
+        }))).await?;
         Ok(TraceStats {
             total_exchanges: total,
             total_errors: errors,
@@ -1772,6 +2228,10 @@ impl TraceStore {
                         created_at: source["created_at"].as_str().unwrap_or("").to_string(),
                         attachment_count: source["attachment_count"].as_u64().unwrap_or(0) as usize,
                         cdv_status_code: source["cdv_status_code"].as_u64().map(|v| v as u16),
+                        emission_cdv_status_code: source["emission_cdv_status_code"].as_u64().map(|v| v as u16),
+                        emission_disposition_cdv_status_code: source["emission_disposition_cdv_status_code"].as_u64().map(|v| v as u16),
+                        reception_cdv_status_code: source["reception_cdv_status_code"].as_u64().map(|v| v as u16),
+                        reception_disposition_cdv_status_code: source["reception_disposition_cdv_status_code"].as_u64().map(|v| v as u16),
                     });
                 }
             }

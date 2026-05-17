@@ -63,7 +63,12 @@ fn bench_poll_tar_gz(c: &mut Criterion) {
             BenchmarkId::new("files", count),
             &count,
             |b, _| {
-                let endpoint = FileEndpoint::input("bench", &dir_path).with_stable_delay(0);
+                // `with_archive_dir(None)` désactive le move-after-poll pour
+                // que `b.iter()` puisse re-poll le même dossier sans qu'il se
+                // vide après la 1re itération.
+                let endpoint = FileEndpoint::input("bench", &dir_path)
+                    .with_stable_delay(0)
+                    .with_archive_dir(None);
                 b.iter(|| {
                     let exchanges = rt.block_on(endpoint.poll()).unwrap();
                     assert_eq!(exchanges.len(), count);
@@ -89,7 +94,12 @@ fn bench_poll_zip(c: &mut Criterion) {
             BenchmarkId::new("files", count),
             &count,
             |b, _| {
-                let endpoint = FileEndpoint::input("bench", &dir_path).with_stable_delay(0);
+                // `with_archive_dir(None)` désactive le move-after-poll pour
+                // que `b.iter()` puisse re-poll le même dossier sans qu'il se
+                // vide après la 1re itération.
+                let endpoint = FileEndpoint::input("bench", &dir_path)
+                    .with_stable_delay(0)
+                    .with_archive_dir(None);
                 b.iter(|| {
                     let exchanges = rt.block_on(endpoint.poll()).unwrap();
                     assert_eq!(exchanges.len(), count);
@@ -117,7 +127,9 @@ fn bench_poll_mixed(c: &mut Criterion) {
     let dir_path = dir.path().to_str().unwrap().to_string();
 
     group.bench_function("5xml_10tar_10zip", |b| {
-        let endpoint = FileEndpoint::input("bench", &dir_path).with_stable_delay(0);
+        let endpoint = FileEndpoint::input("bench", &dir_path)
+            .with_stable_delay(0)
+            .with_archive_dir(None);
         b.iter(|| {
             let exchanges = rt.block_on(endpoint.poll()).unwrap();
             assert_eq!(exchanges.len(), 25);
@@ -145,7 +157,12 @@ fn bench_poll_plain_files(c: &mut Criterion) {
             BenchmarkId::new("files", count),
             &count,
             |b, _| {
-                let endpoint = FileEndpoint::input("bench", &dir_path).with_stable_delay(0);
+                // `with_archive_dir(None)` désactive le move-after-poll pour
+                // que `b.iter()` puisse re-poll le même dossier sans qu'il se
+                // vide après la 1re itération.
+                let endpoint = FileEndpoint::input("bench", &dir_path)
+                    .with_stable_delay(0)
+                    .with_archive_dir(None);
                 b.iter(|| {
                     let exchanges = rt.block_on(endpoint.poll()).unwrap();
                     assert_eq!(exchanges.len(), count);

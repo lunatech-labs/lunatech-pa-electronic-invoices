@@ -91,6 +91,10 @@ impl InMemoryTraceBackend {
             created_at: d.created_at.clone(),
             attachment_count: d.attachment_count,
             cdv_status_code: d.cdv_status_code,
+            emission_cdv_status_code: d.emission_cdv_status_code,
+            emission_disposition_cdv_status_code: d.emission_disposition_cdv_status_code,
+            reception_cdv_status_code: d.reception_cdv_status_code,
+            reception_disposition_cdv_status_code: d.reception_disposition_cdv_status_code,
         }
     }
 }
@@ -231,6 +235,73 @@ impl TraceBackend for InMemoryTraceBackend {
         Ok(count as i64)
     }
 
+    async fn list_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        page: usize,
+        page_size: usize,
+        direction: Option<&str>,
+        dedup_by_invoice: bool,
+    ) -> PdpResult<Vec<ExchangeSummary>> {
+        if !dedup_by_invoice {
+            return self
+                .list_exchanges(siren, status, from_date, to_date, page, page_size, direction)
+                .await;
+        }
+        // Récupère TOUS les hits filtrés (sans pagination), déduplique par
+        // invoice_number en gardant le plus récent (created_at desc), puis
+        // applique la pagination. Reproduit le comportement ES
+        // `collapse: invoice_number` côté in-memory pour que les tests UI
+        // qui vérifient la dedup soient réalistes.
+        let all = self
+            .list_exchanges(siren, status, from_date, to_date, 0, usize::MAX, direction)
+            .await?;
+        let mut seen = std::collections::HashSet::<String>::new();
+        let mut deduped: Vec<ExchangeSummary> = Vec::new();
+        for s in all.into_iter() {
+            let key = s
+                .invoice_number
+                .clone()
+                .unwrap_or_else(|| format!("__no-inv__{}", s.exchange_id));
+            if seen.insert(key) {
+                deduped.push(s);
+            }
+        }
+        let from = page * page_size;
+        Ok(deduped.into_iter().skip(from).take(page_size).collect())
+    }
+
+    async fn count_exchanges_with_dedup(
+        &self,
+        siren: &str,
+        status: Option<&str>,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+        direction: Option<&str>,
+        dedup_by_invoice: bool,
+    ) -> PdpResult<i64> {
+        if !dedup_by_invoice {
+            return self
+                .count_exchanges(siren, status, from_date, to_date, direction)
+                .await;
+        }
+        let all = self
+            .list_exchanges(siren, status, from_date, to_date, 0, usize::MAX, direction)
+            .await?;
+        let mut seen = std::collections::HashSet::<String>::new();
+        for s in all.into_iter() {
+            let key = s
+                .invoice_number
+                .clone()
+                .unwrap_or_else(|| format!("__no-inv__{}", s.exchange_id));
+            seen.insert(key);
+        }
+        Ok(seen.len() as i64)
+    }
+
     async fn get_exchange(
         &self,
         exchange_id: &str,
@@ -345,10 +416,25 @@ fn doc(
         status: status.to_string(),
         error_count,
         cdv_status_code: None,
+        cdv_received_at: None,
         generated_cdv_xml: None,
         generated_cdv_status_code: None,
+        generated_cdv_at: None,
         disposition_cdv_xml: None,
         disposition_cdv_status_code: None,
+        disposition_cdv_at: None,
+        emission_cdv_xml: None,
+        emission_cdv_status_code: None,
+        emission_cdv_at: None,
+        emission_disposition_cdv_xml: None,
+        emission_disposition_cdv_status_code: None,
+        emission_disposition_cdv_at: None,
+        reception_cdv_xml: None,
+        reception_cdv_status_code: None,
+        reception_cdv_at: None,
+        reception_disposition_cdv_xml: None,
+        reception_disposition_cdv_status_code: None,
+        reception_disposition_cdv_at: None,
         raw_xml: Some(format!("<Invoice id=\"{}\"/>", invoice_number)),
         raw_pdf_base64: None,
         converted_xml: None,

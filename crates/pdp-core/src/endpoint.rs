@@ -77,10 +77,21 @@ pub struct FileEndpoint {
     /// la taille du fichier. Si elle n'a pas changé, le fichier est considéré
     /// comme entièrement écrit et peut être consommé. 0 = pas de vérification.
     stable_delay_ms: u64,
+    /// Nom du sous-répertoire (relatif à `path`) où déplacer les fichiers après
+    /// consommation. `None` = pas d'archivage (les fichiers restent dans `path`
+    /// et seront re-lus au prochain poll — comportement legacy, utile pour
+    /// quelques tests). Sans archivage, la pipeline génère un CDV 213
+    /// (BR-FR-12/13) à chaque poll suivant car la facture est déjà indexée.
+    archive_dir: Option<String>,
 }
 
 /// Délai de stabilité par défaut (1 seconde)
 const DEFAULT_STABLE_DELAY_MS: u64 = 1000;
+
+/// Sous-répertoire d'archive par défaut pour les inputs (préfixé `.` pour ne
+/// pas polluer un listing `ls` du répertoire d'entrée et pour être ignoré par
+/// la plupart des outils de scan).
+const DEFAULT_ARCHIVE_DIR: &str = ".processed";
 
 impl FileEndpoint {
     pub fn input(name: &str, path: &str) -> Self {
@@ -89,6 +100,7 @@ impl FileEndpoint {
             path: path.to_string(),
             endpoint_type: EndpointType::FileIn,
             stable_delay_ms: DEFAULT_STABLE_DELAY_MS,
+            archive_dir: Some(DEFAULT_ARCHIVE_DIR.to_string()),
         }
     }
 
@@ -98,12 +110,21 @@ impl FileEndpoint {
             path: path.to_string(),
             endpoint_type: EndpointType::FileOut,
             stable_delay_ms: 0, // pas de vérification en écriture
+            archive_dir: None,  // pas d'archivage en sortie
         }
     }
 
     /// Configure le délai de stabilité (en ms). 0 = pas de vérification.
     pub fn with_stable_delay(mut self, delay_ms: u64) -> Self {
         self.stable_delay_ms = delay_ms;
+        self
+    }
+
+    /// Configure le sous-répertoire (relatif à `path`) où déplacer les
+    /// fichiers après consommation. Passer `None` désactive l'archivage
+    /// (les fichiers seront re-lus au prochain poll).
+    pub fn with_archive_dir(mut self, dir: Option<&str>) -> Self {
+        self.archive_dir = dir.map(String::from);
         self
     }
 
@@ -149,6 +170,16 @@ impl Consumer for FileEndpoint {
         for entry in entries {
             let entry = entry.map_err(crate::error::PdpError::IoError)?;
             let file_path = entry.path();
+
+            // Le sous-répertoire d'archive est un répertoire (donc déjà filtré
+            // par `is_file()`), mais on l'ignore explicitement pour ne jamais
+            // descendre dedans même si l'utilisateur en faisait un fichier par
+            // erreur, et pour documenter l'intention.
+            if let Some(archive) = self.archive_dir.as_deref() {
+                if entry.file_name().to_str() == Some(archive) {
+                    continue;
+                }
+            }
 
             if file_path.is_file() {
                 let filename = file_path
@@ -200,6 +231,14 @@ impl Consumer for FileEndpoint {
         for (file_path, filename, _) in &candidates {
             let lower = filename.to_lowercase();
 
+            // `consumed` = au moins une donnée a été extraite du fichier (qu'il
+            // soit normal ou archive). On n'archive que dans ce cas, pour que
+            // les fichiers illisibles ou archives corrompues ne soient PAS
+            // déplacés silencieusement — ils restent visibles dans `path` pour
+            // diagnostic. Ils causent un avertissement à chaque poll suivant
+            // mais pas de doublons puisqu'ils ne sont jamais consommés.
+            let consumed;
+
             if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
                 // Décompresser tar.gz → un exchange par fichier extrait
                 match Self::extract_tar_gz(file_path) {
@@ -220,9 +259,11 @@ impl Consumer for FileEndpoint {
                             );
                             exchanges.push(exchange);
                         }
+                        consumed = true;
                     }
                     Err(e) => {
                         tracing::error!(archive = %filename, error = %e, "Erreur décompression tar.gz");
+                        consumed = false;
                     }
                 }
             } else if lower.ends_with(".zip") {
@@ -245,9 +286,11 @@ impl Consumer for FileEndpoint {
                             );
                             exchanges.push(exchange);
                         }
+                        consumed = true;
                     }
                     Err(e) => {
                         tracing::error!(archive = %filename, error = %e, "Erreur décompression ZIP");
+                        consumed = false;
                     }
                 }
             } else {
@@ -264,6 +307,11 @@ impl Consumer for FileEndpoint {
                 );
 
                 exchanges.push(exchange);
+                consumed = true;
+            }
+
+            if consumed {
+                self.archive_consumed_file(file_path, filename);
             }
         }
 
@@ -272,6 +320,79 @@ impl Consumer for FileEndpoint {
 }
 
 impl FileEndpoint {
+    /// Déplace le fichier consommé vers le sous-répertoire d'archive,
+    /// classé par date (`{archive_dir}/{YYYYMMDD}/{filename}`).
+    ///
+    /// Si `archive_dir` est `None`, la fonction est un no-op (le fichier reste
+    /// dans `path` et sera re-lu au prochain poll — l'appelant a explicitement
+    /// désactivé l'archivage).
+    ///
+    /// En cas d'échec (permissions, FS plein, etc.), on log un warning mais on
+    /// laisse le fichier en place. Le prochain poll le re-traitera, ce qui
+    /// peut générer des CDV 213 (doublon BR-FR-12/13) — moins grave qu'une
+    /// suppression silencieuse de données entrantes.
+    fn archive_consumed_file(&self, src: &std::path::Path, filename: &str) {
+        let Some(archive_dir) = self.archive_dir.as_deref() else {
+            return;
+        };
+
+        let date = chrono::Utc::now().format("%Y%m%d").to_string();
+        let target_dir = std::path::Path::new(&self.path)
+            .join(archive_dir)
+            .join(&date);
+
+        if let Err(e) = std::fs::create_dir_all(&target_dir) {
+            tracing::warn!(
+                archive_dir = %target_dir.display(),
+                error = %e,
+                filename = %filename,
+                "Impossible de créer le répertoire d'archive — fichier laissé en place (sera re-traité au prochain poll)"
+            );
+            return;
+        }
+
+        // Choix d'un nom unique : si une archive précédente du même fichier
+        // existe déjà ce jour (re-soumission), on suffixe avec un timestamp
+        // intra-jour pour éviter l'écrasement.
+        let mut dst = target_dir.join(filename);
+        if dst.exists() {
+            let ts = chrono::Utc::now().format("%H%M%S%3f").to_string();
+            let (stem, ext) = match filename.rsplit_once('.') {
+                Some((s, e)) => (s.to_string(), format!(".{}", e)),
+                None => (filename.to_string(), String::new()),
+            };
+            dst = target_dir.join(format!("{}-{}{}", stem, ts, ext));
+        }
+
+        match std::fs::rename(src, &dst) {
+            Ok(_) => {
+                tracing::debug!(
+                    src = %src.display(),
+                    dst = %dst.display(),
+                    "Fichier archivé après consommation"
+                );
+            }
+            Err(e) => {
+                // Fallback copy+remove : `rename` échoue cross-device (FS
+                // montés différemment) ; on tente copy puis remove.
+                match std::fs::copy(src, &dst).and_then(|_| std::fs::remove_file(src)) {
+                    Ok(_) => tracing::debug!(
+                        src = %src.display(),
+                        dst = %dst.display(),
+                        "Fichier archivé (copy+remove)"
+                    ),
+                    Err(e2) => tracing::warn!(
+                        src = %src.display(),
+                        dst = %dst.display(),
+                        rename_error = %e,
+                        copy_error = %e2,
+                        "Impossible d'archiver le fichier — il sera re-traité au prochain poll (risque de boucle CDV 213)"
+                    ),
+                }
+            }
+        }
+    }
+
     /// Extrait les fichiers d'une archive tar.gz en mémoire.
     /// Retourne un Vec de (nom_fichier, contenu).
     fn extract_tar_gz(path: &std::path::Path) -> PdpResult<Vec<(String, Vec<u8>)>> {
@@ -689,6 +810,124 @@ mod tests {
         // Les fichiers extraits ont source_archive
         let from_tar = exchanges.iter().find(|e| e.source_filename.as_deref() == Some("from_tar_1.xml")).unwrap();
         assert_eq!(from_tar.get_property("source_archive").map(|s| s.as_str()), Some("batch.tar.gz"));
+    }
+
+    #[tokio::test]
+    async fn test_file_endpoint_archives_consumed_file() {
+        // Le poll par défaut doit déplacer le fichier vers `.processed/<date>/`
+        // pour éviter qu'un cycle de polling suivant ne le re-traite et
+        // déclenche un CDV 213 (BR-FR-12/13) à cause de la dédup.
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_str().unwrap();
+
+        std::fs::write(dir.path().join("facture.xml"), b"<Invoice/>").unwrap();
+
+        let endpoint = FileEndpoint::input("test", dir_path).with_stable_delay(0);
+        let exchanges = endpoint.poll().await.unwrap();
+        assert_eq!(exchanges.len(), 1);
+
+        // Le fichier d'origine n'existe plus
+        assert!(!dir.path().join("facture.xml").exists(),
+            "Le fichier consommé doit être déplacé hors de la racine du dossier d'entrée");
+
+        // Il est dans .processed/<YYYYMMDD>/
+        let date = chrono::Utc::now().format("%Y%m%d").to_string();
+        let archived = dir.path().join(".processed").join(&date).join("facture.xml");
+        assert!(archived.exists(), "Le fichier doit être archivé sous .processed/{}/", date);
+        assert_eq!(std::fs::read(&archived).unwrap(), b"<Invoice/>");
+    }
+
+    #[tokio::test]
+    async fn test_file_endpoint_repoll_returns_empty_after_archive() {
+        // Régression du bug "tous les CDV en 213" : un 2e poll sur le même
+        // dossier ne doit rien renvoyer une fois les fichiers archivés.
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_str().unwrap();
+
+        std::fs::write(dir.path().join("a.xml"), b"<A/>").unwrap();
+        std::fs::write(dir.path().join("b.xml"), b"<B/>").unwrap();
+
+        let endpoint = FileEndpoint::input("test", dir_path).with_stable_delay(0);
+
+        let first = endpoint.poll().await.unwrap();
+        assert_eq!(first.len(), 2);
+
+        let second = endpoint.poll().await.unwrap();
+        assert_eq!(second.len(), 0, "Un 2e poll ne doit pas re-renvoyer les fichiers déjà archivés");
+    }
+
+    #[tokio::test]
+    async fn test_file_endpoint_with_archive_dir_none_keeps_files() {
+        // Opt-out explicite : `with_archive_dir(None)` conserve les fichiers
+        // dans le dossier d'entrée (comportement legacy, utilisé par les
+        // benches pour pouvoir re-poll le même dossier).
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_str().unwrap();
+
+        std::fs::write(dir.path().join("facture.xml"), b"<Invoice/>").unwrap();
+
+        let endpoint = FileEndpoint::input("test", dir_path)
+            .with_stable_delay(0)
+            .with_archive_dir(None);
+
+        let first = endpoint.poll().await.unwrap();
+        assert_eq!(first.len(), 1);
+        assert!(dir.path().join("facture.xml").exists(),
+            "Sans archivage, le fichier d'origine doit rester en place");
+
+        let second = endpoint.poll().await.unwrap();
+        assert_eq!(second.len(), 1, "Sans archivage, un 2e poll re-renvoie le même fichier");
+    }
+
+    #[tokio::test]
+    async fn test_file_endpoint_archive_handles_duplicate_filename() {
+        // Si le même nom de fichier est re-soumis le même jour, l'archivage
+        // doit suffixer pour ne pas écraser l'archive précédente.
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_str().unwrap();
+
+        let endpoint = FileEndpoint::input("test", dir_path).with_stable_delay(0);
+
+        std::fs::write(dir.path().join("dup.xml"), b"<v1/>").unwrap();
+        endpoint.poll().await.unwrap();
+
+        // Re-soumission du même nom
+        std::fs::write(dir.path().join("dup.xml"), b"<v2/>").unwrap();
+        endpoint.poll().await.unwrap();
+
+        let date = chrono::Utc::now().format("%Y%m%d").to_string();
+        let archive_day = dir.path().join(".processed").join(&date);
+
+        let archived: Vec<_> = std::fs::read_dir(&archive_day)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(archived.len(), 2, "Les deux versions doivent coexister : {:?}", archived);
+        assert!(archived.iter().any(|n| n == "dup.xml"));
+        assert!(archived.iter().any(|n| n != "dup.xml" && n.starts_with("dup-") && n.ends_with(".xml")));
+    }
+
+    #[tokio::test]
+    async fn test_file_endpoint_skips_archive_dir() {
+        // Le sous-répertoire `.processed/` est ignoré par le poll même s'il
+        // contient des fichiers (issus d'archivages précédents).
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path().to_str().unwrap();
+
+        std::fs::create_dir_all(dir.path().join(".processed/20260101")).unwrap();
+        std::fs::write(
+            dir.path().join(".processed/20260101/ancien.xml"),
+            b"<Ancien/>",
+        ).unwrap();
+        std::fs::write(dir.path().join("nouveau.xml"), b"<Nouveau/>").unwrap();
+
+        let endpoint = FileEndpoint::input("test", dir_path).with_stable_delay(0);
+        let exchanges = endpoint.poll().await.unwrap();
+
+        assert_eq!(exchanges.len(), 1);
+        assert_eq!(exchanges[0].source_filename.as_deref(), Some("nouveau.xml"));
     }
 
     #[tokio::test]

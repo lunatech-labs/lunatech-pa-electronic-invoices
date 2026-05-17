@@ -101,6 +101,32 @@ pub trait TraceBackend: Send + Sync {
         siren: Option<&str>,
     ) -> PdpResult<Option<ExchangeDocument>>;
 
+    /// Variante par `flow_id` qui privilégie l'index `pdp-{siren}` — utile
+    /// pour les flows intra-PDP où le même flow_id existe dans 2 docs
+    /// (seller-side et buyer-side). Sans ce ciblage, l'UI tombe sur le
+    /// mauvais doc et affiche les CDVs de l'autre côté.
+    ///
+    /// Impl par défaut : passe par `list_exchanges` puis `get_exchange` —
+    /// suffisant pour `InMemoryTraceBackend` (un seul doc par flow_id dans
+    /// les tests), surchargé par `TraceStore` pour le ciblage d'index ES.
+    async fn get_exchange_by_flow_id(
+        &self,
+        flow_id: &str,
+        siren: &str,
+    ) -> PdpResult<Option<ExchangeDocument>> {
+        let summaries = self
+            .list_exchanges(siren, None, None, None, 0, 200, None)
+            .await?;
+        let summary = match summaries
+            .iter()
+            .find(|s| s.flow_id == flow_id || s.exchange_id == flow_id)
+        {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        self.get_exchange(&summary.exchange_id, Some(siren)).await
+    }
+
     /// Tous les flux en erreur, tous tenants confondus (utilisé par l'API
     /// `/v1/flows` quand on demande `?status=error`).
     async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>>;
@@ -203,6 +229,14 @@ impl TraceBackend for crate::store::TraceStore {
         siren: Option<&str>,
     ) -> PdpResult<Option<ExchangeDocument>> {
         crate::store::TraceStore::get_exchange(self, exchange_id, siren).await
+    }
+
+    async fn get_exchange_by_flow_id(
+        &self,
+        flow_id: &str,
+        siren: &str,
+    ) -> PdpResult<Option<ExchangeDocument>> {
+        crate::store::TraceStore::get_exchange_by_flow_id(self, flow_id, siren).await
     }
 
     async fn get_error_flows(&self) -> PdpResult<Vec<ExchangeSummary>> {
